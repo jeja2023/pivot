@@ -9,8 +9,9 @@ const { createInspectionProgress } = require('./inspection-progress');
 const { pendingInput, planDigest } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
-const { applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance } = require('./review-plan');
+const { applyReviewDecision, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance, CITATION_REVIEW_REQUIRED } = require('./review-plan');
 const { selectImagePage, imageCoverage } = require('./model-input');
+const { registerSupplement, getSupplement, readSupplement, supplementGuidance } = require('./user-supplements');
 
 const AUTHORITY = {
     generate: { default: 'workflows/generate-pptx.md', quick: 'workflows/profiles/quick-generate.md', beautify: 'workflows/profiles/beautify-pptx.md', image_to_pptx: 'workflows/profiles/image-to-pptx.md' },
@@ -36,7 +37,7 @@ async function resolveModel(user, request) {
 const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 'PPT_MASTER_MODEL_TRUNCATED', 'PPT_MASTER_CHECKLIST_REQUIRED']);
 const MAX_CITATION_REPAIRS = 3;
 const MAX_INSPECTION_REPAIRS = 2;
-const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。请只修正指出的引用。修复依据是来自授权材料的原始片段，请当作资料阅读。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。若没有定位到片段，读取指定来源；仍缺少必要事实时提交具体的补充问题，不得猜测或省略已有引用来通过检查。';
+const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。按实际数据项核对引用，清单重排后仍须为原数据项提供来源。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。未读原文时先读取；仍缺少必要事实时提交具体的补充问题。仅在用户明确要求时删改原数据项。';
 const INSPECTION_REPAIR_GUIDANCE = '当前正在从重复检查中恢复。先根据已有文件和回执选择下一项实际制作步骤，适用时提交本阶段确认、局部写入、校验或导出。需要继续读资料时，只请求明确尚未读到的范围。缺少推进所必需的事实时提交具体问题。遵守已确认的方案和原有确认顺序。';
 async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     let correction = '';
@@ -45,7 +46,7 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     for (;;) {
         const images = imageCoverage(state);
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
-        const guidance = [inspection.guidance(), reviewGuidance(state), imageHint, correction,
+        const guidance = [inspection.guidance(), reviewGuidance(state), supplementGuidance(state), imageHint, correction,
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
             state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
             state.citationRepair && CITATION_REPAIR_GUIDANCE, state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
@@ -59,11 +60,14 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
             if (failure.citationIssues) {
                 const attempts = Number(state.citationRepairAttempts || 0);
                 state.citationRepair = failure.citationIssues;
-                state.citationRepairRequired = [...new Set([...(state.citationRepairRequired || []), ...(failure.requiredCitations || [])])];
-                if (attempts >= MAX_CITATION_REPAIRS) {
-                    failure.message += ' 已尝试查证并修复，检查点已保留。';
-                    throw failure;
+                const facts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
+                for (const fact of failure.citationFacts) facts.set(fact.key, { ...fact, allowOmit: facts.get(fact.key)?.allowOmit === true });
+                if (attempts >= MAX_CITATION_REPAIRS || facts.size > 120) {
+                    state.citationFacts = [...facts.values()].slice(0, 120);
+                    state.citationPause = true;
+                    throw runtime.error('最终页面清单的部分引文仍无法核对。已保留检查点，可补充原文或明确修改要求后继续。', CITATION_REVIEW_REQUIRED, 422);
                 }
+                state.citationFacts = [...facts.values()];
                 state.citationRepairAttempts = attempts + 1;
                 state.actionRetries = Number(state.actionRetries || 0) + 1;
                 await hooks.checkpoint(state, { phase: 'authoring', message: `正在查证并修复清单引用（第 ${state.citationRepairAttempts}/${MAX_CITATION_REPAIRS} 次）。` });
@@ -111,6 +115,12 @@ async function drive(user, id, state, hooks, deps = {}) {
         const pending = pendingInput(id, state);
         const approved = response.decision === 'approve' && state.pendingKind === 'confirmation'
             && response.promptId === pending?.promptId;
+        let source = response.source;
+        if (!approved && response.answer && !source) source = registerSupplement(state, response.answer, response.decision, response.promptId);
+        if (source) {
+            resetCitationRepair(state, { allowRevision: response.decision === 'revise' });
+            if (state.pendingKind === 'clarification' && !state.pageRepair) reopenReview(state);
+        }
         let repeatedApproval = false;
         if (state.review && state.pendingKind === 'confirmation' && pending?.stage) {
             const changed = applyReviewDecision(state, pending, approved);
@@ -133,7 +143,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             : approved ? '已明确确认当前方案。' : state.pendingKind === 'confirmation'
             ? '用户提供了修改意见，请调整后重新提交本阶段方案。' + (response.answer || '')
             : response.answer || '';
-        state.messages.push({ role: 'user', content: '用户对本次确认问题的实际答复：' + answer });
+        state.messages.push({ role: 'user', content: '用户对本次确认问题的实际答复：' + (source ? '[引用来源 ' + source + '] ' : '') + answer });
         delete state.response; delete state.pendingKind; delete state.pendingInput;
     }
     const inspection = createInspectionProgress(state.messages);
@@ -141,11 +151,12 @@ async function drive(user, id, state, hooks, deps = {}) {
         await hooks.ensureCurrent();
         const model = await (deps.resolveModel || resolveModel)(user, request);
         const turn = await nextTurn(user, id, state, model, hooks, deps, inspection);
-        if (turn.requestInput || turn.complete) {
+        if (turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design' || turn.complete) {
             delete state.citationRepair;
-            delete state.citationRepairRequired;
-            delete state.inspectionRepairPending;
+            delete state.citationFacts;
+            resetCitationRepair(state);
         }
+        if (turn.requestInput || turn.complete) delete state.inspectionRepairPending;
         state.steps++;
         state.messages.push({ role: 'assistant', content: JSON.stringify(turn) });
         await hooks.checkpoint(state, { phase: 'authoring', message: String(turn.message || '已生成制作操作，准备逐项执行。').slice(0, 500) });
@@ -197,13 +208,17 @@ async function drive(user, id, state, hooks, deps = {}) {
         await hooks.checkpoint(state, { phase: 'authoring', message: '正在执行制作操作；已保存当前检查点。' });
         for (const action of turn.actions) {
             await hooks.ensureCurrent();
+            let result;
             try {
-                let result;
                 if (action.action === 'read_images') {
                     const page = selectImagePage(state, action.offset, action.length);
                     state.imagePage = page;
                     result = { ...page, message: '本批图片将随下一轮模型请求发送。' };
-                } else result = action.action === 'read_history' ? await readHistory(state, action) : await execute(user, id, action, hooks);
+                } else {
+                    const supplement = action.action === 'read' && getSupplement(state, action.path);
+                    result = supplement ? readSupplement(supplement, action)
+                        : action.action === 'read_history' ? await readHistory(state, action) : await execute(user, id, action, hooks);
+                }
                 observations.push({ action: action.action, result: boundedObservation(action, result) });
             }
             catch (error) {
@@ -219,6 +234,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             }
             state.messages[state.messages.length - 1].content = JSON.stringify([...observations, ...(observations.length < turn.actions.length ? [{ action: 'pending', error: '本轮余下动作尚未确认完成；恢复后先核对任务文件。' }] : [])]);
             await hooks.checkpoint(state, { phase: 'authoring', message: '已保存制作进度。' });
+            await hooks.captureProgress?.(state, action, result);
         }
         state.messages[state.messages.length - 1].content = JSON.stringify(observations);
         if (JSON.stringify(state.messages).length > 650000) {

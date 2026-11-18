@@ -14,6 +14,8 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     const registry = source('client/chat/apps-workbench-core.js');
     const workspace = source('client/chat/partials/workspaces/apps.html');
     const editor = source('client/chat/apps-workbench-presentations.js');
+    const generation = source('client/chat/apps-workbench-presentations-generation.js');
+    const generationDrafts = source('server/services/presentations/presentation-generation-drafts.js');
     const presenter = source('client/chat/apps-workbench-presentations-presenter.js');
     assert.match(registry, /id:\s*'presentations'/);
     assert.match(registry, /showPresentationsAppFromRegistry/);
@@ -68,7 +70,10 @@ test('PPT 应用在应用中心、按需脚本和受控模块 API 之间完整�
     assert.match(editor, /function renderOutlineReview/);
     assert.match(presenter, /function renderEvidence/);
     assert.match(editor, /materials: content\.sources \|\| \[\]/);
-    assert.match(editor, /planApproval: \{ outline \}/);
+    assert.match(editor, /apps-workbench-presentations-generation/);
+    assert.match(workspace, /id="presentation-fill-missing-btn"/);
+    assert.match(generation, /pending\.draftId/);
+    assert.match(generationDrafts, /planApproval: \{ outline: generation\.input\.outline \}/);
     assert.match(editor, /function collectOutlineFromReview/);
     assert.match(editor, /function cancelOutlineReview/);
     assert.match(editor, /pendingOutlineConfirmations/);
@@ -102,6 +107,8 @@ test('PPT API 提供文稿、版本、素材、模板包、AI、检查与导出�
         'post:/apps/presentations/assets/publish',
         'post:/apps/presentations/ai/outline',
         'post:/apps/presentations/ai/slides',
+        'post:/apps/presentations/:id/ai/fill-missing',
+        'get:/apps/presentations/master/tasks/:taskId/snapshots/:kind',
         'post:/apps/presentations/ai/continue',
         'post:/apps/presentations/layout-variants',
         'post:/apps/presentations/ai/rewrite',

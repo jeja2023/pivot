@@ -74,9 +74,9 @@
     },
     {
       "file": "server/repositories/presentation-master-tasks.js",
-      "count": 13,
-      "rationale": "活动任务、确认和交付继续绑定当前账号与固定工具名称。确认提交原子校验检查点所在步骤和未答复状态。交付在任务行锁内核对期限和租约并登记，启动和续跑继续由接纳事务限制并发。所有业务参数绑定。",
-      "verification": "tests/presentation-master-postgres.test.js 验证活动任务账号范围、并发确认与领取、旧租约和交付回滚。"
+      "count": 19,
+      "rationale": "活动任务、审批和交付绑定账号与固定工具名称。通过页保存锁定任务并比对修订，自动快照和受控产物引用在带租约的任务行锁内一起更新。仅为替换后无引用的制作快照设置回收期限。历史按账号筛选，优先返回已保存任务。业务参数均绑定。",
+      "verification": "tests/presentation-master-postgres.test.js 验证租约和交付事务。tests/e2e/presentation-recovery.spec.js 验证普通账号查看持久快照、跨账号拒绝和原任务续作。"
     },
     {
       "file": "server/repositories/presentation-quality-tasks.js",
@@ -476,9 +476,9 @@
     },
     {
       "file": "server/services/presentations/presentation-service.js",
-      "count": 15,
-      "rationale": "演示文稿草稿自动保存与里程碑版本分离机制：在事务内按文稿 ID 与 current_version 执行乐观锁条件更新，仅更新当前文稿草稿内容、验证状态及关联产物，不冗余插入历史版本快照；全部查询均已参数化并按租户和所有者权限隔离。；里程碑保存先条件更新文稿并核对原始JSON，再在同一显式事务中登记所有者产物及文稿版本；任一步失败整体回滚。新增语句仅绑定受控产物ID和已鉴权文稿主键。",
-      "verification": "presentation-storyline-postgres并发草稿冲突验证文稿与产物均无残留写入；presentation-workbench-integration验证历史、恢复和协作保存。"
+      "count": 17,
+      "rationale": "自动保存与里程碑版本继续按文稿版本及授权隔离。生成草稿在租户和文稿标识的事务锁下去重，初次文稿、产物、版本及生成进度在同一事务登记。补齐按原内容摘要进行条件写入，文稿版本与大纲进度同步提交。所有查询使用绑定参数。",
+      "verification": "tests/presentation-storyline-postgres.test.js 验证并发草稿冲突，tests/e2e/presentation-recovery.spec.js 验证逐批落库、跨账号拒绝、补齐和已有编辑保留。"
     },
     {
       "file": "server/repositories/mindmaps.js",

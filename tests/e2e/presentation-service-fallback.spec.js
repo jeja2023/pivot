@@ -25,9 +25,10 @@ test('独立PPT服务停机时标准AI创建、编辑与PPTX导出继续工作',
     await page.locator('#presentation-create-topic').fill('无独立引擎时继续制作'); await page.locator('#presentation-create-pages').fill('3');
     await page.locator('#presentation-create-model').selectOption(String(model.id)); await page.locator('#presentation-create-submit-btn').click();
     await expect(page.locator('#presentation-outline-confirm-btn')).toBeVisible({ timeout: 20000 });
-    const creating = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations') && response.request().method() === 'POST');
+    const creating = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations/ai/slides') && response.request().method() === 'POST');
     await page.locator('#presentation-outline-confirm-btn').click(); const created = await creating; expect(created.ok(), await created.text()).toBeTruthy();
-    const document = (await created.json()).presentation; expect(document.content.slides.length).toBe(3);
+    const { draftId } = await created.json();
+    const document = (await (await page.request.get('/api/apps/presentations/' + draftId)).json()).presentation; expect(document.content.slides.length).toBe(3);
     await page.locator('[data-presentation-panel="story"]').click(); await page.locator('#presentation-story-takeaway').fill('服务离线后的标准编辑'); await page.locator('#presentation-story-save').click();
     await expect.poll(async () => (await (await page.request.get('/api/apps/presentations/' + document.id)).json()).presentation.content.slides[0].intent.takeaway).toBe('服务离线后的标准编辑');
     const response = await page.request.post('/api/apps/presentations/' + document.id + '/export', { headers: await csrf(), data: { format: 'pptx' } });

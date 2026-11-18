@@ -74,7 +74,7 @@ function confirmedRoster(outline) {
     return rows.map(({ section, slide }, index) => ({ ...slide, section, outlinePageId: 'outline_page_' + (index + 1) }));
 }
 
-async function generateRosterPages(roster, callPages) {
+async function generateRosterPages(roster, callPages, { onAccepted } = {}) {
     const completed = new Map(), warnings = [];
     for (let index = 0; index < roster.length; index += PAGE_BATCH_SIZE) {
         const batch = roster.slice(index, index + PAGE_BATCH_SIZE);
@@ -87,16 +87,20 @@ async function generateRosterPages(roster, callPages) {
             try { proposal = parseAiJsonObject(response.content, 'AI 返回的页面 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID'); }
             catch (error) { if (compact) throw error; else continue; }
             const pages = Array.isArray(proposal.slides) ? proposal.slides : [];
+            const accepted = [];
             for (const page of pages) {
                 const id = page?.outlinePageId ?? page?.id;
                 if (!requested.has(id) || pages.filter(candidate => (candidate?.outlinePageId ?? candidate?.id) === id).length !== 1
                     || !(typeof page.title === 'string' && page.title.trim() || Array.isArray(page.elements) && page.elements.length)) continue;
-                completed.set(id, { ...page, id });
+                const item = { ...page, id };
+                completed.set(id, item);
+                accepted.push(item);
             }
+            if (accepted.length && onAccepted) await onAccepted(accepted);
             if (Array.isArray(proposal.warnings)) warnings.push(...proposal.warnings.slice(0, 20).map(String));
         }
         const missing = batch.filter(page => !completed.has(page.outlinePageId));
-        if (missing.length) throw presentationError(`模型未完整生成已确认页面（${missing.map(page => page.outlinePageId.replace('outline_page_', '第 ') + ' 页').join('、')}），请重试或切换模型。未保存缺页文稿。`, 422, 'PRESENTATION_SLIDE_COVERAGE_INCOMPLETE');
+        if (missing.length) throw presentationError(`模型未完整生成已确认页面（${missing.map(page => page.outlinePageId.replace('outline_page_', '第 ') + ' 页').join('、')}），请重试或切换模型。${onAccepted ? '' : '未保存缺页文稿。'}`, 422, 'PRESENTATION_SLIDE_COVERAGE_INCOMPLETE');
     }
     return { slides: roster.map(page => completed.get(page.outlinePageId)), warnings };
 }

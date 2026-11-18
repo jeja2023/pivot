@@ -135,6 +135,11 @@ function toPublicPresentation(row, { includeContent = false } = {}) {
         isOwner: row.is_owner === undefined ? true : (row.is_owner === true || row.is_owner === 'true' || Number(row.is_owner || 0) === 1),
         collaboratorRole: row.collaborator_role || null
     };
+    const generation = row.generation_json;
+    if (generation) {
+        const pending = generation.roster.filter(({ id }) => !Object.hasOwn(generation.pages, id));
+        output.generation = { total: generation.roster.length, pending, completed: generation.roster.length - pending.length };
+    }
     if (includeContent) {
         output.content = parseJson(row.content_json, null);
         if (output.content) output.contentDigest = computePresentationDigest(output.content);
@@ -337,7 +342,7 @@ async function createPresentationFromArtifact(user, artifactId, body = {}) {
     return await createPresentation(user, { title, templateId: template.id, templateVersion: template.version, content, tags: normalizeTags(body.tags || ['Agent产物']) });
 }
 
-async function createPresentation(user, body = {}) {
+async function createPresentation(user, body = {}, { generation = null } = {}) {
     const tenant = await assertTenantContext(user);
     const clientId = body.id ? normalizeClientId(body.id) : newClientId();
     const title = normalizeTitle(body.title);
@@ -353,23 +358,30 @@ async function createPresentation(user, body = {}) {
     await require('./presentation-analysis-sources').assertAnalysisSources(content, user);
     await assertPresentationAssetOwnership(user, content);
     const validation = runPresentationValidation(content);
-    const artifact = await createStandaloneArtifact(user, {
-        type: 'presentation',
-        title,
-        content: serializeJson(content),
-        preserveWhitespace: true,
-        note: '创建演示文稿源稿'
+    await transaction(async trx => {
+        if (generation) {
+            await trx.queryOne('SELECT pg_advisory_xact_lock(hashtext(?))', ['presentation-generation:' + tenant.tenantId + ':' + clientId]);
+            const existing = await trx.queryOne('SELECT id FROM presentation_documents WHERE tenant_id=? AND client_id=?', [tenant.tenantId, clientId]);
+            if (existing) throw publicError('该生成草稿已存在，请重新打开。', 409, 'PRESENTATION_GENERATION_DRAFT_EXISTS');
+        }
+        const artifact = await createStandaloneArtifact(user, {
+            type: 'presentation',
+            title,
+            content: serializeJson(content),
+            preserveWhitespace: true,
+            note: '创建演示文稿源稿'
+        }, { executor: trx });
+        const row = await trx.queryOne(`
+            INSERT INTO presentation_documents
+                (tenant_id, owner_user_id, client_id, artifact_id, title, status, aspect_ratio, template_id, template_version, template_digest, tags_json, cover_asset_ref, content_json, validation_json, current_version, generation_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 1, ?::jsonb, NOW(), NOW())
+            RETURNING *
+        `, [tenant.tenantId, user.id, clientId, artifact?.id || null, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || ''), serializeJson(content), serializeJson(validation), generation && serializeJson(generation)]);
+        await trx.execute(`
+            INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
+            VALUES (?, 1, ?, ?, ?, ?, ?, ?, NOW())
+        `, [row.id, artifact?.current_version_id || null, serializeJson(content), computePresentationDigest(content), serializeJson(validation), '创建演示文稿', user.id]);
     });
-    const row = await queryOne(`
-        INSERT INTO presentation_documents
-            (tenant_id, owner_user_id, client_id, artifact_id, title, status, aspect_ratio, template_id, template_version, template_digest, tags_json, cover_asset_ref, content_json, validation_json, current_version, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?, 1, NOW(), NOW())
-        RETURNING *
-    `, [tenant.tenantId, user.id, clientId, artifact?.id || null, title, content.aspectRatio, template.id, template.version, template.snapshotDigest, serializeJson(normalizeTags(body.tags)), String(content.metadata?.coverAssetRef || ''), serializeJson(content), serializeJson(validation)]);
-    await execute(`
-        INSERT INTO presentation_versions (presentation_id, version, artifact_version_id, content_json, content_digest, validation_json, note, created_by, created_at)
-        VALUES (?, 1, ?, ?, ?, ?, ?, ?, NOW())
-    `, [row.id, artifact?.current_version_id || null, serializeJson(content), computePresentationDigest(content), serializeJson(validation), '创建演示文稿', user.id]);
     return await getPresentation(user, clientId);
 }
 
@@ -409,16 +421,23 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     const sourceSafeContent = require('./presentation-analysis-sources').preserveAnalysisSources(previousContent, reviewSafeContent);
     let content = normalizePresentation({ ...sourceSafeContent, metadata: submittedMetadata, presentationId: current.client_id, title, template: { id: templateId, version: templateVersion, snapshotDigest: templateDigest } });
     await require('./presentation-analysis-sources').assertAnalysisSources(content, user, { ownerId: current.owner_user_id });
-    content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow',
+    content = applyTemplateLayoutLayers(content, activeTemplate, { reflow: Boolean(options.generation) || body.templateApplyMode === 'reflow' || body.template_apply_mode === 'reflow',
         recolor: body.templateApplyMode === 'theme' || body.template_apply_mode === 'theme' || templateId !== current.template_id || Number(templateVersion) !== Number(current.template_version) });
     content = applyTemplateBrandControls(content, activeTemplate);
-    if (body.templateApplyMode === 'reflow') content = await require('./presentation-text-metrics').fitDesignPresentation(content);
+    if (options.generation || body.templateApplyMode === 'reflow') content = await require('./presentation-text-metrics').fitDesignPresentation(content);
+    if (options.generation) {
+        const existing = new Map(previousContent.slides.map(slide => [slide.id, slide]));
+        content = normalizePresentation({ ...content, slides: content.slides.map((slide, index) => {
+            const previous = existing.get(slide.id);
+            return previous ? { ...previous, index } : slide;
+        }) });
+    }
     const trustedAssetRefs = collectPresentationAssetRefs(parseJson(current.content_json, {}));
     await assertPresentationAssetOwnership(user, content, { trustedRefs: trustedAssetRefs });
     const validation = runPresentationValidation(content);
     const contentJson = serializeJson(content);
     const existingJson = String(current.content_json || '');
-    if (existingJson === contentJson && title === current.title) return toPublicPresentation(current, { includeContent: true });
+    if (!options.generation && existingJson === contentJson && title === current.title) return toPublicPresentation(current, { includeContent: true });
     // 判断是否为自动保存草稿（只更新草稿，不自增版本号，不生成冗余历史版本快照）
     const isAutoSave = Boolean(body.autoSave ?? body.isAutoSave ?? (body.note === '自动保存' && !body.isMilestone && !options.isMilestone));
     if (isAutoSave) {
@@ -455,10 +474,10 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
     const updated = await transaction(async trx => {
         const document = await trx.queryOne(`
             UPDATE presentation_documents
-            SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, updated_at = NOW()
+            SET title = ?, content_json = ?, validation_json = ?, cover_asset_ref = ?, current_version = ?, status = ?, template_id = ?, template_version = ?, template_digest = ?, aspect_ratio = ?, generation_json=COALESCE(?::jsonb,generation_json), updated_at = NOW()
             WHERE id = ? AND current_version = ? AND deleted_at IS NULL AND (?::jsonb IS NULL OR content_json::jsonb=?::jsonb)
             RETURNING *
-        `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, current.id, baseVersion, expectedContent, expectedContent]);
+        `, [title, contentJson, serializeJson(validation), String(content.metadata?.coverAssetRef || ''), nextVersion, validation.status === 'blocked' ? 'needs_attention' : 'draft', templateId, templateVersion, templateDigest, content.aspectRatio, options.generation ? serializeJson(options.generation) : null, current.id, baseVersion, expectedContent, expectedContent]);
         if (!document) throw publicError('文稿已被新版本更新，请刷新后合并修改。', 409, 'PRESENTATION_VERSION_CONFLICT');
         let artifact = current.artifact_id ? await createStandaloneArtifact(artifactOwner, {
             artifactId: current.artifact_id,
@@ -681,6 +700,7 @@ module.exports = {
     exportPresentationTemplate,
     getPresentation,
     getPresentationRow,
+    toPublicPresentation,
     getPresentationTemplateStatistics,
     getPresentationTemplateSource,
     reparsePresentationTemplateSource,

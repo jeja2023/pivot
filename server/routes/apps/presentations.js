@@ -84,6 +84,7 @@ const { buildPresentationDeliveryGuide } = require('../../services/presentations
 const { runRenderedPresentationQuality } = require('../../services/presentations/presentation-render-quality');
 const { buildSlideLayoutVariants } = require('../../services/presentations/presentation-layout-variants');
 const { validateGenerationMaterials, prepareGenerationMaterials, materialNotice, confirmedRoster, generateRosterPages, largestPageBatch } = require('../../services/presentations/presentation-generation-coverage');
+const generationDrafts = require('../../services/presentations/presentation-generation-drafts');
 
 const MAX_MATERIAL_TEXT = MAX_MATERIAL_TEXT_CHARS;
 const SOURCE_FORMAT_PIVOT = 'pivot';
@@ -494,6 +495,10 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         const requestBody = { ...body, outline: filterOutlineSourceRefs(body.outline, body.materials) };
         const roster = confirmedRoster(requestBody.outline);
+        if (requestBody.draftId !== undefined) {
+            const generation = await generationDrafts.startPlan(req.user, requestBody.draftId, requestBody, roster);
+            return runDraftGeneration(req, res, requestBody.draftId, requestBody, roster, generation);
+        }
         return runAiRequest(req, res, requestBody, null, {
             source: 'presentation_slides',
             auditAction: 'PPT AI生成页面',
@@ -518,6 +523,39 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
                 return { proposal, materialCoverage: prepared.coverage, validation: runPresentationValidation(proposal.presentation) };
             }
         });
+    }));
+
+    function runDraftGeneration(req, res, id, requestBody, roster, generation) {
+        const pending = generationDrafts.selectPending(roster, generation);
+        if (!pending.length) return res.json({ draftId: id, warnings: [] });
+        return runAiRequest(req, res, { id, digest: generation.digest, pending: pending.map(page => page.outlinePageId), model: req.body?.model }, null, {
+            source: 'presentation_slides',
+            auditAction: '生成并保存大纲页面',
+            maxTokens: 7200,
+            generate: async (model, call) => {
+                const build = (materials, pages, compact = false) => buildSlidesMessages({ ...requestBody, materials, compact, enforcePageIds: true,
+                    outline: { title: requestBody.outline.title, assumptions: requestBody.outline.assumptions, slides: pages } });
+                const largest = largestPageBatch(pending, batch => build([], batch, true));
+                const prepared = await prepareGenerationMaterials(requestBody.materials, model, materials => build(materials, largest, true), 7200, call, requestBody.title || requestBody.outline.title);
+                const warnings = materialNotice(prepared.coverage);
+                const productionProfile = require('../../services/presentations/presentation-production-profile').fromRequest(requestBody);
+                const outcome = await generateRosterPages(pending, (pages, compact) => call(build(prepared.materials, pages, compact), {
+                    sourceSuffix: compact ? '_missing_pages' : ''
+                }), { onAccepted: async accepted => {
+                    warnings.push(...await generationDrafts.saveAccepted(req.user, id, generation, requestBody, accepted, { productionProfile }));
+                } });
+                return { draftId: id, warnings: [...warnings, ...outcome.warnings].slice(0, 30) };
+            }
+        });
+    }
+
+    router.post('/apps/presentations/:id/ai/fill-missing', authMiddleware, asyncHandler(async (req, res) => {
+        const generation = await generationDrafts.generationRequest(req.user, req.params.id);
+        const body = await withResolvedAiTemplate(req.user, generation.input);
+        if (String(body.template.snapshotDigest) !== String(generation.templateDigest)) return res.status(409).json({
+            error: '模板版本摘要已变化，不能继续制作。', code: 'PRESENTATION_GENERATION_TEMPLATE_CHANGED'
+        });
+        return runDraftGeneration(req, res, req.params.id, body, confirmedRoster(body.outline), generation);
     }));
 
     router.post('/apps/presentations/ai/continue', authMiddleware, asyncHandler(async (req, res) => {

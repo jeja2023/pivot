@@ -87,7 +87,8 @@ async function session(user, id, env = process.env) {
     sessions.set(cacheKey, health); return { settings, key, health };
 }
 async function execute(user, id, operation, { signal, env = process.env } = {}) {
-    const { settings, key, health } = await session(user, id, env), requestId = crypto.randomBytes(16).toString('hex');
+    const { settings, key, health } = operation.action === 'inspect_export' ? await reviewSession(user, id, env) : await session(user, id, env);
+    const requestId = crypto.randomBytes(16).toString('hex');
     let cancellation;
     const cancel = () => cancellation ||= request(settings, '/v1/jobs/' + key + '/operations/' + requestId + '/cancel', { method: 'POST', body: {}, timeout: 4000 }).catch(() => {});
     signal?.addEventListener('abort', cancel, { once: true });
@@ -109,8 +110,15 @@ async function inputFile(user, id, name, buffer, env = process.env) {
 }
 async function file(user, id, kind, name, maximum, env = process.env) {
     if (!['inputs', 'outputs'].includes(kind) || !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name)) throw error('PPT文件请求范围无效。', 'PPT_SERVICE_FILE_INVALID', 400);
-    const { settings, key } = await session(user, id, env);
+    const { settings, key } = kind === 'outputs' && /^review-[a-f0-9]{64}-(?:[1-9]|[1-9]\d|100)\.png$/.test(name)
+        ? await reviewSession(user, id, env) : await session(user, id, env);
     return request(settings, '/v1/jobs/' + key + '/' + kind + '/' + name, { binary: true, maximum });
+}
+async function reviewSession(user, id, env) {
+    const { settings } = await connection(env);
+    if (!settings) throw error('PPT制作服务已停用。');
+    // 查阅已有快照不创建任务，也不重绑旧工作区的运行身份。
+    return { settings, key: jobKey(user, id, settings), health: await info({ env }) };
 }
 async function cleanup(user, id, env = process.env) {
     const { settings } = await connection(env); if (!settings) return;

@@ -3,6 +3,7 @@
 const { error } = require('./runtime');
 const { exportReview, normalizeStage, repairActionAllowed } = require('./review-plan');
 const { imageCoverage, selectImagePage } = require('./model-input');
+const { getSupplement } = require('./user-supplements');
 
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
@@ -28,7 +29,8 @@ function validateAction(action, state) {
     if (state.pageRepair && !repairActionAllowed(state, action)) {
         throw invalid('按页修复只允许编辑当前项目的页面源稿，或校验和导出当前项目。系统会核对未选页面是否保留。');
     }
-    if (['read', 'read_runtime', 'write', 'copy', 'copy_template', 'validate_template'].includes(action.action) && !presentationPath(action.path)) {
+    const supplementRead = action.action === 'read' && getSupplement(state, action.path);
+    if (['read', 'read_runtime', 'write', 'copy', 'copy_template', 'validate_template'].includes(action.action) && !supplementRead && !presentationPath(action.path)) {
         throw invalid('制作动作须提供当前任务内的安全相对路径。');
     }
     if (action.action === 'write' && (typeof action.text !== 'string' || Buffer.byteLength(action.text, 'utf8') > 180000 || /^(?:inputs|delivery)(?:\/|$)/.test(action.path))) {

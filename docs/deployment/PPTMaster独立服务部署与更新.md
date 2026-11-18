@@ -53,6 +53,51 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 
 ## 更新服务镜像与主应用
 
+### v0.7.178 制作快照和引文恢复
+
+将主应用更新到 v0.7.178 后，以登录请求 `GET /api/apps/presentations/master/info` 返回的能力判断是否需要换镜像。
+
+| 当前独立服务能力 | 更新方式 |
+| --- | --- |
+| `engine.progressSnapshotsReady: true` | 只更新主应用，继续使用当前已具备快照能力的镜像。 |
+| `engine.enabled: true`，但 `progressSnapshotsReady` 缺失或为 `false` | 如需制作快照、通过页 PPTX 和转存独立原稿，用支持快照的 `ppt-master:6.8.0` 替换独立服务。标签相同也应核对镜像 ID。 |
+
+用户补充来源、引文修复失败后的续作和制作记录导航随主应用更新。标准工作台的草稿保存随主应用数据库迁移生效。构建身份和普通账号验收见 [v0.7.178 发布说明](../releases/v0.7.178-PPT制作快照与引文恢复.md)。
+
+### 历史版本说明
+
+v0.7.177 扩展了主应用的整份重新生成入口。已运行 v0.7.176 批次的 `ppt-master:6.8.0` 且支持逐页修复时，只需更新主应用。更早的 `ppt-master:6.8.0` 也可能使用同一个标签，请按交付清单确认实际镜像，并检查主应用的 `engine.pageRepairReady`。需要换镜像时按下述步骤保留任务。[v0.7.177 发布说明](../releases/v0.7.177-PPTMaster修复后重新生成与本地验收.md)
+
+### 保留原数据卷和任务
+
+制作快照随主应用数据库和产物存储持久化。保留原任务和已保存快照需要两者配套备份。继续执行旧检查点还需要原引擎身份、连接配置和任务卷。
+
+1. **换镜像前处理在途任务。** 在原引擎上完成正在制作、等待确认或仍需续跑的任务，下载重要成品、项目源包和可下载草稿。任务记录在 Pivot 的 PostgreSQL 中，已交付文件在主应用的产物存储中，PPT Master 工作区在独立服务的 `/data` 卷中。安排维护窗口，把数据库、主应用持久数据目录（含产物存储和上传目录）、PPT Master 数据卷备份到同一业务时点，另行保管现用 `.env`、`DATA_ENCRYPTION_KEY`、服务地址和访问密钥。若需要换引擎，在导入同名标签前保存原镜像，便于回退。
+2. **在原 Compose 项目中只重建目标服务。** 沿用部署目录、原 Compose 项目名、原配置文件和卷映射。替换主应用时也沿用其 PostgreSQL 连接与持久目录。需要更新 PPT Master 时，校验归档后导入，并仅重建 `ppt-master` 服务。避免 `docker compose down -v`、清卷和从新目录用默认项目名启动。保留原服务地址和 `PPT_MASTER_TOKEN`，以便原环境继续定位存量工作区。
+3. **复核挂载和任务。** 重启后核对 `/data` 的实际卷名、镜像身份、管理员连接测试，以及旧任务列表和已交付文件下载。再新建测试任务核对逐页修复和重生成。参数、密钥和文件保留后，原任务记录可继续查看。旧检查点仍与原地址、密钥及引擎运行身份绑定，换镜像后不能直接续跑。需要恢复这类任务时，应使用原服务配置、原镜像和对应工作区备份。工作区闲置 24 小时会被清理，重要的待核验草稿和材料应在切换前保存。
+
+以下示例适用于生产已使用 `docker-compose.ppt-master.yml` 的独立服务。先在旧容器上确认原 Compose 项目名，将 `PPT_PROJECT` 替换为该值。在已完成备份、且确实需要换镜像时执行。保留原 `.env` 中的密钥，按当前包设置 `PPT_MASTER_IMAGE=ppt-master:6.8.0`。
+
+```bash
+cd /data/ppt-master
+PPT_PROJECT='替换为原 Compose 项目名'
+ppt_compose=(docker compose -p "$PPT_PROJECT" -f docker-compose.ppt-master.yml)
+volume_at_data() {
+  docker inspect --format '{{range .Mounts}}{{if eq .Destination "/data"}}{{.Name}}{{end}}{{end}}' "$1"
+}
+
+old_container=$("${ppt_compose[@]}" ps -q ppt-master)
+old_volume=$(volume_at_data "$old_container")
+test -n "$old_volume" || exit 1
+sha256sum -c ppt-master.tar.sha256 &&
+  docker load -i ppt-master.tar &&
+  "${ppt_compose[@]}" up -d --no-build --pull never --force-recreate ppt-master || exit 1
+new_container=$("${ppt_compose[@]}" ps -q ppt-master)
+test "$(volume_at_data "$new_container")" = "$old_volume" || exit 1
+```
+
+可用 `docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' <旧容器名>` 查询项目名。重建后若卷名有变化，暂停验收，按原部署参数恢复挂载后再接受新任务。主应用可在其原部署目录和原 Compose 项目中更新镜像后，仅重建 `pivot` 服务。
+
 v0.7.176 的逐页核验与选页修复需要同时更新主应用和独立服务。独立镜像仍使用 `ppt-master:6.8.0`，导入前核对本批归档摘要。更新后检查服务报告 `pageRepair: 1`，并用带有源页映射的失败导出复验。任务检查点继续绑定原引擎身份，请先处理在途与待恢复任务，再切换镜像并保留数据卷。[v0.7.176 发布说明](../releases/v0.7.176-PPTMaster逐页核验与修复.md)
 
 v0.7.175 的引文和重复检查自动修复随主应用更新。待核验草稿使用同批交付的 `ppt-master:6.8.0` 镜像和新版主应用。已有检查点绑定原引擎身份。可以先更新主应用，在原镜像上处理在途和待恢复任务，再安排独立服务换镜像。保留服务数据卷和连接配置。若既有配置使用其他标签，请将 `PPT_MASTER_IMAGE` 改为本次镜像标签。[v0.7.175 发布说明](../releases/v0.7.175-PPTMaster自动修复与待核验草稿.md)

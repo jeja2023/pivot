@@ -38,6 +38,58 @@ def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"
 
 
 class DeliveryChecklistTests(unittest.TestCase):
+    def test_partial_snapshot_keeps_native_chart_and_excludes_failed_slide(self):
+        from native_subset import select_pages
+        source = io.BytesIO()
+        with zipfile.ZipFile(deck()) as baseline, zipfile.ZipFile(source, "w") as archive:
+            for name in baseline.namelist():
+                data = baseline.read(name)
+                if name == "ppt/presentation.xml":
+                    data = data.replace(b"</p:presentation>", b'<p:sldSz cx="12192000" cy="6858000"/></p:presentation>')
+                archive.writestr(name, data)
+            archive.writestr("_rels/.rels", f'<Relationships xmlns="{REL}"><Relationship Id="rId1" Type="{R}/officeDocument" Target="ppt/presentation.xml"/></Relationships>')
+            archive.writestr("[Content_Types].xml", '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>')
+        result = select_pages(source.getvalue(), [1])
+        with zipfile.ZipFile(io.BytesIO(result)) as archive:
+            self.assertEqual(verify_checklist(archive, ["ppt/slides/slide2.xml"],
+                             [["首页", [["实际一季度120", "实际", "一季度", "120"]]]])["checkedPages"], 1)
+            self.assertIn("ppt/charts/chart1.xml", archive.namelist())
+            self.assertNotIn("ppt/slides/slide1.xml", archive.namelist())
+            self.assertNotIn("ppt/notesSlides/notesSlide2.xml", archive.namelist())
+
+    def test_review_preview_recovers_registered_export_without_draft_or_delivery(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, "WORKSPACE", Path(directory)):
+            root = Path(directory)
+            export = root / "project/exports/report.pptx"
+            export.parent.mkdir(parents=True)
+            data = deck().getvalue()
+            export.write_bytes(data)
+            metadata = root / ".pivot"
+            metadata.mkdir()
+            path = "project/exports/report.pptx"
+            (metadata / "export.json").write_text(json.dumps({"exports": {path: hashlib.sha256(data).hexdigest()}}), encoding="utf-8")
+
+            def render(source, staging, count):
+                self.assertEqual(source, export)
+                images = staging / "native-preview"
+                images.mkdir()
+                for index in range(1, count + 1):
+                    (images / f"slide-{index}.png").write_bytes(b"preview")
+
+            with patch("native_media.preview", side_effect=render) as renderer:
+                request = {"path": path, "checklist": [["首页", []], ["后页", ["成本1000"]]]}
+                result = runner.inspect_export(request)
+                self.assertEqual(runner.inspect_export(request), result)
+                self.assertEqual(renderer.call_count, 1)
+                self.assertEqual(result["pageReview"]["passedPages"], [1])
+                previews = root / runner.REVIEW_PREVIEW
+                self.assertEqual([file.name for file in previews.iterdir()], [result["pages"][0]["file"]])
+                self.assertFalse((root / runner.REVIEW_DRAFT).exists())
+                self.assertFalse((root / "delivery").exists())
+            export.write_bytes(b"unregistered bytes")
+            with self.assertRaisesRegex(ValueError, "摘要不一致"):
+                runner.inspect_export(request)
+
     def test_full_review_lists_all_pages_and_checks(self):
         with self.assertRaises(runner.ChecklistMismatch) as failure:
             runner.package_report(deck().getvalue(), [["首页", []], ["另一个标题", ["成本1000", "成本2000"]]])

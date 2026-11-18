@@ -6,7 +6,7 @@ const { createHash } = require('node:crypto');
 const { drive } = require('../server/services/presentations/master/driver');
 const { validateTurn } = require('../server/services/presentations/master/actions');
 const { initializeReview, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('../server/services/presentations/master/review-plan');
-const { readReviewDraft } = require('../server/services/presentations/master/tasks');
+const { readReviewDraft, recent, inspectPages, readPagePreview, saveReviewPages, readSavedPages } = require('../server/services/presentations/master/tasks');
 const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
 const { getMaxImagesPerMessage } = require('../server/image-safety');
 const { checkModel } = require('../server/services/presentations/master/model-preflight');
@@ -153,13 +153,14 @@ test('引文自动修复使用材料原文，拒绝删除失败引用，修正�
         }
     });
     const checkEvidence = messages => {
-        assert.match(messages[0].content, /原始片段/);
+        assert.match(messages[0].content, /按实际数据项核对引用/);
         const evidence = messages.find(message => message.role === 'user' && typeof message.content === 'string'
             && message.content.startsWith('{"citationRepairEvidence":'));
         assert.equal(JSON.parse(evidence.content).citationRepairEvidence[0].excerpt, '原始收入120万元。');
     };
     await turns([bogus, messages => { checkEvidence(messages); return omitted; }, messages => { checkEvidence(messages); return design; }]);
-    assert.equal(state.citationRepairAttempts, 2);
+    assert.equal(state.citationRepairAttempts, undefined);
+    assert.equal(state.actionRetries, 2);
     assert.equal(state.steps, 1);
     assert.equal(progress.filter(message => /正在查证并修复清单引用/.test(message)).length, 2);
     assert.deepEqual(calls, []);
@@ -179,10 +180,45 @@ test('找不到原文时自动查证次数有上限并保留检查点', async ()
         resolveModel: async () => ({ context_window_tokens: 256000 }),
         callModel: async () => { calls++; return bogus; },
         execute: async () => assert.fail('无法核验的引文不能触发工具动作')
-    }), /已尝试查证并修复，检查点已保留/);
+    }), { code: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' });
     assert.equal(calls, 4);
     assert.equal(state.citationRepairAttempts, 3);
     assert.equal(state.citationRepair[0].excerpt, undefined);
+    assert.equal(state.citationPause, true);
+});
+
+test('用户补充单独持久登记，原任务引用可随事实重新排序', async () => {
+    const { registerSupplement } = require('../server/services/presentations/master/user-supplements');
+    const { resetCitationRepair, reopenReview } = require('../server/services/presentations/master/review-plan');
+    const state = makeState('quick');
+    state.request.pageCount = 2;
+    const path = registerSupplement(state, '经核实，项目预算80万元。', 'clarify', 'prompt');
+    const fact = { text: '项目预算80万元', source: { path, quote: '项目预算80万元' } };
+    const proposal = globalThis.structuredClone(design);
+    proposal.requestInput.plan.pages.push({ title: '项目预算', values: [fact] });
+    const read = async () => state.request.instruction;
+    const wrong = globalThis.structuredClone(proposal);
+    wrong.requestInput.plan.pages[1].values[0].source.path = 'instruction';
+    await assert.rejects(validateTurn(wrong, state, read), error => {
+        state.citationFacts = error.citationFacts;
+        return /第 2 页第 1 项/.test(error.message);
+    });
+    const reordered = globalThis.structuredClone(proposal);
+    reordered.requestInput.plan.pages.reverse();
+    assert.equal((await validateTurn(reordered, state, read)).requestInput.plan.pages[0].values[0].source.path, 'user-supplement:1');
+    reordered.requestInput.plan.pages[0].values = [];
+    await assert.rejects(validateTurn(reordered, state, read), /之前待核对的数据项仍需保留/);
+    resetCitationRepair(state, { allowRevision: true });
+    await validateTurn(reordered, state, read);
+    reordered.requestInput.plan.pages[0].values = [{ text: fact.text }];
+    await assert.rejects(validateTurn(reordered, state, read), /仍需为该数据项提供可核对的引用/);
+    await assert.rejects(validateTurn({ actions: [{ action: 'write', path, text: '改写原文' }] }, state, read), /安全相对路径/);
+    state.review.approvals.design = { plan: design.requestInput.plan };
+    state.deliveryReceipt = { old: true };
+    reopenReview(state);
+    assert.equal(state.deliveryReceipt, undefined);
+    assert.throws(() => exportReview(state, 'report'), { code: 'PPT_MASTER_CHECKLIST_REQUIRED' });
+    assert.equal(state.userSupplements[0].text, '经核实，项目预算80万元。');
 });
 
 test('交付核验失败保留草稿检查点，仍需通过清单才有正式回执', async () => {
@@ -237,6 +273,93 @@ test('按页恢复只能写指定源稿并复用原有确认，导出仍绑定�
     await assert.doesNotReject(validateTurn({ actions: [{ action: 'write', path: 'report/svg_output/page1.svg', text: '<svg/>' }] }, state));
 });
 
+test('制作记录仅显示当前仍可查阅的任务摘要', async () => {
+    const user = { id: 1 };
+    const list = async actor => {
+        assert.equal(actor, user);
+        return [{ id: 'one', status: 'completed', created_at: '先前', request: { title: '已交付', sourceAssetId: '1' } },
+            { id: 'two', status: 'failed', request: { title: '已撤权', sourceAssetId: '2' } }];
+    };
+    const checkAccess = async (actor, request) => {
+        assert.equal(actor, user);
+        if (request.sourceAssetId === '2') throw Object.assign(new Error('已撤权'), { status: 403 });
+    };
+    assert.deepEqual(await recent(user, { list, checkAccess }), [{ id: 'one', status: 'completed', title: '已交付', createdAt: '先前' }]);
+});
+
+test('旧失败任务无草稿时也能核验已登记导出，并只返回通过页', async () => {
+    const state = makeState('quick'), user = { id: 1 };
+    const plan = { project: 'report', pages: [{ title: '通过页', values: [] }, { title: '未通过页', values: [{ text: '成本120万元' }] }] };
+    state.review.approvals.design = { plan, digest: createHash('sha256').update(JSON.stringify(plan)).digest('hex') };
+    state.messages.push({ role: 'assistant', content: JSON.stringify({ complete: { path: 'report/exports/original.pptx' } }) });
+    const lookup = async () => ({ row: { result_json: { state } }, task: { status: 'failed' } });
+    const file = page => 'review-' + 'a'.repeat(64) + '-' + page + '.png';
+    const review = await inspectPages(user, 'old-task', { lookup, execute: async (actor, id, input) => {
+        assert.equal(actor, user); assert.equal(id, 'old-task');
+        assert.deepEqual(input, { action: 'inspect_export', path: 'report/exports/original.pptx', checklist: [['通过页', []], ['未通过页', ['成本120万元']]] });
+        return { pageReview: { passedPages: [1], failedPages: [{ page: 2, missingValues: [1] }] }, pages: [{ page: 1, file: file(1) }, { page: 2, file: file(2) }] };
+    } });
+    assert.deepEqual(review.pages, [{ page: 1, file: file(1), title: '通过页' }]);
+    assert.equal(review.failedPages[0].items[0].text, '成本120万元');
+    await assert.rejects(readPagePreview(user, 'old-task', file(1), { lookup: async () => null, readOutput: async () => assert.fail('无权读取时不取图片') }), { code: 'PPT_MASTER_PREVIEW_UNAVAILABLE' });
+    await assert.rejects(readPagePreview(user, 'old-task', '../../secret.png', { lookup }), /标识无效/);
+});
+
+test('通过页只能按当前核验结果保存，恢复后从已保存图片读取', async () => {
+    const user = { id: 1 }, state = makeState('quick'), id = 'old-task';
+    const plan = { project: 'report', pages: [{ title: '通过页', values: [] }, { title: '未通过页', values: [] }] };
+    state.review.approvals.design = { plan, digest: createHash('sha256').update(JSON.stringify(plan)).digest('hex') };
+    state.messages.push({ role: 'assistant', content: JSON.stringify({ complete: { path: 'report/exports/original.pptx' } }) });
+    const row = { review_revision: '最初失败', result_json: { state } }, task = { status: 'failed' };
+    const revision = 'b'.repeat(64), file = 'review-' + revision + '-1.png';
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7eQAAAAASUVORK5CYII=', 'base64');
+    const executor = {};
+    let referenceCount = 0;
+    const deps = {
+        lookup: async () => ({ row, task }),
+        execute: async () => ({ pageReview: { passedPages: [1], failedPages: [{ page: 2, missingTitle: true }] },
+            pages: [{ page: 1, file }, { page: 2, file: 'review-' + revision + '-2.png' }] }),
+        readOutput: async (_actor, _id, name) => { assert.equal(name, file); return png; },
+        tenantContext: async () => ({ tenantId: 2 }),
+        putBuffer: async options => {
+            assert.equal(options.mimeType, 'image/png');
+            assert.equal(options.ownerUserId, 1);
+            assert.equal(options.tenantId, 2);
+            return { objectId: 'stored-png' };
+        },
+        persist: async (_actor, _id, expected, snapshot, commit) => {
+            assert.equal(expected, '最初失败');
+            await commit(executor, row.result_json.savedReviewPages);
+            row.result_json.savedReviewPages = snapshot;
+            return snapshot;
+        },
+        incrementRefCount: async (objectId, delta, options) => {
+            assert.equal(objectId, 'stored-png');
+            assert.equal(options.executor, executor);
+            referenceCount += delta;
+        }
+    };
+    await assert.rejects(saveReviewPages(user, id, 'a'.repeat(64), { ...deps, putBuffer: async () => assert.fail('过期预览不能保存') }),
+        { code: 'PPT_MASTER_DRAFT_CHANGED' });
+    const saved = await saveReviewPages(user, id, revision, deps);
+    assert.deepEqual(saved.pages, [{ page: 1, title: '通过页', file }]);
+    assert.deepEqual(saved.failedPages, [{ page: 2 }]);
+    assert.equal(referenceCount, 1);
+    assert.deepEqual(await saveReviewPages(user, id, revision, { ...deps, execute: async () => assert.fail('重试应复用保存结果') }), saved);
+    task.status = 'completed';
+    row.review_revision = '已完成';
+    assert.deepEqual(await readSavedPages(user, id, deps), saved);
+    assert.deepEqual(await readPagePreview(user, id, file, {
+        ...deps,
+        readOutput: async () => assert.fail('已保存页面不能依赖临时工作区'),
+        readBuffer: async options => {
+            assert.deepEqual(options, { objectId: 'stored-png', tenantId: 2, userId: 1, tenantScoped: true });
+            return { buffer: png };
+        }
+    }), png);
+    await assert.rejects(readSavedPages(user, id, { lookup: async () => null }), { code: 'PPT_MASTER_PREVIEW_UNAVAILABLE' });
+});
+
 test('重新生成从授权快照恢复完整材料并以新任务关联原任务', async () => {
     const { regenerate } = require('../server/services/presentations/master/tasks');
     const user = { id: 1 }, bytes = Buffer.from('完整原始材料');
@@ -247,7 +370,13 @@ test('重新生成从授权快照恢复完整材料并以新任务关联原任�
         assert.equal(context.regeneratedFrom, 'previous');
         return { id: 'new' };
     } };
-    assert.deepEqual(await regenerate(user, 'previous', options), { id: 'new' });
+    for (const status of ['failed', 'completed']) {
+        previous.task.status = status;
+        assert.deepEqual(await regenerate(user, 'previous', options), { id: 'new' });
+    }
+    previous.task.status = 'working';
+    await assert.rejects(regenerate(user, 'previous', options), { code: 'PPT_MASTER_REGENERATE_UNAVAILABLE' });
+    previous.task.status = 'completed';
     assert.equal(request.materials[0].text, undefined);
     await assert.rejects(regenerate(user, 'previous', { ...options, readOriginal: async () => Buffer.from('被更换的材料') }), /原材料快照已不可用/);
 });

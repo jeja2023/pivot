@@ -25,11 +25,36 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
         writeLog(req, '创建完整PPT制作任务', `任务: ${task.id}`); res.status(202).json({ task });
     }));
     router.get('/apps/presentations/master/tasks/latest', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.latest(req.user, String(req.query.presentationId || '')) })));
+    router.get('/apps/presentations/master/tasks/recent', authMiddleware, asyncHandler(async (req, res) => {
+        res.set('Cache-Control', 'private, no-store').json({ tasks: await tasks.recent(req.user) });
+    }));
     router.get('/apps/presentations/master/tasks/active', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.activeTask(req.user) })));
     router.get('/apps/presentations/master/tasks/:taskId/review-draft', authMiddleware, asyncHandler(async (req, res) => {
         const draft = await tasks.readReviewDraft(req.user, req.params.taskId);
         writeLog(req, '下载待核验PPT草稿', `任务: ${req.params.taskId}`);
         res.set('Cache-Control', 'private, no-store').attachment(draft.filename).send(draft.buffer);
+    }));
+    router.post('/apps/presentations/master/tasks/:taskId/review-pages', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await tasks.inspectPages(req.user, req.params.taskId);
+        res.set('Cache-Control', 'private, no-store').json(preview);
+    }));
+    router.get('/apps/presentations/master/tasks/:taskId/snapshots/:kind', authMiddleware, asyncHandler(async (req, res) => {
+        const file = await tasks.readSnapshot(req.user, req.params.taskId, req.params.kind);
+        writeLog(req, '读取PPT制作快照', `任务: ${req.params.taskId}，类型: ${req.params.kind}`);
+        res.set('Cache-Control', 'private, no-store').attachment(file.filename).type(file.mimeType).send(file.buffer);
+    }));
+    router.get('/apps/presentations/master/tasks/:taskId/review-pages', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await tasks.readSavedPages(req.user, req.params.taskId);
+        res.set('Cache-Control', 'private, no-store').json(preview);
+    }));
+    router.post('/apps/presentations/master/tasks/:taskId/review-pages/save', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await tasks.saveReviewPages(req.user, req.params.taskId, req.body?.exportRevision);
+        writeLog(req, '保存已通过的PPT页面', `任务: ${req.params.taskId}`);
+        res.set('Cache-Control', 'private, no-store').json(preview);
+    }));
+    router.get('/apps/presentations/master/tasks/:taskId/review-pages/:file', authMiddleware, asyncHandler(async (req, res) => {
+        const image = await tasks.readPagePreview(req.user, req.params.taskId, req.params.file);
+        res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' }).type('png').send(image);
     }));
     router.get('/apps/presentations/master/tasks/:taskId', authMiddleware, asyncHandler(async (req, res) => {
         const task = await tasks.get(req.user, req.params.taskId);

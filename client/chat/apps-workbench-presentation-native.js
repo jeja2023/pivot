@@ -208,7 +208,7 @@
         if (!engine.enabled) { showError(new Error(engine.message)); return; }
         await library(sequence);
         if (!current(sequence)) return;
-        if (source?.sourceRenditionId) { await begin({ kind: 'import', ...source }); return; }
+        if (source?.sourceRenditionId || source?.sourceAssetId) { await begin({ kind: 'import', ...source }); return; }
         const data = await helpers.requestJson(API + '/jobs/latest');
         if (!current(sequence)) return;
         if (data.task) { job = data.task; await poll(job.id, sequence); }

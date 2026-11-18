@@ -199,7 +199,8 @@ const migrationModules = [
     require('./common-recovery-late-tables'),
     require('./web-local-helper'),
     require('./common-recovery-web-local-helper'),
-    require('./model-consumption-ledger')
+    require('./model-consumption-ledger'),
+    require('./presentation-generation-progress')
 ];
 
 module.exports = migrationModules

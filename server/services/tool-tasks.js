@@ -15,6 +15,11 @@ function parseJson(value, fallback = {}) {
 }
 
 function publicTask(row = {}) {
+    let result = ['completed', 'failed', 'cancelled', 'expired'].includes(row.status) ? parseJson(row.result_json, {}) : undefined;
+    if (row.tool_name === 'presentation.master' && result) {
+        const { savedReviewPages: _savedReviewPages, progressSnapshots: _progressSnapshots, ...publicResult } = result;
+        result = publicResult;
+    }
     return {
         id: row.id,
         toolName: row.tool_name,
@@ -23,7 +28,7 @@ function publicTask(row = {}) {
         expiresAt: row.expires_at,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
-        result: ['completed', 'failed', 'cancelled', 'expired'].includes(row.status) ? parseJson(row.result_json, {}) : undefined,
+        result,
         error: row.error_code ? { code: row.error_code, message: row.error_message || '' } : undefined,
         inputRequest: row.status === 'input_required' ? parseJson(row.input_request, {}) : undefined,
         cancelRequested: Boolean(row.cancel_requested_at)
@@ -118,12 +123,16 @@ function createToolTaskStore(deps = {}) {
         if (!['working', 'input_required'].includes(task.status)) return publicTask(task);
         const failed = options.failed === true;
         const status = failed ? 'failed' : 'completed';
+        const recorded = task.tool_name === 'presentation.master' ? {
+            ...result,
+            ...Object.fromEntries(Object.entries(parseJson(task.result_json)).filter(([key]) => ['savedReviewPages', 'progressSnapshots'].includes(key)))
+        } : result ?? {};
         await write(`
             UPDATE tool_tasks
             SET status = ?, result_json = ?::jsonb, result_digest = ?, invocation_event_id = COALESCE(?, invocation_event_id), error_code = ?, error_message = ?, updated_at = ?
             WHERE id = ? AND user_id = ? AND status IN ('working', 'input_required')
               AND (?::text IS NULL OR (result_json->>'_lease'=? AND COALESCE((result_json->>'_leaseUntil')::numeric,0)>extract(epoch from NOW())))
-        `, [status, JSON.stringify(result ?? {}), digest(result ?? {}), options.invocationEventId || null, String(options.errorCode || '').slice(0, 128), String(options.errorMessage || '').slice(0, 2000), now(), id, user.id, options.expectedLease || null, options.expectedLease || null]);
+        `, [status, JSON.stringify(recorded), digest(recorded), options.invocationEventId || null, String(options.errorCode || '').slice(0, 128), String(options.errorMessage || '').slice(0, 2000), now(), id, user.id, options.expectedLease || null, options.expectedLease || null]);
         return publicTask(await readOne('SELECT * FROM tool_tasks WHERE id = ?', [id]));
     }
 

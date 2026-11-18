@@ -15,7 +15,9 @@ import time
 
 KEY = re.compile(r"[a-f0-9]{64}\Z")
 REQUEST = re.compile(r"[a-f0-9]{32}\Z")
-ACTIONS = {"health", "read_runtime", "list", "read", "write", "run", "copy", "copy_template", "validate_template", "deliver_template", "deliver", "native_inspect", "native_patch", "native_video_prepare", "native_video_clip", "native_video_finish"}
+REVIEW_IMAGE = re.compile(r"review-[a-f0-9]{64}-(?:[1-9]|[1-9]\d|100)\.png\Z")
+ACTIONS = {"health", "read_runtime", "list", "read", "write", "run", "copy", "copy_template", "validate_template", "deliver_template", "deliver", "native_inspect", "native_patch", "native_video_prepare", "native_video_clip", "native_video_finish", "inspect_export", "capture_progress"}
+PROGRESS_FILES = {"progress-sources.zip", "progress-review.pptx", "progress-passed.pptx"}
 
 
 class ServiceError(Exception):
@@ -104,11 +106,16 @@ class Jobs:
             return {"path": "inputs/" + name, "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data)}
 
     def output(self, key, name):
-        if name not in {"presentation.pptx", "project.zip", "manifest.json", "video.mp4", "video-first.png", "review-draft.pptx"} and not re.fullmatch(r"preview-(?:[1-9]|[1-3]\d|40)\.png", name):
+        review = REVIEW_IMAGE.fullmatch(name) is not None
+        if not review and name not in PROGRESS_FILES and name not in {"presentation.pptx", "project.zip", "manifest.json", "video.mp4", "video-first.png", "review-draft.pptx"} and not re.fullmatch(r"preview-(?:[1-9]|[1-3]\d|40)\.png", name):
             raise ServiceError("交付文件名无效。")
-        with self.locked(key) as root:
+        with self.locked(key, allow_old=review) as root:
             workspace = root / "workspace"
-            if name.startswith("preview-"):
+            if review:
+                file = workspace / ".pivot" / "review-preview" / name
+            elif name in PROGRESS_FILES:
+                file = workspace / ".pivot" / "progress" / name
+            elif name.startswith("preview-"):
                 file = workspace / "native-preview" / name.replace("preview-", "slide-")
             else:
                 file = workspace / (".pivot" if name == "review-draft.pptx" else "delivery") / name
@@ -133,7 +140,7 @@ class Jobs:
         if not self.slots.acquire(blocking=False):
             raise ServiceError("制作服务繁忙，请稍后重试。", 429, "PPT_SERVICE_CAPACITY")
         try:
-            with self.locked(key) as root:
+            with self.locked(key, allow_old=operation["action"] == "inspect_export") as root:
                 work = root / "workspace"
                 if work.is_symlink():
                     raise ServiceError("任务目录已被重定向。", 409, "PPT_SERVICE_JOB_CHANGED")

@@ -14,7 +14,7 @@ async function fixture() {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-master-form-'));
     const app = express(), requests = [];
     app.use(express.json());
-    app.get('/fixture', (_req, res) => res.send('<!DOCTYPE html><html lang="zh-CN"><body><button id="entry">按模板创建</button></body></html>'));
+    app.get('/fixture', (_req, res) => res.send('<!DOCTYPE html><html lang="zh-CN"><body><button id="entry">按模板创建</button><button data-presentation-master-history>完整制作记录</button></body></html>'));
     const authMiddleware = (req, res, next) => {
         if (req.headers['x-fixture-user'] !== '1') return res.status(401).json({ error: '请先登录。' });
         req.user = { id: 1 }; next();
@@ -41,7 +41,7 @@ async function fixture() {
         await browser.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true });
     } };
 }
-async function pageFor(context, viewport = { width: 1366, height: 768 }, colorScheme = 'light') {
+async function pageFor(context, viewport = { width: 1366, height: 768 }, colorScheme = 'light', openForm = true) {
     const page = await context.browser.newPage({ viewport, colorScheme, locale: 'en-US' });
     page.setDefaultTimeout(7000);
     await page.goto(context.url + '/fixture');
@@ -64,10 +64,12 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
         window.Pivot.moduleApi('apps.presentations.master').bind(window.fixtureState, window.fixtureHelpers);
         document.getElementById('entry').addEventListener('click', () => window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', template }));
     }, template);
-    await page.locator('#entry').click();
-    await expect(page.locator('#presentation-master-title')).toHaveValue('');
-    await page.locator('#presentation-master-title').fill('测试演示');
-    await page.locator('#presentation-master-instruction').fill('按材料制作汇报，保留原始数字和来源。');
+    if (openForm) {
+        await page.locator('#entry').click();
+        await expect(page.locator('#presentation-master-title')).toHaveValue('');
+        await page.locator('#presentation-master-title').fill('测试演示');
+        await page.locator('#presentation-master-instruction').fill('按材料制作汇报，保留原始数字和来源。');
+    }
     return page;
 }
 async function word(name, text) {
@@ -94,6 +96,122 @@ test('待核验草稿在失败面板可单独下载，保留继续制作入口',
     } finally { await context.close(); }
 });
 
+test('旧制作记录可放大单页并保存，通过历史入口重新打开', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        const name = number => 'review-' + 'a'.repeat(64) + '-' + number + '.png';
+        const preview = { pages: [{ page: 1, title: '第一页', file: name(1) }, { page: 3, title: '第三页', file: name(3) }],
+            failedPages: [{ page: 2 }], exportRevision: 'a'.repeat(64) };
+        let saved = false;
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'failed', canPreviewExport: !saved, hasSavedReviewPages: saved,
+            request: { title: '旧经营回顾' }, error: { code: 'PPT_MASTER_OPERATION_FAILED', message: '第 2 页需要修复。' }
+        } } }));
+        await page.route('**/master/tasks/recent', route => route.fulfill({ json: { tasks: [
+            { id: 'fixture-task', status: 'failed', title: '旧经营回顾', hasSavedReviewPages: saved }
+        ] } }));
+        await page.route('**/master/tasks/fixture-task/review-pages', route => {
+            assert.equal(route.request().method(), saved ? 'GET' : 'POST');
+            return route.fulfill({ json: preview });
+        });
+        await page.route('**/master/tasks/fixture-task/review-pages/save', route => {
+            assert.deepEqual(route.request().postDataJSON(), { exportRevision: preview.exportRevision });
+            saved = true;
+            return route.fulfill({ json: preview });
+        });
+        await page.route('**/review-pages/*.png', route => route.fulfill({ contentType: 'image/png', body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a7eQAAAAASUVORK5CYII=', 'base64') }));
+        await page.locator('#presentation-master-start').click();
+        await expect(panel.getByRole('button', { name: '下载待核验草稿（.pptx）' })).toHaveCount(0);
+        await panel.getByRole('button', { name: '查看已通过页面' }).click();
+        const selector = panel.getByRole('combobox', { name: '选择已通过的页面' });
+        await expect(selector.locator('option')).toHaveCount(2);
+        await selector.selectOption('3');
+        await expect(panel.getByRole('img', { name: /第 3 页/ })).toBeVisible();
+        const open = panel.getByRole('button', { name: '打开单页预览图' });
+        await open.click();
+        const imageDialog = page.getByRole('dialog', { name: /单页预览.*第 3 页/ });
+        await expect(imageDialog.getByRole('img')).toHaveAttribute('src', new RegExp(name(3) + '$'));
+        assert.equal(context.browser.contexts().flatMap(context => context.pages()).length, 1);
+        await page.keyboard.press('Escape');
+        await expect(imageDialog).toHaveCount(0);
+        await expect(open).toBeFocused();
+        await expect(panel).toContainText('待修复页：2');
+        await panel.getByRole('button', { name: '保存已通过页面' }).click();
+        await expect(panel).toContainText('已保存到本条制作记录');
+        await page.getByRole('dialog', { name: '完整制作过程' }).getByRole('button', { name: '关闭', exact: true }).click();
+        await page.locator('#presentation-master-modal').getByRole('button', { name: '关闭', exact: true }).click();
+        await page.getByRole('button', { name: '完整制作记录', exact: true }).click();
+        await panel.getByRole('button', { name: /旧经营回顾.*已保存通过页/ }).click();
+        await panel.getByRole('button', { name: '查看已保存页面' }).click();
+        await expect(panel.getByRole('combobox', { name: '选择已通过的页面' }).locator('option')).toHaveCount(2);
+        await expect(panel.getByRole('img', { name: /第 1 页/ })).toBeVisible();
+    } finally { await context.close(); }
+});
+
+test('PPT 制作记录可打开旧草稿并将副本交给原稿编辑器', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context, undefined, undefined, false), panel = page.locator('#presentation-master-status');
+        await page.evaluate(() => {
+            window.Pivot.api = { fetch: (...args) => fetch(...args) };
+            window.Pivot.exposeModule('apps.presentations.native', { open: async source => { window.fixtureNativeSource = source; } });
+        });
+        await page.route('**/master/tasks/recent', route => route.fulfill({ json: { tasks: [
+            { id: 'old-draft', title: '旧经营回顾', status: 'failed', createdAt: '2026-11-18T06:17:50.000Z' },
+            { id: 'old-empty', title: '未生成稿件', status: 'completed', createdAt: '2026-11-18T05:08:53.000Z' }
+        ] } }));
+        await page.route('**/master/tasks/old-draft', route => route.fulfill({ json: { task: {
+            id: 'old-draft', status: 'failed', hasReviewDraft: true, request: { title: '旧经营回顾' }, error: { message: '有页面未通过。' }
+        } } }));
+        await page.route('**/master/tasks/old-empty', route => route.fulfill({ json: { task: {
+            id: 'old-empty', status: 'failed', request: { title: '未生成稿件' }, error: { message: '材料读取失败。' }
+        } } }));
+        await page.route('**/master/tasks/old-draft/review-draft', route => route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', body: 'test draft' }));
+        await page.route('**/apps/presentations/assets', route => {
+            assert.match(route.request().postData(), /test draft/);
+            return route.fulfill({ json: { asset: { id: 42 } } });
+        });
+        const entry = page.getByRole('button', { name: '完整制作记录', exact: true });
+        await entry.click();
+        const history = page.getByRole('dialog', { name: '完整制作记录', exact: true });
+        const detail = page.getByRole('dialog', { name: '完整制作过程', exact: true });
+        const form = page.locator('#presentation-master-modal');
+        await expect(history).toBeVisible();
+        await expect(form).toHaveCount(0);
+        assert.deepEqual(await page.evaluate(() => window.fixtureTaskResponses), ['/api/apps/presentations/master/tasks/recent']);
+        await expect(panel.locator('.presentation-master-history-row')).toHaveCount(2);
+        await expect(panel.locator('.presentation-master-history-count')).toHaveText('共 2 条');
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/history-1366.png') });
+        await page.setViewportSize({ width: 390, height: 844 });
+        assert.equal(await panel.evaluate(element => element.scrollWidth <= element.clientWidth), true);
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/history-390.png') });
+        await page.setViewportSize({ width: 1366, height: 768 });
+        const empty = panel.getByRole('button', { name: /未生成稿件/ });
+        await empty.click();
+        await expect(panel).toContainText('没有已保留的待核验 PPTX');
+        await expect(panel.getByRole('button', { name: '手动编辑草稿副本' })).toHaveCount(0);
+        await detail.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(history).toBeVisible();
+        await expect(empty).toBeFocused();
+        await expect(form).toHaveCount(0);
+        const draft = panel.getByRole('button', { name: /旧经营回顾/ });
+        await draft.click();
+        await detail.getByRole('button', { name: '手动编辑草稿副本' }).waitFor();
+        await page.keyboard.press('Escape');
+        await expect(history).toBeVisible();
+        await expect(draft).toBeFocused();
+        await page.keyboard.press('Escape');
+        await expect(history).toHaveCount(0);
+        await expect(entry).toBeFocused();
+        await entry.click();
+        await draft.click();
+        await panel.getByRole('button', { name: '手动编辑草稿副本' }).click();
+        await expect.poll(() => page.evaluate(() => window.fixtureNativeSource)).toEqual({ sourceAssetId: '42', title: '旧经营回顾-待核验草稿' });
+        await expect(page.getByRole('dialog', { name: '完整制作过程' })).toHaveCount(0);
+    } finally { await context.close(); }
+});
+
 test('逐页核验显示应有数据，提交时只修复勾选页', async () => {
     const context = await fixture();
     try {
@@ -115,6 +233,7 @@ test('逐页核验显示应有数据，提交时只修复勾选页', async () =>
         await expect(panel).toContainText('已通过 1 页');
         await expect(panel).toContainText('收入120万元');
         await expect(panel.getByRole('button', { name: '重新生成整份' })).toBeVisible();
+        await page.screenshot({ path: path.join(root, 'output/presentation-master-form/page-review-1366.png') });
         await panel.getByRole('checkbox', { name: /第 3 页/ }).uncheck();
         await panel.getByRole('textbox', { name: '本次修改意见（选填）' }).fill('在图表旁补上数值。');
         await panel.getByRole('button', { name: '仅修复所选页面' }).click();

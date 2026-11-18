@@ -12,13 +12,22 @@ const { prepareDelivery, commitDelivery } = require('./delivery');
 const { pendingInput, parseDecision } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { checkModel } = require('./model-preflight');
-const { initializeReview, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('./review-plan');
+const { initializeReview, reopenReview, resetCitationRepair, exportReview, verifyReceipt, reviewRecoveryGuidance, CITATION_REVIEW_REQUIRED } = require('./review-plan');
+const { registerSupplement } = require('./user-supplements');
+const { createReviewPreviewService, exportForPreview } = require('./review-previews');
+const progressSnapshots = require('./progress-snapshots');
+const { logger } = require('../../../logger');
 const { imageCoverage } = require('./model-input');
 const deployment = require('./deployment');
 const active = require('./continuation').createContinuationCoordinator();
 
 function reviewDraftFor(row, task) {
     return ['failed', 'expired'].includes(task.status) ? row.result_json.state?.reviewDraft : null;
+}
+
+function citationPaused(state, code) {
+    return code === CITATION_REVIEW_REQUIRED || Boolean(state?.citationPause)
+        || code === 'PPT_MASTER_ACTION_INVALID' && Boolean(state?.citationRepair?.length && state.citationRepairAttempts >= 3);
 }
 
 async function ensureAccess(user, request) {
@@ -38,6 +47,7 @@ async function ensureAccess(user, request) {
 function publicResult(row, task) {
     const data = row.result_json || {}, state = data.state;
     const pending = pendingInput(row.id, state, row.input_request);
+    const paused = ['failed', 'expired'].includes(task.status) && citationPaused(state, task.error?.code);
     return { ...task, toolName: repository.TOOL, progress: data.progress || { phase: 'preparing', message: '正在准备完整制作引擎。' },
         request: state ? { title: state.request.title, operation: state.request.operation, profile: state.request.profile, presentationId: state.request.presentationId,
             pageCount: state.request.pageCount, modelId: state.request.modelId, maxSteps: state.request.maxSteps, tokenBudget: state.request.tokenBudget, productionProfile: state.request.productionProfile, template: state.request.template || null } : undefined,
@@ -46,19 +56,25 @@ function publicResult(row, task) {
         imageCoverage: state?.prepared ? imageCoverage(state) : undefined, actionRetries: state?.actionRetries || 0,
         usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
         recoverable: Boolean(state && (!state.pendingKind || state.response) && (task.status === 'failed' || task.status === 'expired' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
+        ...(paused ? { citationReview: { items: (state?.citationRepair || []).map(({ location, text, title }) => ({ location, text, title })) } } : {}),
         ...(reviewDraftFor(row, task) ? { hasReviewDraft: true } : {}),
+        ...(data.savedReviewPages ? { hasSavedReviewPages: true } : {}),
+        ...(data.progressSnapshots ? { progressSnapshot: progressSnapshots.snapshotView(data.progressSnapshots) } : {}),
+        ...((!data.savedReviewPages || data.savedReviewPages.sourceRevision !== row.review_revision) && exportForPreview(row, task) ? { canPreviewExport: true } : {}),
         ...(reviewDraftFor(row, task) && state.pageReview ? { pageReview: state.pageReview, draftRevision: state.reviewDraft.sha256,
             canRepairPages: state.engine?.pageRepair === 1 && Boolean(state.pageSources?.length) } : {}),
-        canRegenerate: ['failed', 'expired'].includes(task.status) && Boolean(state?.request?.title) && !state.request.runId,
+        canRegenerate: ['completed', 'failed', 'expired'].includes(task.status) && Boolean(state?.request?.title) && !state.request.runId,
         ...(state?.request?.regeneratedFrom ? { regeneratedFrom: state.request.regeneratedFrom } : {}),
         ...((task.status === 'input_required' || ['expired', 'failed'].includes(task.status)) && !state?.response && pending ? { inputRequest: pending } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
 }
 async function accessibleTask(user, id) {
-    const row = await repository.read(user, id);
+    let row = await repository.read(user, id);
     if (!row) return null;
     const task = await taskStore.getForUser(id, user);
     if (!task) return null;
+    if (row.status !== task.status) row = await repository.read(user, id);
+    if (!row) return null;
     await ensureAccess(user, row.result_json.state?.request || row.input_request);
     return { row, task };
 }
@@ -66,6 +82,8 @@ async function get(user, id) {
     const result = await accessibleTask(user, id);
     return result && publicResult(result.row, result.task);
 }
+const reviewPreviews = createReviewPreviewService(accessibleTask);
+const readSnapshot = (user, id, kind) => progressSnapshots.readSnapshot(user, id, kind, accessibleTask);
 async function readReviewDraft(user, id, { lookup = accessibleTask, readOutput = runtime.readOutput } = {}) {
     const result = await lookup(user, id);
     const draft = result && reviewDraftFor(result.row, result.task);
@@ -171,8 +189,15 @@ async function run(id, user, deps = {}) {
             if (state.bootstrapped) state.messages?.push({ role: 'user', content: '请按当前宿主阶段要求核对方案与现有文件。旧确认没有分阶段清单，请重新提交用户批准。' });
             await checkpoint(state, { phase: 'preparing', message: '已启用分阶段确认与交付清单核验。' });
         }
+        const captureProgress = async (nextState, action, output) => {
+            try { await progressSnapshots.capture(user, id, lease, nextState, action, output, { signal, ensureCurrent }); }
+            catch (error) {
+                signal.throwIfAborted();
+                logger.warn({ taskId: id, code: error.code || error.name }, 'PPT Master 制作快照未保存');
+            }
+        };
         const result = state.deliveryReceipt ? { receipt: state.deliveryReceipt }
-            : await (deps.drive || drive)(user, id, state, { signal, ensureCurrent, checkpoint }, deps.driverDeps || {});
+            : await (deps.drive || drive)(user, id, state, { signal, ensureCurrent, checkpoint, captureProgress }, deps.driverDeps || {});
         await ensureCurrent();
         if (result.pending) {
             await checkpoint(state, { phase: 'input_required', message: result.pending.question });
@@ -224,7 +249,9 @@ async function respond(user, id, input, deps = {}) {
     const state = row.result_json.state;
     const decision = parseDecision(input, pendingInput(id, state, row.input_request));
     deployment.assertCheckpoint(state, await (deps.identity || runtime.identity)());
-    await (deps.ensureAccess || ensureAccess)(user, state.request); state.response = decision;
+    await (deps.ensureAccess || ensureAccess)(user, state.request);
+    if (decision.answer) decision.source = registerSupplement(state, decision.answer, decision.decision, decision.promptId);
+    state.response = decision;
     const accept = () => repo.acceptResponse(user, id, state);
     const accepted = task.status === 'input_required' ? await accept() : await repo.admit(user, () => { deployment.assertAccepting(); return accept(); }, id);
     if (!accepted) throw runtime.error('确认问题状态已变化，请刷新后核对。', 'PPT_MASTER_BUSY', 409);
@@ -240,6 +267,18 @@ async function cancel(user, id) {
     }
 }
 async function latest(user, presentationId) { const row = await repository.latest(user, presentationId); return row ? get(user, row.id) : null; }
+async function recent(user, { list = repository.recent, checkAccess = ensureAccess } = {}) {
+    const items = await list(user), visible = [];
+    for (const item of items) {
+        const request = item.request || {};
+        try { await checkAccess(user, request); }
+        catch (error) { if ([403, 404].includes(error.status)) continue; throw error; }
+        visible.push({ id: item.id, status: item.status, title: request.title || '演示文稿', createdAt: item.created_at,
+            ...(item.has_saved_review_pages ? { hasSavedReviewPages: true } : {}),
+            ...(item.has_progress_snapshot ? { hasProgressSnapshot: true } : {}) });
+    }
+    return visible;
+}
 async function activeTask(user) {
     const row = await repository.findActive(user);
     if (!row) return null;
@@ -254,6 +293,19 @@ async function resume(user, id, input = {}) {
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
     deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
+    if (input.resumeNote !== undefined && (typeof input.resumeNote !== 'string' || input.resumeNote.length > 4000)) {
+        throw runtime.error('补充说明请填写四千字以内的有效文字。');
+    }
+    const resumeNote = input.resumeNote?.trim() || '';
+    if (input.revisePlan !== undefined && typeof input.revisePlan !== 'boolean'
+        || input.revisePlan && !resumeNote || input.pages !== undefined && resumeNote) {
+        throw runtime.error('请填写调整说明，并选择普通续作或按页修复。');
+    }
+    const modelId = input.modelId === undefined ? state.request.modelId : String(input.modelId || '').trim();
+    if (!modelId || modelId.length > 160) throw runtime.error('请选择可用的制作模型。');
+    const changedModel = modelId !== state.request.modelId;
+    const paused = citationPaused(state, row.error_code);
+    if (paused && !resumeNote && !changedModel) throw runtime.error('请补充可核对的事实、填写修改意见，或切换制作模型后继续。', CITATION_REVIEW_REQUIRED, 409);
     if (input.pages !== undefined) {
         if (!['failed', 'expired'].includes(row.status) || !state.reviewDraft || !state.pageReview || !state.pageSources?.length || state.engine?.pageRepair !== 1) {
             throw runtime.error('当前任务没有可按页修复的草稿，请检查任务或重新生成整份。', 'PPT_MASTER_PAGE_REPAIR_UNAVAILABLE', 409);
@@ -273,15 +325,19 @@ async function resume(user, id, input = {}) {
         state.messages.push({ role: 'user', content: '用户要求只修复选中的页面，保留其他页面。以下是已确认清单与本次修改意见：'
             + JSON.stringify({ issues, note: input.repairNote?.trim() || '' }) });
     }
-    const modelId = input.modelId === undefined ? state.request.modelId : String(input.modelId || '').trim();
-    if (!modelId || modelId.length > 160) throw runtime.error('请选择可用的制作模型。');
-    if (modelId !== state.request.modelId) {
+    if (changedModel) {
         await checkModel(user, { ...state.request, modelId }, { visionRequired: imageCoverage(state).total > 0 });
     }
     const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = contract.normalizeTokenBudget(input.tokenBudget, state.request.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160) throw runtime.error('继续轮次只能在上限内增加，不能重置累计消耗。');
     state.request.maxSteps = maxSteps; state.request.tokenBudget = tokenBudget; state.request.modelId = modelId;
-    if (row.error_code === 'PPT_MASTER_ACTION_INVALID' && state.citationRepair) state.citationRepairAttempts = 0;
+    if (resumeNote) {
+        const source = registerSupplement(state, resumeNote, 'resume');
+        resetCitationRepair(state, { allowRevision: input.revisePlan === true });
+        reopenReview(state);
+        state.messages ||= [];
+        state.messages.push({ role: 'user', content: '用户在检查点补充说明 [引用来源 ' + source + ']：' + resumeNote });
+    } else if (paused && changedModel) resetCitationRepair(state);
     if (row.error_code === 'PPT_MASTER_NO_PROGRESS') {
         state.inspectionRepairAttempts = 0;
         state.inspectionRepairPending = true;
@@ -301,7 +357,7 @@ async function resume(user, id, input = {}) {
 
 async function regenerate(user, id, dependencies = {}) {
     const previous = await (dependencies.lookup || accessibleTask)(user, id);
-    if (!previous || !['failed', 'expired'].includes(previous.task.status) || previous.row.result_json.state?.request?.runId) {
+    if (!previous || !['completed', 'failed', 'expired'].includes(previous.task.status) || previous.row.result_json.state?.request?.runId) {
         throw runtime.error('此任务当前不能重新生成整份。', 'PPT_MASTER_REGENERATE_UNAVAILABLE', 409);
     }
     const request = previous.row.result_json.state?.request || previous.row.input_request;
@@ -322,4 +378,4 @@ async function regenerate(user, id, dependencies = {}) {
     return (dependencies.start || start)(user, { ...settings, ...(sourceAssetId ? { sourceAssetId } : {}), materials }, { regeneratedFrom: id });
 }
 
-module.exports = { start, get, readReviewDraft, respond, cancel, latest, activeTask, run, resume, regenerate };
+module.exports = { start, get, readReviewDraft, readSnapshot, ...reviewPreviews, respond, cancel, latest, recent, activeTask, run, resume, regenerate };

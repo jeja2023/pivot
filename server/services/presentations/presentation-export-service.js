@@ -102,6 +102,9 @@ function createExportService(deps) {
         if (!currentRow) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
         assertPresentationOwnerOrAdmin(user, currentRow);
         const current = toPublicPresentation(currentRow, { includeContent: true });
+        if (current.generation?.pending.length && ['pptx', 'pdf'].includes(normalizedFormat)) {
+            throw publicError('此草稿仍有大纲页面待生成，请先补齐缺页再导出整份文稿。', 409, 'PRESENTATION_GENERATION_INCOMPLETE');
+        }
         if (options.allowSensitiveExport === true && (options.baseVersion !== Number(current.version) || options.baseDigest !== current.contentDigest)) {
             throw publicError('请在当前文稿版本重新确认敏感内容后导出。', 409, 'PRESENTATION_SENSITIVE_EXPORT_VERSION_CHANGED');
         }

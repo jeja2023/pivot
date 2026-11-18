@@ -27,6 +27,8 @@ TEXT_EXTENSIONS = {".md", ".json", ".yaml", ".yml", ".txt", ".svg", ".csv", ".xm
 MAX_TEXT = 180_000
 MAX_WORKSPACE = 250 * 1024 * 1024
 REVIEW_DRAFT = ".pivot/review-draft.pptx"
+REVIEW_PREVIEW = ".pivot/review-preview"
+PROGRESS_DIRECTORY = (".pivot", "progress")
 
 
 def source_fingerprint() -> str:
@@ -58,6 +60,9 @@ def inventory() -> list[Path]:
         if file.is_symlink():
             raise ValueError("任务目录包含符号链接。")
         if file.is_file():
+            # 由宿主单独限额并转存的快照中转文件不计入源工作区配额。
+            if file.relative_to(WORKSPACE).parts[:2] == PROGRESS_DIRECTORY:
+                continue
             files.append(file)
             size += file.stat().st_size
             if len(files) > 16_000 or size > MAX_WORKSPACE:
@@ -130,14 +135,125 @@ def page_sources(file, receipt, checklist):
     return export
 
 
-def deliver_presentation(request: dict) -> dict:
-    file = relative_path(request.get("path"), WORKSPACE, must_exist=True)
-    if file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
+def registered_export(path):
+    file = relative_path(path, WORKSPACE, must_exist=True)
+    if not file.is_file() or file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
         raise ValueError("只能交付 exports 目录中的最终 PPTX。")
     data = file.read_bytes()
     content_hash = hashlib.sha256(data).hexdigest()
     receipt = json.loads((WORKSPACE / ".pivot/export.json").read_text(encoding="utf-8"))
-    if receipt.get("sourceFingerprint") != source_fingerprint() or receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != content_hash:
+    if receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != content_hash:
+        raise ValueError("文件与上游导出回执的摘要不一致。")
+    return file, data, content_hash, receipt
+
+
+def inspect_export(request):
+    """对已登记的导出快照重新核验和渲染，避免运行或改写原制作任务。"""
+    file, data, digest, _ = registered_export(request.get("path"))
+    checklist = request.get("checklist")
+    if not isinstance(checklist, list) or not 1 <= len(checklist) <= 100:
+        raise ValueError("此任务缺少可核对的已确认清单。")
+    try:
+        package_report(data, checklist)
+        report = {"passedPages": list(range(1, len(checklist) + 1)), "failedPages": []}
+    except ChecklistMismatch as error:
+        if error.report is None:
+            raise
+        report = error.report
+    passed = report["passedPages"]
+    if not passed:
+        return {"pageReview": report, "pages": []}
+
+    # 导出快照及清单共同决定哪些页可读，缓存只保存一份通过页预览。
+    revision = hashlib.sha256((digest + json.dumps(checklist, ensure_ascii=False, separators=(",", ":"))).encode()).hexdigest()
+    destination = WORKSPACE / REVIEW_PREVIEW
+    names = [f"review-{revision}-{page}.png" for page in passed]
+    if not all((destination / name).is_file() for name in names):
+        from native_media import preview
+        with tempfile.TemporaryDirectory(prefix="review-preview-", dir=WORKSPACE / ".pivot") as temporary:
+            staging = Path(temporary)
+            preview(file, staging, len(checklist))
+            images = [staging / "native-preview" / f"slide-{page}.png" for page in passed]
+            if sum(image.stat().st_size for image in images) > 32 * 1024 * 1024:
+                raise ValueError("通过页预览超过文件上限，请下载草稿查看。")
+            if destination.exists():
+                shutil.rmtree(destination)
+            destination.mkdir()
+            for image, name in zip(images, names):
+                image.replace(destination / name)
+    return {"pageReview": report, "pages": [{"page": page, "file": name} for page, name in zip(passed, names)]}
+
+
+def capture_progress(request):
+    project = relative_path(request.get("project"), WORKSPACE, must_exist=True)
+    if not project.is_dir():
+        raise ValueError("制作项目目录无效。")
+    destination = WORKSPACE.joinpath(*PROGRESS_DIRECTORY)
+    if destination.is_symlink() or destination.parent.is_symlink():
+        raise ValueError("制作快照目录已重定向。")
+    destination.mkdir(parents=True, exist_ok=True)
+
+    def describe(name, data):
+        if not 0 < len(data) <= 60 * 1024 * 1024:
+            raise ValueError("制作快照超过保存上限。")
+        with tempfile.NamedTemporaryFile(dir=destination, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+        try:
+            temporary.replace(destination / name)
+        finally:
+            temporary.unlink(missing_ok=True)
+        return {"file": name, "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data)}
+
+    path = request.get("export")
+    if not path:
+        files = [entry for entry in inventory() if entry.is_relative_to(project)
+                 and not any(part.startswith(".") or part in {"exports", "validation", "delivery"}
+                             for part in entry.relative_to(project).parts)]
+        pages = [file.stem for file in files if file.parent in {project / "svg_output", project / "authoring-svg-flat"}
+                 and file.suffix.lower() == ".svg"]
+        if not files or not pages and request.get("template") is not True:
+            return {}
+        if sum(file.stat().st_size for file in files) > 60 * 1024 * 1024:
+            raise ValueError("当前项目源稿超过快照保存上限。")
+        data = io.BytesIO()
+        with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
+            for file in sorted(files):
+                archive.write(file, file.relative_to(WORKSPACE).as_posix())
+        return {"source": {**describe("progress-sources.zip", data.getvalue()), "files": sorted(pages)}}
+
+    file, data, original_digest, receipt = registered_export(path)
+    if not file.is_relative_to(project / "exports") or receipt.get("sourceFingerprint") != source_fingerprint():
+        raise ValueError("快照与本次导出或项目源稿不一致。")
+    checklist = request.get("checklist")
+    if not isinstance(checklist, list) or not 1 <= len(checklist) <= 100:
+        raise ValueError("快照缺少已确认的页面清单。")
+    try:
+        package_report(data, checklist)
+        report = {"passedPages": list(range(1, len(checklist) + 1)), "failedPages": []}
+    except ChecklistMismatch as error:
+        report = error.report or {"passedPages": [], "failedPages": [{"page": index} for index in range(1, len(checklist) + 1)]}
+    passed = sorted(report["passedPages"])
+    result = {"export": {**describe("progress-review.pptx", data), "passedPages": passed,
+                         "pendingPages": [item["page"] for item in report["failedPages"]]},
+              "originalDigest": original_digest}
+    if passed:
+        from native_subset import select_pages
+        try:
+            subset = select_pages(data, passed)
+            package_report(subset, [checklist[page - 1] for page in passed])
+            result["passed"] = describe("progress-passed.pptx", subset)
+        except (ValueError, zipfile.BadZipFile) as error:
+            result["subsetUnavailable"] = clean(str(error))[:500]
+    return result
+
+
+def deliver_presentation(request: dict) -> dict:
+    try:
+        file, data, content_hash, receipt = registered_export(request.get("path"))
+    except ValueError as error:
+        raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。") from error
+    if receipt.get("sourceFingerprint") != source_fingerprint():
         raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。")
     preservation = None
     repair = request.get("repair")
@@ -213,8 +329,12 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "pageRepair": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
+    if action == "inspect_export":
+        return inspect_export(request)
+    if action == "capture_progress":
+        return capture_progress(request)
     if action in {"native_inspect", "native_patch", "native_video_prepare", "native_video_clip", "native_video_finish"}:
         from native_adapter import execute
         result = execute(request, WORKSPACE, SKILL)
@@ -295,6 +415,10 @@ def main(request: dict) -> dict:
                 page_sources_by_export = {file.relative_to(WORKSPACE).as_posix(): sources for file in outputs
                                           if file.is_relative_to(project / "exports") and file.stat().st_mtime_ns != previous_exports.get(file)}
             (metadata / "export.json").write_text(json.dumps({"sourceFingerprint": source_fingerprint(), "exports": exports, "pageSources": page_sources_by_export}), encoding="utf-8")
+            current_exports = [file for file in outputs if file.is_relative_to(project / "exports")
+                               and file.stat().st_mtime_ns != previous_exports.get(file)]
+            if len(current_exports) == 1:
+                result["progressExport"] = current_exports[0].relative_to(WORKSPACE).as_posix()
         return result
     if action == "validate_template":
         root = relative_path(request.get("path"), WORKSPACE, must_exist=True)

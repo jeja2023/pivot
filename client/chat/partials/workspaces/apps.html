@@ -533,6 +533,7 @@
                                         </svg>
                                         <span>模板库</span>
                                     </button>
+                                    <button class="btn-secondary" type="button" data-presentation-master-history>完整制作记录</button>
                                     <details class="presentation-dropdown" id="presentation-more-create-dropdown">
                                         <summary class="btn-secondary presentation-dropdown-summary" title="更多创建与导入方式">
                                             <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
@@ -625,6 +626,8 @@
                                     <button id="presentation-back-to-library-btn" class="btn-secondary" type="button">返回文稿库</button>
                                     <input id="presentation-title-input" class="presentation-title-input" aria-label="演示文稿名称" maxlength="160">
                                     <span id="presentation-save-state" class="presentation-save-state" role="status">已保存</span>
+                                    <span id="presentation-generation-progress" class="presentation-save-state hidden" role="status"></span>
+                                    <button id="presentation-fill-missing-btn" class="btn-secondary hidden" type="button">补齐缺页</button>
                                     <div id="presentation-presence-bar" class="presentation-presence-bar" aria-label="在线协作者"></div>
                                 </div>
                                 <div class="presentation-editor-actions">

@@ -44,3 +44,24 @@ test('大纲三页先生成两页，重试只请求缺页并按原顺序编译�
     assert.deepEqual(compiled.presentation.slides.map(page => page.id), roster.map(page => page.outlinePageId));
     await assert.rejects(generateRosterPages(roster, async () => reply([roster[0], roster[0]])), { code: 'PRESENTATION_SLIDE_COVERAGE_INCOMPLETE' });
 });
+
+test('后批超时前已逐批保存，补回页可保留用户编辑与原大纲位置', async () => {
+    const roster = confirmedRoster({ slides: Array.from({ length: 7 }, (_, index) => ({ title: String(index + 1) })) });
+    const saved = [];
+    await assert.rejects(generateRosterPages(roster, async pages => {
+        if (pages[0].outlinePageId === 'outline_page_6') throw Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' });
+        return { content: JSON.stringify({ slides: pages }) };
+    }, { onAccepted: async pages => saved.push(...pages.map(page => page.id)) }), { code: 'ETIMEDOUT' });
+    assert.deepEqual(saved, roster.slice(0, 5).map(page => page.outlinePageId));
+
+    const { mergeContent } = require('../server/services/presentations/presentation-generation-drafts');
+    const ids = roster.slice(0, 3).map(page => page.outlinePageId);
+    const first = { id: ids[0], speakerNotes: '手动编辑' };
+    const result = mergeContent({ slides: [first, { id: ids[2] }], sources: [] }, [
+        { id: ids[0], content: { slides: [{ id: ids[0], speakerNotes: '陈旧生成结果' }], sources: [] } },
+        { id: ids[1], content: { slides: [{ id: ids[1] }, { id: ids[1] + '_part_2' }], sources: [] } }
+    ], { roster: ids.map(id => ({ id })), pages: { [ids[0]]: [ids[0]], [ids[2]]: [ids[2]] } });
+    assert.deepEqual(result.content.slides.map(slide => slide.id), [ids[0], ids[1], ids[1] + '_part_2', ids[2]]);
+    assert.equal(result.content.slides[0].speakerNotes, first.speakerNotes);
+    assert.deepEqual(result.pages[ids[1]], [ids[1], ids[1] + '_part_2']);
+});

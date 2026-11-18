@@ -545,13 +545,13 @@ function repairAiPresentationProposal(proposal, options = {}) {
     return { ...proposal, slides, sources, warnings };
 }
 
-function parsePresentationProposal(content, { templateId = 'business-blue', template: suppliedTemplate, title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [], productionProfile } = {}) {
+function parsePresentationProposal(content, { templateId = 'business-blue', template: suppliedTemplate, title = '未命名演示文稿', aspectRatio = '16:9', language = 'zh-CN', sources = [], productionProfile, outlinePosition = 0 } = {}) {
     let proposal = parseAiJsonObject(content, 'AI 返回的演示文稿 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID');
     if (!Array.isArray(proposal.slides)) return proposal;
     const template = templateForAi({ templateId, template: suppliedTemplate });
     const allowedLayoutIds = new Set((template.layouts || []).map(layout => String(layout.id || '')).filter(Boolean));
     const fallbackLayoutId = preferredTemplateLayoutId(template, 'title-content');
-    proposal.slides = proposal.slides.map((slide, index) => ({ ...slide, layoutId: allowedLayoutIds.has(String(slide?.layoutId || '')) ? slide.layoutId : preferredTemplateLayoutId(template, index === 0 ? 'cover' : 'title-content', fallbackLayoutId) }));
+    proposal.slides = proposal.slides.map((slide, index) => ({ ...slide, layoutId: allowedLayoutIds.has(String(slide?.layoutId || '')) ? slide.layoutId : preferredTemplateLayoutId(template, index + outlinePosition === 0 ? 'cover' : 'title-content', fallbackLayoutId) }));
     proposal = repairAiPresentationProposal(proposal, { aspectRatio, sources });
     const contentObject = normalizePresentation({
         presentationId: 'proposal',

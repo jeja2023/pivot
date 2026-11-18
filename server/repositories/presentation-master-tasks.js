@@ -1,15 +1,38 @@
 'use strict';
 
-const { queryOne, execute, transaction } = require('../db/client');
+const { query, queryOne, execute, transaction } = require('../db/client');
 const TOOL = 'presentation.master';
 const json = value => value && typeof value === 'object' ? value : JSON.parse(value || '{}');
 
 async function read(user, id) {
-    const row = await queryOne('SELECT * FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=?', [id, user.id, TOOL]);
+    const row = await queryOne('SELECT *, updated_at::text AS review_revision FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=?', [id, user.id, TOOL]);
     return row ? { ...row, input_request: json(row.input_request), result_json: json(row.result_json) } : null;
 }
 async function latest(user, presentationId = '') {
     return queryOne("SELECT id FROM tool_tasks WHERE user_id=? AND tool_name=? AND COALESCE(result_json->'state'->'request'->>'presentationId',input_request->>'presentationId','')=? ORDER BY created_at DESC LIMIT 1", [user.id, TOOL, presentationId]);
+}
+async function recent(user) {
+    return query(`WITH latest AS (
+        SELECT id FROM tool_tasks WHERE user_id=? AND tool_name=? ORDER BY created_at DESC, id DESC LIMIT 20
+    )
+        SELECT id, status, created_at, (result_json->'savedReviewPages' IS NOT NULL) AS has_saved_review_pages,
+        (result_json->'progressSnapshots' IS NOT NULL) AS has_progress_snapshot,
+        COALESCE(result_json->'state'->'request',input_request)-'materials'-'instruction' AS request
+        FROM tool_tasks WHERE user_id=? AND tool_name=?
+          AND (id IN (SELECT id FROM latest) OR result_json->'savedReviewPages' IS NOT NULL OR result_json->'progressSnapshots' IS NOT NULL)
+        ORDER BY (result_json->'savedReviewPages' IS NOT NULL OR result_json->'progressSnapshots' IS NOT NULL) DESC, created_at DESC, id DESC`, [user.id, TOOL, user.id, TOOL]);
+}
+async function saveReviewPages(user, id, revision, snapshot, commit) {
+    return transaction(async client => {
+        const row = await client.queryOne(`SELECT updated_at::text AS review_revision, result_json->'savedReviewPages' AS saved
+            FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=? AND status IN ('failed','expired') FOR UPDATE`, [id, user.id, TOOL]);
+        if (!row || row.review_revision !== revision) return null;
+        if (row.saved?.exportRevision === snapshot.exportRevision && row.saved.sourceRevision === revision) return row.saved;
+        await commit(client, row.saved);
+        await client.execute(`UPDATE tool_tasks SET result_json=result_json||jsonb_build_object('savedReviewPages', ?::jsonb)
+            WHERE id=? AND user_id=? AND tool_name=?`, [JSON.stringify(snapshot), id, user.id, TOOL]);
+        return snapshot;
+    });
 }
 async function findActive(user) {
     return queryOne("SELECT id FROM tool_tasks WHERE user_id=? AND tool_name=? AND status IN ('working','input_required') AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1", [user.id, TOOL]);
@@ -20,6 +43,19 @@ async function withExecution(user, id, lease, commit) {
         if (!owned) throw Object.assign(new Error('制作任务已停止或执行租约已失效。'), { code: 'PPT_MASTER_LEASE_LOST', status: 409 });
         return commit(client);
     });
+}
+async function saveProgressSnapshot(user, id, lease, prepared, updateReferences) {
+    return withExecution(user, id, lease, async client => {
+        const row = await client.queryOne("SELECT result_json->'progressSnapshots' AS snapshots FROM tool_tasks WHERE id=?", [id]);
+        const before = row.snapshots || {}, after = { ...before, ...prepared };
+        await updateReferences(client, before, after);
+        await client.execute("UPDATE tool_tasks SET result_json=result_json||jsonb_build_object('progressSnapshots',?::jsonb) WHERE id=?", [JSON.stringify(after), id]);
+    });
+}
+async function updateProgressRetention(executor, objectId) {
+    return executor.execute(`UPDATE agent_artifact_objects
+        SET expires_at=CASE WHEN ref_count>0 THEN NULL ELSE NOW()+INTERVAL '24 hours' END
+        WHERE id=? AND kind='ppt_master_progress'`, [objectId]);
 }
 async function claim(user, id, leaseId) {
     return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object('_lease',?::text, '_leaseUntil', extract(epoch from NOW())+180),updated_at=NOW()
@@ -65,4 +101,4 @@ async function admit(user, create, excludedTaskId = '') {
     });
 }
 
-module.exports = { TOOL, read, latest, findActive, withExecution, claim, save, renew, release, parentActive, acceptResponse, resume, admit };
+module.exports = { TOOL, read, latest, recent, saveReviewPages, findActive, withExecution, saveProgressSnapshot, updateProgressRetention, claim, save, renew, release, parentActive, acceptResponse, resume, admit };

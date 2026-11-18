@@ -1,6 +1,7 @@
 (function () {
     if (window.Pivot?.moduleApi?.('apps.presentations')?.ready) return;
     const API = '/api/apps/presentations';
+    let generation;
     const state = {
         templates: [], documents: [], assets: [], pendingAssetType: '', fontFaceUrls: new Map(), coverUrls: new Map(), imageUrls: new Map(), dataSets: [], versions: [],
         libraryFilters: { search: '', tag: '', favorite: false, templateId: '', status: '', createdBy: '', updatedFrom: '', updatedTo: '' }, libraryFilterTimer: null,
@@ -242,7 +243,7 @@
             tdTitle.appendChild(wrap);
             const tdTpl = document.createElement('td'); const tplName = templateById(doc.template?.id)?.name || doc.template?.name || '自定义主题'; tdTpl.textContent = tplName; tdTpl.title = tplName;
             const tdVer = document.createElement('td'); tdVer.className = 'text-center'; tdVer.textContent = 'v' + (doc.version || 1);
-            const tdSt = document.createElement('td'); tdSt.className = 'text-center'; const pill = document.createElement('span'); const sk = doc.status || 'draft'; pill.className = 'presentation-status-pill ' + sk; pill.textContent = statusLabel(sk); tdSt.appendChild(pill);
+            const tdSt = document.createElement('td'); tdSt.className = 'text-center'; const pill = document.createElement('span'); const sk = doc.status || 'draft'; pill.className = 'presentation-status-pill ' + sk; pill.textContent = doc.generation?.pending.length ? `待补齐 ${doc.generation.pending.length} 页` : statusLabel(sk); tdSt.appendChild(pill);
             const tdRole = document.createElement('td'); tdRole.className = 'text-center'; const badge = document.createElement('span');
             if (doc.isOwner !== false) { badge.className = 'presentation-role-badge is-owner'; badge.textContent = '我创建的'; }
             else { badge.className = 'presentation-role-badge is-shared'; const rt = ({ editor: '可编辑', commenter: '可评论', viewer: '只读' }[doc.collaboratorRole] || '协作者'); badge.textContent = '共享 · ' + rt; badge.title = '共享文档（' + rt + '）'; }
@@ -333,13 +334,15 @@
         ensureThemeFonts().catch(() => { });
         renderSlideList(); renderStage(); renderProperties(); renderSpeakerNotes(); presenter()?.renderEvidence?.(state); renderTemplatePanel(); renderIssues(); updateUndoRedo();
         const editable = canEditActivePresentation(); const slideApproved = activeSlide()?.review?.status === 'approved';
+        const hasMissingPages = generation?.renderProgress();
         const admin = typeof isAdminUser === 'function' && isAdminUser();
         document.querySelector('[data-presentation-panel="metrics"]')?.classList.toggle('hidden', !admin);
         byId('presentation-title-input')?.toggleAttribute('readonly', !editable);
         byId('presentation-speaker-notes')?.toggleAttribute('disabled', !editable || slideApproved);
         ['presentation-add-slide-btn', 'presentation-duplicate-slide-btn', 'presentation-move-slide-up-btn', 'presentation-move-slide-down-btn', 'presentation-delete-slide-btn', 'presentation-undo-btn', 'presentation-redo-btn', 'presentation-layer-down-btn', 'presentation-layer-up-btn', 'presentation-delete-element-btn', 'presentation-copy-element-btn', 'presentation-paste-element-btn', 'presentation-group-elements-btn', 'presentation-ungroup-elements-btn', 'presentation-align-left-btn', 'presentation-align-center-btn', 'presentation-distribute-horizontal-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-table-remove-row-btn', 'presentation-table-add-column-btn', 'presentation-table-remove-column-btn', 'presentation-add-text-btn', 'presentation-add-shape-btn', 'presentation-add-table-btn', 'presentation-add-chart-btn', 'presentation-import-data-chart-btn', 'presentation-upload-image-btn', 'presentation-ai-rewrite-btn', 'presentation-ai-layout-variants-btn', 'presentation-ai-continue-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !editable || slideApproved));
         const canExport = state.active?.isOwner !== false || (typeof isAdminUser === 'function' && isAdminUser());
-        ['presentation-export-pptx-btn', 'presentation-export-pdf-btn', 'presentation-export-png-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !canExport));
+        ['presentation-export-pptx-btn', 'presentation-export-pdf-btn'].forEach(id => byId(id)?.toggleAttribute('disabled', !canExport || hasMissingPages));
+        byId('presentation-export-png-btn')?.toggleAttribute('disabled', !canExport);
         byId('presentation-remote-start-btn')?.toggleAttribute('disabled', !canExport);
         byId('presentation-remote-start-btn')?.classList.toggle('hidden', Boolean(state.remoteSession?.id));
         byId('presentation-remote-stop-btn')?.classList.toggle('hidden', !state.remoteSession?.id);
@@ -591,9 +594,11 @@
     }
     function closeCreateModal() { abortAiRequest(); byId('presentation-create-modal')?.classList.add('hidden'); }
     function cancelOutlineReview() {
+        const draft = state.pendingCreate?.draftId;
         abortAiRequest();
         state.pendingOutline = null; state.pendingOutlineConfirmations = new Set(); state.pendingCreate = null;
         byId('presentation-outline-modal')?.classList.add('hidden');
+        if (draft) void loadDocuments().catch(() => {});
     }
     function populateTemplateSelect(select, selected = '') {
         if (!select) return; window.Pivot.moduleApi('apps.presentations.catalog').populate(select, selected);
@@ -651,19 +656,7 @@
         let outline;
         try { outline = collectOutlineFromReview(); } catch (error) { toast(error.message || '大纲内容无效，请检查后再生成。', 'error'); return; }
         if (!state.pendingCreate) { toast('创建参数已失效，请重新生成大纲。', 'error'); return; }
-        const button = byId('presentation-outline-confirm-btn'); const controller = beginAiRequest();
-        button?.setAttribute('disabled', ''); if (button) button.textContent = '正在生成页面…';
-        try {
-            const request = { ...state.pendingCreate, outline, title: outline.title || state.pendingCreate.topic };
-            const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
-            const created = await requestJson(API, jsonOptions({ title: data.proposal.presentation.title, templateId: request.templateId, templateVersion: request.templateVersion, content: data.proposal.presentation, planApproval: { outline } }));
-            byId('presentation-outline-modal')?.classList.add('hidden'); await loadDocuments(); await openPresentation(created.presentation.id);
-            const warnings = Array.isArray(data.proposal?.warnings) ? data.proposal.warnings.filter(Boolean) : [];
-            toast(window.Pivot.moduleApi('apps.presentations.design').generationMessage(data.proposal), warnings.length ? 'warning' : 'success');
-        } catch (error) {
-            if (isAiAbort(error, controller)) { toast('AI 页面生成已取消。', 'warning'); return; }
-            throw error;
-        } finally { endAiRequest(controller); button?.removeAttribute('disabled'); if (button) button.textContent = '生成页面'; }
+        await generation.generateSlides(outline);
     }
     async function rewriteCurrentSlide() {
         const slide = activeSlide(); if (!slide || !state.active?.content) return;
@@ -898,6 +891,7 @@
             if (event.target.closest('#presentation-export-options-btn')) { exportOptionsApi.openExportOptions(state); return; } if (event.target.closest('#presentation-export-options-cancel-btn')) { byId('presentation-export-options-modal')?.classList.add('hidden'); return; } if (event.target.closest('#presentation-export-options-save-btn')) { exportOptionsApi.saveExportOptions(state, persistence.flush, toast).catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-export-pptx-btn')) { exportPresentation('pptx').catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-export-pdf-btn')) { exportPresentation('pdf').catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-export-png-btn')) { exportPresentation('png').catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-ai-rewrite-btn')) { rewriteCurrentSlide().catch(error => toast(error.message, 'error')); return; }
+            if (event.target.closest('#presentation-fill-missing-btn')) { generation.fillMissingPages().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-ai-continue-btn')) { continuePresentation().catch(error => toast(error.message, 'error')); return; } if (event.target.closest('#presentation-ai-layout-variants-btn')) { presenter()?.generateLayoutVariants?.(state, { renderEditor, toast }); return; }
             if (event.target.closest('#presentation-ai-validate-btn')) { runAiContentValidation().catch(error => toast(error.message, 'error')); return; }
             if (event.target.closest('#presentation-visual-review-btn')) { runVisualReview().catch(error => toast(error.message, 'error')); return; }
@@ -948,7 +942,11 @@
         const load = async list => { for (const name of list) await window.Pivot.loadScriptOnce(`/chat/${name}.js`); };
         await load(['apps-workbench-presentation-goals', 'presentation-colors', 'apps-workbench-presentation-canvas', 'presentation-template-preview', 'presentation-graphics', 'presentation-geometry']);
         await window.Pivot.presentationGeometry.loadDefaultCatalog();
-        await load(['apps-workbench-presentation-storyline', 'apps-workbench-presentation-studio', 'apps-workbench-presentation-master']);
+        await load(['apps-workbench-presentation-storyline', 'apps-workbench-presentation-studio', 'apps-workbench-presentation-master', 'apps-workbench-presentations-generation']);
+        generation ||= window.Pivot.moduleApi('apps.presentations.generation').create(state, {
+            requestJson, beginAiRequest, endAiRequest, aiJsonOptions, isAiAbort, loadDocuments, openPresentation,
+            flush: persistence.flush, requireModel: requirePresentationAiModel, toast
+        });
         window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson, openCreateModal, toast });
         await load(['presentation-native-geometry', 'apps-workbench-presentation-native-properties', 'apps-workbench-presentation-native']);
         window.Pivot.moduleApi('apps.presentations.native').bind(state, { requestJson });

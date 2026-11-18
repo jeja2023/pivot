@@ -17,7 +17,7 @@ function buildWikiTopicPlan(sources = [], maxTopics = 10, signals = {}) {
     const tagsByDocument = signals.tagsByDocument || new Map();
     const entitiesByDocument = signals.entitiesByDocument || new Map();
     const historicalTopics = Array.isArray(signals.historicalTopics) ? signals.historicalTopics : [];
-    const append = (label, source, origin) => {
+    const addTopic = (label, source, origin) => {
         const normalized = normalizeText(label, 160);
         const key = normalized.toLowerCase();
         if (!normalized || seen.has(key) || topics.length >= maxTopics) return;
@@ -25,11 +25,11 @@ function buildWikiTopicPlan(sources = [], maxTopics = 10, signals = {}) {
         topics.push({ label: normalized, documentTitle: source?.documentTitle || '', sourceId: source?.sourceId || '', origin });
     };
     for (const source of sources) {
-        append(source.headingPath || source.documentTitle || '综合概览', source, 'heading');
-        (tagsByDocument.get(Number(source.documentId)) || []).forEach(tag => append(tag, source, 'tag'));
-        (entitiesByDocument.get(Number(source.documentId)) || []).forEach(entity => append(entity, source, 'entity'));
+        addTopic(source.headingPath || source.documentTitle || '综合概览', source, 'heading');
+        (tagsByDocument.get(Number(source.documentId)) || []).forEach(tag => addTopic(tag, source, 'tag'));
+        (entitiesByDocument.get(Number(source.documentId)) || []).forEach(entity => addTopic(entity, source, 'entity'));
     }
-    historicalTopics.forEach(topic => append(topic, null, 'history'));
+    historicalTopics.forEach(topic => addTopic(topic, null, 'history'));
     return topics;
 }
 

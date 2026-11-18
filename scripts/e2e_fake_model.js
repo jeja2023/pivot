@@ -3,6 +3,7 @@ const http = require('http');
 
 const port = Number.parseInt(process.env.E2E_FAKE_MODEL_PORT || '0', 10);
 const logPath = String(process.env.E2E_FAKE_MODEL_LOG || '').trim();
+const recoveryModel = require('./test_support/ppt_recovery_model');
 function log(message) {
     if (logPath) fs.appendFileSync(logPath, `${new Date().toISOString()} ${message}\n`);
 }
@@ -46,6 +47,13 @@ const server = http.createServer((req, res) => {
             let content = '真实 E2E 回答';
             if (payload.model === 'policy-review-e2e') content = JSON.stringify(require('./test_support/policy_review_model').response(payload.messages || []));
             if (payload.model === 'ppt-master-e2e') content = JSON.stringify(require('./test_support/ppt_master_model').pptMasterModelTurn(payload.messages || []));
+            if (['ppt-master-recovery-e2e', 'ppt-master-recovery-finish-e2e'].includes(payload.model)) {
+                content = JSON.stringify(recoveryModel.master(payload.messages || [], payload.model.endsWith('-finish-e2e')));
+            }
+            if (payload.model === 'ppt-master-citations-e2e') content = JSON.stringify(recoveryModel.master(payload.messages || [], false, true));
+            if (payload.model === 'ppt-standard-recovery-fail-e2e' || payload.model === 'ppt-standard-recovery-finish-e2e') {
+                content = JSON.stringify(recoveryModel.standard(payload.messages || [], payload.model.endsWith('-fail-e2e')));
+            }
             if (payload.model === 'ppt-storyline-e2e-slow') content = JSON.stringify(require('./test_support/ppt_storyline_model').turn(payload.messages || []));
             if (payload.model === 'ppt-e2e-vision-slow') content = JSON.stringify({ issues: [] });
             if (JSON.stringify(payload.messages || []).includes('E2E_KNOWLEDGE_刑事案件') && payload.messages?.some(message => String(message.content || '').includes('知识库证据蕴含核验器'))) {

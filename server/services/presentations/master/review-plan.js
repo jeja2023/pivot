@@ -2,12 +2,16 @@
 
 const { createHash } = require('node:crypto');
 const { error } = require('./runtime');
+const { getSupplement } = require('./user-supplements');
 
 const digest = value => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const checklistError = message => error(message, 'PPT_MASTER_CHECKLIST_REQUIRED', 409);
 const labels = { direction: '沟通方向', design: '最终页面与关键数据清单', template: '模板制作方案' };
 const compact = value => value.normalize('NFKC').replace(/\s+/gu, '');
+const citationKey = ({ text, chart }) => digest([compact(text), ...(chart ? [compact(chart.series), compact(chart.category), chart.number] : [])]);
+const sourceLabel = path => path === 'instruction' ? '制作要求' : path.startsWith('user-supplement:') ? '用户补充 ' + path.split(':')[1] : path;
+const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const sourcePath = /^inputs\/[A-Za-z0-9][A-Za-z0-9_.-]*\.md$/;
 const projectPath = /^(?!inputs(?:\/|$)|delivery(?:\/|$))[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*(?:\/[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*)*$/u;
 
@@ -72,13 +76,8 @@ async function normalizeStage(input, state, verifySource) {
     if (state.request.operation === 'generate' && ['default', 'quick', 'image_to_pptx'].includes(state.request.profile) && pages.length !== expected) {
         throw invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`);
     }
-    for (const position of state.citationRepairRequired || []) {
-        const [page, item] = position.split(':').map(Number);
-        if (!pages[page]?.values?.[item]?.source) {
-            throw Object.assign(invalid(`修正清单时，第 ${page + 1} 页第 ${item + 1} 项须保留可核对的引用。如缺少必要事实，请提交补充问题。`), { citationIssues: state.citationRepair });
-        }
-    }
-    const normalized = [], sources = new Map(), citationIssues = [], requiredCitations = [];
+    const normalized = [], sources = new Map(), failures = new Map(), seen = new Set();
+    const requiredFacts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
     let totalValues = 0;
     for (const [pageIndex, page] of pages.entries()) {
         const title = valueText(page?.title, 180, '页面标题');
@@ -100,49 +99,60 @@ async function normalizeStage(input, state, verifySource) {
                 }
                 value.chart = { series, category, number };
             }
-            if (entry.source === undefined) { values.push(value); continue; }
+            const key = citationKey(value);
+            seen.add(key);
+            const previous = requiredFacts.get(key);
+            const fact = { key, text, title, page: pageIndex + 1, item: valueIndex + 1 };
+            if (entry.source === undefined) {
+                if (previous) failures.set(key, { ...previous, ...fact, reason: '仍需为该数据项提供可核对的引用。' });
+                else values.push(value);
+                continue;
+            }
             const path = valueText(entry.source?.path, 140, '关键数据来源');
             const quote = valueText(entry.source?.quote, 350, '关键数据引文');
-            if (path !== 'instruction' && (!sourcePath.test(path) || !state.request.inputFiles?.some(file => file.path === path && file.kind === 'text'))) {
-                throw invalid('关键数据引文须引用当前任务的文本材料或制作要求。');
+            const supplement = getSupplement(state, path);
+            if (path !== 'instruction' && !supplement && (!sourcePath.test(path) || !state.request.inputFiles?.some(file => file.path === path && file.kind === 'text'))) {
+                throw invalid('关键数据引文须引用当前任务的文本材料、制作要求或已登记的用户补充。');
             }
             if (!sources.has(path)) {
-                const raw = await verifySource(path);
+                const raw = supplement?.text ?? await verifySource(path);
                 sources.set(path, { raw, normalized: compact(raw) });
             }
             const source = sources.get(path);
-            const location = `第 ${pageIndex + 1} 页第 ${valueIndex + 1} 项（${path === 'instruction' ? '制作要求' : path}）`;
             const normalizedQuote = compact(quote);
             const quoteFound = source.normalized.includes(normalizedQuote);
             if (!quoteFound || !normalizedQuote.includes(compact(text))) {
-                requiredCitations.push(`${pageIndex}:${valueIndex}`);
-                if (citationIssues.length < 4) {
-                    const reason = quoteFound ? '关键数据未完整出现在引文中，请核对数字、单位及原文范围。'
-                        : '关键数据引文与材料原文不一致，请重新查阅该来源并引用连续原文。';
-                    const excerpt = citationExcerpt(source.raw, quoteFound ? quote : text);
-                    citationIssues.push({ location, path, reason, ...(excerpt ? { excerpt } : {}) });
-                }
+                const reason = quoteFound ? '关键数据未完整出现在引文中，请核对数字、单位及原文范围。'
+                    : '关键数据引文与材料原文不一致，请重新查阅该来源并引用连续原文。';
+                const excerpt = citationExcerpt(source.raw, quoteFound ? quote : text);
+                failures.set(key, { ...fact, path, reason, ...(excerpt ? { excerpt } : {}) });
                 continue;
             }
             values.push({ ...value, source: { path, quote } });
         }
         normalized.push({ title, values });
     }
-    if (citationIssues.length) {
+    for (const [key, fact] of requiredFacts) {
+        if (!fact.allowOmit && !seen.has(key)) failures.set(key, { ...fact, reason: '之前待核对的数据项仍需保留，或由用户说明如何调整。' });
+    }
+    if (failures.size) {
+        const citationFacts = [...failures.values()];
+        const citationIssues = citationFacts.slice(0, 4).map(({ page, item, path, title, text, reason, excerpt }) => ({
+            location: `第 ${page} 页第 ${item} 项（${sourceLabel(path)}）`, title, text, path, reason, ...(excerpt ? { excerpt } : {})
+        }));
         const detail = citationIssues.map(({ location, reason }) => `${location}的${reason}`).join('');
-        const remaining = requiredCitations.length - citationIssues.length;
-        throw Object.assign(invalid(detail + (remaining ? `另有 ${remaining} 项引用待核对。` : '')), { citationIssues, requiredCitations });
+        const remaining = failures.size - citationIssues.length;
+        throw Object.assign(invalid(detail + (remaining ? `另有 ${remaining} 项引用待核对。` : '')), { citationIssues, citationFacts });
     }
     return { stage, plan: { summary, project, pages: normalized } };
 }
 
-function applyReviewDecision(state, pending, approved) {
+function reopenReview(state, stage = requiredStages(state.request).at(-1)) {
+    if (!state.review) return;
     const approvals = state.review.approvals;
     const required = requiredStages(state.request);
-    const stageIndex = required.indexOf(pending.stage);
-    if (stageIndex < 0 || !pending.plan) return false;
-    const postingDigest = digest(pending.plan), previous = approvals[pending.stage];
-    if (approved && previous?.digest === postingDigest) return false;
+    const stageIndex = required.indexOf(stage);
+    if (stageIndex < 0) return;
     for (const stage of required.slice(stageIndex)) delete approvals[stage];
     delete state.deliveryReceipt;
     delete state.deliveryReview;
@@ -150,6 +160,15 @@ function applyReviewDecision(state, pending, approved) {
     delete state.pageReview;
     delete state.pageSources;
     delete state.pageRepair;
+    state.confirmedGates = Object.keys(approvals).length;
+}
+
+function applyReviewDecision(state, pending, approved) {
+    const approvals = state.review.approvals;
+    if (!requiredStages(state.request).includes(pending.stage) || !pending.plan) return false;
+    const postingDigest = digest(pending.plan), previous = approvals[pending.stage];
+    if (approved && previous?.digest === postingDigest) return false;
+    reopenReview(state, pending.stage);
     if (approved) approvals[pending.stage] = { promptId: pending.promptId, digest: postingDigest, plan: pending.plan };
     state.confirmedGates = Object.keys(approvals).length;
     return true;
@@ -228,6 +247,9 @@ function reviewRecoveryGuidance(state, code, message) {
     if (code === 'PPT_MASTER_ACTION_INVALID' && reason) {
         return '\n上次无效回复未执行。失败原因：' + reason + '\n按提示核对相关字段和当前材料后，仅修正存在问题的部分。';
     }
+    if (code === CITATION_REVIEW_REQUIRED) {
+        return '\n上次停在清单引文核对。结合用户补充的原文修正数据项，或按明确的修改要求重提清单。';
+    }
     if (code === 'PPT_MASTER_NO_PROGRESS') {
         return '\n上一轮已因反复读取或检查暂停。复用已有文件和回执，读取确实未读的范围，或推进当前阶段的确认、写入、导出。缺少必要事实时提交具体问题。';
     }
@@ -242,4 +264,14 @@ function reviewRecoveryGuidance(state, code, message) {
         + '\n完整标题及文字型关键数据各放在单个可回读的文本对象中，可在同一对象内换行。';
 }
 
-module.exports = { initializeReview, normalizeStage, applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };
+function resetCitationRepair(state, { allowRevision = false } = {}) {
+    delete state.citationRepairAttempts;
+    delete state.citationRepairRequired;
+    delete state.citationPause;
+    if (allowRevision) {
+        state.citationFacts = state.citationFacts?.map(fact => ({ ...fact, allowOmit: true }));
+        delete state.citationRepair;
+    }
+}
+
+module.exports = { initializeReview, normalizeStage, applyReviewDecision, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, CITATION_REVIEW_REQUIRED, labels };

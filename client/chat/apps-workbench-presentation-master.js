@@ -1,7 +1,8 @@
 (function () {
     'use strict';
     const API = '/api/apps/presentations/master';
-    let bound = false, state, helpers, epoch = 0, selectedTemplate = null, preparation = null, returnFocus = null, processReturnFocus = null, usageReturnFocus = null, currentUsageDiagnostics = [];
+    let bound = false, state, helpers, epoch = 0, selectedTemplate = null, preparation = null, returnFocus = null, processReturnFocus = null;
+    let historySession = null;
     const byId = id => document.getElementById(id);
     const actorId = () => String(window.Pivot.legacy?.currentUser?.id || '');
     const presentationId = () => String(state.active?.id || '');
@@ -12,7 +13,8 @@
     }
     function isProcessCurrent(sequence) {
         const processModal = byId('presentation-master-process-modal');
-        return isCurrent(sequence) && processModal && !processModal.classList.contains('hidden');
+        return sequence === epoch && processModal && !processModal.classList.contains('hidden')
+            && processModal.dataset.owner === actorId() && processModal.dataset.presentationId === presentationId();
     }
     function node(tag, className = '', value = '') { const item = document.createElement(tag); if (className) item.className = className; if (value) item.textContent = value; return item; }
     function svgIcon(paths, size = 16) {
@@ -35,27 +37,11 @@
         else modal.removeAttribute('aria-hidden');
         if ('inert' in modal) modal.inert = Boolean(inactive);
     }
-    function setProcessModalInert(inactive) {
-        const processModal = byId('presentation-master-process-modal');
-        if (!processModal) return;
-        if (inactive) processModal.setAttribute('aria-hidden', 'true');
-        else processModal.removeAttribute('aria-hidden');
-        if ('inert' in processModal) processModal.inert = Boolean(inactive);
-    }
-    function closeUsageModal({ restoreFocus = true } = {}) {
-        const usageModal = byId('presentation-master-usage-modal');
-        const list = byId('presentation-master-usage-list');
-        if (list) list.replaceChildren();
-        setProcessModalInert(false);
-        if (usageModal && !usageModal.classList.contains('hidden')) usageModal.classList.add('hidden');
-        const focus = usageReturnFocus; usageReturnFocus = null;
-        if (restoreFocus && focus?.isConnected) focus.focus();
-    }
     function closeProcessModal({ restoreFocus = true, resetEpoch = true } = {}) {
         if (resetEpoch) ++epoch;
+        historySession = null;
         preparation?.abort(); preparation = null;
-        currentUsageDiagnostics = [];
-        closeUsageModal({ restoreFocus: false });
+        window.Pivot.moduleApi('apps.presentations.masterPageReview')?.closeUsageModal?.({ restoreFocus: false });
         const processModal = byId('presentation-master-process-modal');
         const panel = byId('presentation-master-status');
         if (panel) {
@@ -78,18 +64,24 @@
         const focus = processReturnFocus; processReturnFocus = null;
         if (restoreFocus && focus?.isConnected) focus.focus();
     }
+    function exitProcessView() {
+        if (historySession?.detail && isProcessCurrent(epoch)) {
+            void showHistory();
+            return;
+        }
+        closeProcessModal();
+    }
     function closeModal({ preserveForm = false } = {}) {
         ++epoch;
         closeProcessModal({ restoreFocus: false, resetEpoch: false });
         const modal = byId('presentation-master-modal');
         const processModal = byId('presentation-master-process-modal');
-        const usageModal = byId('presentation-master-usage-modal');
         if (preserveForm) {
             modal?.classList.add('hidden');
             const formError = byId('presentation-master-form-error');
             if (formError) formError.textContent = '';
         } else {
-            usageModal?.remove();
+            window.Pivot.moduleApi('apps.presentations.masterPageReview')?.removeUsageModal?.();
             processModal?.remove();
             modal?.remove();
             selectedTemplate = null;
@@ -213,11 +205,7 @@
             const processModal = byId('presentation-master-process-modal');
             if (processModal && !processModal.classList.contains('hidden')) return;
             if (event.key === 'Escape') { event.preventDefault(); closeModal(); }
-            if (event.key !== 'Tab') return;
-            const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            window.Pivot.moduleApi('apps.presentations.masterPageReview')?.trapDialogFocus?.(dialog, event);
         });
         byId('presentation-master-operation').addEventListener('change', event => {
             const profile = byId('presentation-master-profile'); profile.disabled = event.target.value !== 'generate'; if (profile.disabled) profile.value = 'default';
@@ -245,7 +233,7 @@
         const headerSubtitle = node('p', 'presentation-master-header-subtitle', '实时展示模型预检、材料读取、分阶段确认与产物交付');
         headerInfo.append(headerTitleRow, headerSubtitle);
         const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
-        closeBtn.addEventListener('click', () => closeProcessModal());
+        closeBtn.addEventListener('click', exitProcessView);
         header.append(headerInfo, closeBtn);
 
         const body = node('div', 'workspace-modal-body presentation-master-process-body');
@@ -255,93 +243,47 @@
 
         const footer = node('footer', 'presentation-master-footer presentation-master-process-footer');
         const footerHint = node('div', 'presentation-master-footer-hint');
+        const processHintText = node('p', 'presentation-master-hint', '点击右上角「关闭」或按 Esc 返回配置页面，后台任务将继续运行；如需取消请点击「停止制作」。');
+        processHintText.id = 'presentation-master-process-hint';
         footerHint.append(
             svgIcon([['circle', { cx: '12', cy: '12', r: '10' }], ['line', { x1: '12', y1: '16', x2: '12', y2: '12' }], ['line', { x1: '12', y1: '8', x2: '12.01', y2: '8' }]], 15),
-            node('p', 'presentation-master-hint', '点击右上角「关闭」或按 Esc 返回配置页面，后台任务将继续运行；如需取消请点击「停止制作」。')
+            processHintText
         );
         footer.appendChild(footerHint);
 
         dialog.append(header, body, footer); processModal.appendChild(dialog); document.body.appendChild(processModal);
-        processModal.addEventListener('click', event => { if (event.target === processModal) closeProcessModal(); });
+        processModal.addEventListener('click', event => { if (event.target === processModal) exitProcessView(); });
         processModal.addEventListener('keydown', event => {
             const usageModal = byId('presentation-master-usage-modal');
             if (usageModal && !usageModal.classList.contains('hidden')) return;
-            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeProcessModal(); return; }
-            if (event.key !== 'Tab') return;
-            const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); exitProcessView(); return; }
+            window.Pivot.moduleApi('apps.presentations.masterPageReview')?.trapDialogFocus?.(dialog, event);
         });
         return processModal;
-    }
-    function ensureUsageModal() {
-        if (byId('presentation-master-usage-modal')) return byId('presentation-master-usage-modal');
-        const usageModal = node('div', 'modal-overlay presentation-master-usage-overlay hidden');
-        usageModal.id = 'presentation-master-usage-modal';
-        const dialog = node('section', 'workspace-modal presentation-master-usage-dialog');
-        dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', '每轮模型用量明细');
-
-        const header = node('header', 'workspace-modal-header presentation-master-header');
-        const headerInfo = node('div', 'presentation-master-header-info');
-        const headerTitleRow = node('div', 'presentation-master-header-title-row');
-        const headerIcon = node('span', 'presentation-master-header-icon');
-        headerIcon.appendChild(svgIcon([['line', { x1: '18', y1: '20', x2: '18', y2: '10' }], ['line', { x1: '12', y1: '20', x2: '12', y2: '4' }], ['line', { x1: '6', y1: '20', x2: '6', y2: '14' }]], 16));
-        headerTitleRow.append(headerIcon, node('h3', '', '每轮模型用量明细'));
-        headerInfo.append(headerTitleRow, node('p', 'presentation-master-header-subtitle', '按模型调用轮次展示输入、输出、累计令牌与上下文收敛详情'));
-        const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
-        closeBtn.addEventListener('click', () => closeUsageModal());
-        header.append(headerInfo, closeBtn);
-
-        const body = node('div', 'workspace-modal-body presentation-master-usage-body');
-        const list = node('ol', 'presentation-master-usage-list'); list.id = 'presentation-master-usage-list';
-        body.appendChild(list);
-
-        dialog.append(header, body); usageModal.appendChild(dialog); document.body.appendChild(usageModal);
-        usageModal.addEventListener('click', event => { if (event.target === usageModal) closeUsageModal(); });
-        usageModal.addEventListener('keydown', event => {
-            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeUsageModal(); return; }
-            if (event.key !== 'Tab') return;
-            const controls = [...dialog.querySelectorAll('button,input,select,textarea,summary')].filter(element => !element.disabled && element.getClientRects().length);
-            const first = controls[0], last = controls.at(-1);
-            if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
-            else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
-        });
-        return usageModal;
-    }
-    function renderUsageList() {
-        const list = byId('presentation-master-usage-list');
-        if (!list) return;
-        list.replaceChildren();
-        for (const item of currentUsageDiagnostics) {
-            const row = node('li', 'presentation-master-usage-item');
-            const top = node('div', 'presentation-master-usage-item-head');
-            top.append(
-                node('span', 'presentation-master-usage-step', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）`),
-                node('span', 'presentation-master-usage-metrics', `输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}`)
-            );
-            const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
-            const detail = node('p', 'presentation-master-usage-detail', `预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`);
-            row.append(top, detail);
-            list.appendChild(row);
-        }
-    }
-    function openUsageModal(trigger = null) {
-        const usageModal = ensureUsageModal();
-        if (usageModal.classList.contains('hidden')) usageReturnFocus = trigger || document.activeElement;
-        renderUsageList();
-        setProcessModalInert(true);
-        usageModal.classList.remove('hidden');
-        usageModal.querySelector('.workspace-modal-close')?.focus();
     }
     function openProcessModal({ trigger = null, initialMessage = '' } = {}) {
         const processModal = ensureProcessModal();
         if (processModal.classList.contains('hidden')) processReturnFocus = trigger || document.activeElement;
+        processModal.dataset.owner = actorId();
+        processModal.dataset.presentationId = presentationId();
         setFormModalInert(true);
         processModal.classList.remove('hidden');
         const panel = byId('presentation-master-status');
-        if (panel && initialMessage) panel.replaceChildren(node('p', 'presentation-master-task-message', initialMessage));
+        if (initialMessage) panel.replaceChildren(node('p', 'presentation-master-task-message', initialMessage));
+        panel.closest('.workspace-modal-body').scrollTop = 0;
+        updateProcessHeader();
         processModal.querySelector('.workspace-modal-close')?.focus();
+    }
+    function updateProcessHeader() {
+        const processModal = byId('presentation-master-process-modal'), dialog = processModal.querySelector('[role="dialog"]');
+        const list = historySession && !historySession.detail;
+        const title = list ? '完整制作记录' : '完整制作过程';
+        dialog.setAttribute('aria-label', title);
+        dialog.querySelector('h3').textContent = title;
+        dialog.querySelector('.presentation-master-header-subtitle').hidden = Boolean(list);
+        byId('presentation-master-process-hint').textContent = list ? '选择一条记录查看任务详情。'
+            : historySession ? '点击「关闭」或按 Esc 返回完整制作记录。后台任务会继续运行。'
+                : '点击「关闭」或按 Esc 返回配置页面。后台任务会继续运行，如需取消请点击「停止制作」。';
     }
     function errorText(error) { const message = String(error?.message || ''); return /[\u3400-\u9fff]/u.test(message) ? message : '处理未完成，请检查文件、网络或服务连接后重试。'; }
     function clearFormError() {
@@ -355,7 +297,7 @@
         formError.scrollIntoView?.({ block: 'nearest' });
     }
     function showError(error, sequence) {
-        if (!isCurrent(sequence) || error.name === 'AbortError') return;
+        if ((!isCurrent(sequence) && !isProcessCurrent(sequence)) || error.name === 'AbortError') return;
         const text = errorText(error);
         const processModal = byId('presentation-master-process-modal');
         if (processModal && !processModal.classList.contains('hidden')) {
@@ -444,6 +386,59 @@
             }
         } catch (error) { showError(error, sequence); }
         finally { if (isCurrent(sequence)) { byId('presentation-master-history').disabled = false; byId('presentation-master-active').disabled = false; } }
+    }
+
+    async function openHistory(trigger) {
+        if (byId('presentation-master-modal') && isCurrent(epoch)) closeModal();
+        const sequence = ++epoch, actor = actorId(), target = presentationId();
+        try {
+            await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-page-review.js');
+            if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
+            closeProcessModal({ restoreFocus: false, resetEpoch: false });
+            historySession = { detail: false, tasks: null, selectedId: '', scrollTop: 0 };
+            openProcessModal({ trigger, initialMessage: '正在读取完整制作记录…' });
+            await showHistory();
+        } catch (error) {
+            if (sequence === epoch && actor === actorId() && target === presentationId()) helpers.toast(errorText(error), 'error');
+        }
+    }
+
+    async function showHistory() {
+        const sequence = ++epoch, history = historySession, panel = byId('presentation-master-status');
+        const body = panel.closest('.workspace-modal-body'), close = body.parentElement.querySelector('.workspace-modal-close');
+        history.detail = false;
+        delete panel.dataset.taskId;
+        updateProcessHeader();
+        close.focus();
+        const render = (tasks, restoreRow) => {
+            window.Pivot.moduleApi('apps.presentations.masterPageReview').mountHistory(panel, tasks, node, id => {
+                if (!isProcessCurrent(sequence)) return;
+                history.detail = true;
+                history.selectedId = id;
+                history.scrollTop = body.scrollTop;
+                const detailSequence = ++epoch;
+                openProcessModal({ initialMessage: '正在读取任务详情…' });
+                void poll(id, detailSequence).catch(error => showError(error, detailSequence));
+            });
+            body.scrollTop = history.scrollTop;
+            if (restoreRow) {
+                const selected = [...panel.querySelectorAll('[data-history-task-id]')].find(button => button.dataset.historyTaskId === history.selectedId);
+                (selected || close).focus({ preventScroll: true });
+            }
+        };
+        try {
+            if (history.tasks) render(history.tasks, true);
+            const { tasks } = await helpers.requestJson(API + '/tasks/recent');
+            if (!isProcessCurrent(sequence)) return;
+            const focusedId = document.activeElement?.dataset.historyTaskId;
+            if (focusedId) history.selectedId = focusedId;
+            history.scrollTop = body.scrollTop;
+            history.tasks = tasks;
+            render(tasks, Boolean(focusedId));
+        } catch (error) {
+            if (!isProcessCurrent(sequence)) return;
+            if (!history.tasks) showError(error, sequence);
+        }
     }
 
     async function loadTask(button, route, showAccountTask = false) {
@@ -613,25 +608,12 @@
             });
             panel.appendChild(node('p', 'presentation-master-task-summary', milestones.join('，') + '。'));
         }
-        const modal = byId('presentation-master-modal');
-        if ((value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
+        const modal = historySession ? null : byId('presentation-master-modal');
+        if (modal && (value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
             const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);
             modal.dataset.modelTask = String(value.id);
         }
-        currentUsageDiagnostics = Array.isArray(value.usageDiagnostics) ? value.usageDiagnostics : [];
-        if (currentUsageDiagnostics.length) {
-            const usageBar = node('div', 'presentation-master-usage-bar');
-            const usageBtn = node('button', 'btn-secondary presentation-master-usage-btn');
-            usageBtn.type = 'button'; usageBtn.id = 'presentation-master-usage-btn';
-            const chartIcon = svgIcon([['line', { x1: '18', y1: '20', x2: '18', y2: '10' }], ['line', { x1: '12', y1: '20', x2: '12', y2: '4' }], ['line', { x1: '6', y1: '20', x2: '6', y2: '14' }]], 13);
-            chartIcon.setAttribute('aria-hidden', 'true');
-            usageBtn.append(chartIcon, node('span', '', `查看每轮模型用量（共 ${currentUsageDiagnostics.length} 轮）`));
-            usageBtn.addEventListener('click', () => openUsageModal(usageBtn));
-            usageBar.appendChild(usageBtn);
-            panel.appendChild(usageBar);
-            const usageModal = byId('presentation-master-usage-modal');
-            if (usageModal && !usageModal.classList.contains('hidden')) renderUsageList();
-        }
+        window.Pivot.moduleApi('apps.presentations.masterPageReview')?.mountUsageButton?.(panel, value.usageDiagnostics);
         if (['working', 'input_required'].includes(value.status)) {
             const cancel = node('button', 'btn-danger-outline presentation-master-stop-btn'); cancel.type = 'button';
             const stopIcon = svgIcon([['rect', { x: '6', y: '6', width: '12', height: '12', rx: '2' }]], 12);
@@ -671,7 +653,10 @@
                         const chart = fact.chart ? `（图表 ${fact.chart.series} / ${fact.chart.category} 为 ${fact.chart.number}）` : '';
                         const factLi = node('li', 'presentation-master-plan-fact');
                         factLi.append(node('span', 'presentation-master-plan-fact-text', fact.text + chart));
-                        if (fact.source) factLi.append(node('span', 'presentation-master-plan-source', `（${fact.source.path === 'instruction' ? '制作要求' : fact.source.path}，引文 ${fact.source.quote}）`));
+                        if (fact.source) {
+                            const source = window.Pivot.moduleApi('apps.presentations.masterPageReview').citationSourceName(fact.source.path);
+                            factLi.append(node('span', 'presentation-master-plan-source', `（${source}，引文 ${fact.source.quote}）`));
+                        }
                         facts.appendChild(factLi);
                     }
                     if (facts.children.length) item.appendChild(facts);
@@ -736,7 +721,7 @@
             budgetWrap.appendChild(node('span', 'modal-form-label', '续跑累计预算（令牌，0 为不限）'));
             const resumeBudget = node('input', 'form-input'); resumeBudget.type = 'number'; resumeBudget.id = 'presentation-master-resume-budget';
             resumeBudget.min = '0'; resumeBudget.step = '1'; resumeBudget.placeholder = '留空沿用原预算，0 改为不限';
-            const formBudget = byId('presentation-master-budget');
+            const formBudget = modal && byId('presentation-master-budget');
             resumeBudget.value = formBudget?.value || '';
             resumeBudget.addEventListener('input', () => { if (formBudget) formBudget.value = resumeBudget.value; });
             budgetWrap.appendChild(resumeBudget);
@@ -745,7 +730,7 @@
             stepsWrap.appendChild(node('span', 'modal-form-label', '执行轮次上限（5至160）'));
             const resumeSteps = node('input', 'form-input'); resumeSteps.type = 'number'; resumeSteps.id = 'presentation-master-resume-steps';
             resumeSteps.min = '5'; resumeSteps.max = '160'; resumeSteps.step = '1';
-            const formSteps = byId('presentation-master-steps');
+            const formSteps = modal && byId('presentation-master-steps');
             resumeSteps.value = formSteps?.value || String(value.request?.maxSteps || 80);
             resumeSteps.addEventListener('input', () => { if (formSteps) formSteps.value = resumeSteps.value; });
             stepsWrap.appendChild(resumeSteps);
@@ -753,7 +738,7 @@
             const modelWrap = node('label', 'modal-form-field');
             modelWrap.appendChild(node('span', 'modal-form-label', '制作模型'));
             const resumeModel = node('select', 'form-input'); resumeModel.id = 'presentation-master-resume-model';
-            const formModel = byId('presentation-master-model');
+            const formModel = modal && byId('presentation-master-model');
             if (formModel) {
                 for (const option of formModel.options) resumeModel.appendChild(option.cloneNode(true));
                 resumeModel.value = formModel.value;
@@ -765,10 +750,25 @@
 
             const resumeActions = node('div', 'presentation-master-task-actions presentation-master-resume-actions');
             const resume = node('button', 'btn-primary presentation-master-resume-btn'); resume.type = 'button';
-            const readRepair = window.Pivot.moduleApi('apps.presentations.masterPageReview').mount(resumePanel, value, node);
+            const review = window.Pivot.moduleApi('apps.presentations.masterPageReview');
+            const readRepair = review.mount(resumePanel, value, node);
+            const readNote = !readRepair && review.mountResumeNote(resumePanel, value, node);
             const playIcon = svgIcon([['polygon', { points: '6 4 20 12 6 20 6 4' }]], 13);
             playIcon.setAttribute('aria-hidden', 'true');
             resume.append(playIcon, node('span', '', readRepair ? '仅修复所选页面' : '从检查点继续'));
+            if (historySession) {
+                const original = String(value.request?.modelId || '');
+                resumeModel.appendChild(new Option(original ? '沿用原制作模型' : '正在加载可用模型…', original));
+                resume.disabled = !original;
+                const sequence = epoch;
+                void window.Pivot?.legacy?.PivotAppModels?.refresh?.('presentations', resumeModel, {
+                    isCurrent: () => isProcessCurrent(sequence) && resumeModel.isConnected
+                }).then(() => {
+                    if (!isProcessCurrent(sequence) || !resumeModel.isConnected) return;
+                    if (original && !resumeModel.value) resumeModel.appendChild(new Option('沿用原制作模型', original, true, true));
+                    resume.disabled = !resumeModel.value;
+                });
+            }
             resume.addEventListener('click', async () => { const sequence = ++epoch; resume.disabled = true; feedback.textContent = ''; try {
                 const tokenBudget = readTokenBudget(resumeBudget);
                 if (currentBudget === 0 && tokenBudget > 0) throw new Error('本任务累计模型预算为不限，请清空预算或填写 0 后继续。');
@@ -780,7 +780,7 @@
                     tokenBudget: tokenBudget > 0 ? Math.max(tokenBudget, currentBudget ?? 0) : tokenBudget,
                     maxSteps: Math.max(Number(resumeSteps.value), Number(value.request?.maxSteps || 0)),
                     modelId: resumeModel.value || formModel?.value || '',
-                    ...readRepair?.()
+                    ...(readRepair ? readRepair() : readNote())
                 }));
                 await poll(value.id, sequence);
             } catch (error) { if (isProcessCurrent(sequence)) { resume.disabled = false; feedback.textContent = errorText(error); } } });
@@ -789,8 +789,13 @@
             panel.appendChild(resumePanel);
         }
         const actionRow = node('div', 'presentation-master-task-actions');
+        const openNative = source => {
+            closeModal();
+            return window.Pivot.moduleApi('apps.presentations.native').open(source).catch(error => helpers.toast(errorText(error), 'error'));
+        };
         window.Pivot.moduleApi('apps.presentations.masterPageReview').mountActions(actionRow, panel, value, {
             node, getEpoch: () => epoch, isCurrent: isProcessCurrent, showError: errorText, feedback,
+            requestJson: helpers.requestJson, openNative,
             async restart(id, regenerate) {
                 const sequence = ++epoch;
                 if (!regenerate) return poll(id, sequence).catch(error => showError(error, sequence));
@@ -814,12 +819,9 @@
                 } catch (error) { showError(error, sequence); }
             }); actionRow.appendChild(download);
             if (file.format === 'pptx') {
-                const edit = node('button', 'btn-secondary', '在浏览器编辑原生对象'); edit.type = 'button';
-                edit.addEventListener('click', () => {
-                    closeModal();
-                    window.Pivot.moduleApi('apps.presentations.native').open({ sourceRenditionId: String(file.renditionId), title: value.request?.title || '完整制作结果' })
-                    .catch(error => helpers.toast(errorText(error), 'error'));
-                }); actionRow.appendChild(edit);
+                const edit = node('button', 'btn-secondary', '编辑已生成页面'); edit.type = 'button';
+                edit.addEventListener('click', () => openNative({ sourceRenditionId: String(file.renditionId), title: value.request?.title || '完整制作结果' }));
+                actionRow.appendChild(edit);
             }
         }
         if (actionRow.children.length) panel.appendChild(actionRow);
@@ -830,6 +832,8 @@
         state = currentState; helpers = currentHelpers;
         if (bound) return; bound = true;
         document.addEventListener('click', event => {
+            const history = event.target.closest?.('[data-presentation-master-history]');
+            if (history) { void openHistory(history); return; }
             if (!event.target.closest?.('[data-presentation-master-open]')) return;
             const opening = open(), sequence = epoch;
             void opening.catch(error => showError(error, sequence));
