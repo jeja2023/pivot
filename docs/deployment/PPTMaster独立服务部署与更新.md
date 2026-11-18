@@ -12,7 +12,7 @@ PPT Master作为独立常驻HTTP服务运行，Pivot只通过内网服务协议�
 npm run build:ppt-master-service -- --checkout E:/ppt-master-upstream --output E:/releases/ppt-master-service
 ```
 
-已有目标版本对应的服务镜像时可加`--skip-build --image ppt-master:6.8.0`。工具检查实际服务启动并导出固定文件名`ppt-master.tar`，附独立Compose和配置示例。旧的仅stdin动作镜像需要首次更新为带HTTP服务的新镜像。
+可用 `--image ppt-master:6.8.0-pivot0.7.172` 区分使用同一上游版本的不同 Pivot 制品。已有目标版本对应的服务镜像时可加 `--skip-build --image <镜像标签>`。打包工具检查服务启动和交付核验能力，导出固定文件名 `ppt-master.tar`，附独立 Compose 和配置示例。旧的仅 stdin 动作镜像需要首次更新为带 HTTP 服务的新镜像。
 
 ## 首次启动服务
 
@@ -55,7 +55,9 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 
 升级到 Pivot v0.7.172 时，使用该版源码重建 PPT Master 服务镜像，使其包含更新后的 `runner.py`、`tool_catalog.py` 和 `delivery_checklist.py`，并同时更新 Pivot 主应用。建议在切换前结束运行中或等待确认的任务，保存已有交付文件。服务数据卷与现有连接配置可继续使用；运行身份改变后，原检查点需在原运行环境完成，切换后按需新建任务。[v0.7.172 发布说明](../releases/v0.7.172-PPTMaster分阶段确认与交付核验.md)
 
-等待完整制作和原稿任务结束后，复制新版 `ppt-master.tar` 到服务目录，再替换服务容器。
+等待完整制作和原稿任务结束后，复制新版 `ppt-master.tar` 和 `docker-compose.ppt-master.yml` 到现有服务目录，在 `.env` 中按随包 `.env.example` 设置 `PPT_MASTER_IMAGE`，并配置 `PPT_MASTER_TOKEN`。现有部署可以沿用已单独配置的密钥。曾使用旧模板固定密钥的部署应生成新密钥，并在 Pivot 的 PPT Master 服务设置中同步更新。保留现有命名卷，再替换服务容器。
+
+随包提供 `ppt-master.tar.sha256` 时，在服务目录执行 `sha256sum -c ppt-master.tar.sha256`，通过后再导入镜像。
 
 ```bash
 cd /data/ppt-master

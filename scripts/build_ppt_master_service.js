@@ -36,6 +36,10 @@ async function main(args = process.argv.slice(2)) {
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         if (!ready) throw new Error('独立PPT服务启动检查未通过，请检查镜像日志。');
+        const verifyChecklist = "import json,os,urllib.request;req=urllib.request.Request('http://127.0.0.1:8502/v1/info',headers={'Authorization':'Bearer '+os.environ['PPT_MASTER_TOKEN']});assert json.load(urllib.request.urlopen(req,timeout=2)).get('deliveryChecklist') == 1";
+        await run('docker', ['exec', name, 'python', '-c', verifyChecklist]).catch(() => {
+            throw new Error('镜像缺少交付清单核验能力，请使用当前源码重新构建。');
+        });
     } finally { await run('docker', ['rm', '-f', '-v', name]).catch(() => {}); }
     const api = (await run('docker', ['version', '--format', '{{.Server.APIVersion}}'])).stdout.trim().split('.').map(Number);
     await run('docker', ['image', 'save', ...(api[0] > 1 || api[1] >= 48 ? ['--platform', 'linux/amd64'] : []), '-o', path.join(output, 'ppt-master.tar'), image], { timeout: 600000 });
