@@ -117,6 +117,8 @@ test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码
     assert.equal(calls[0].body.language, 'mermaid'); assert.equal(calls[1].body.renditionId, 'source-file');
     await fs.mkdir(path.resolve('output/mermaid-preview'), { recursive: true });
     await page.screenshot({ path: path.resolve('output/mermaid-preview/light.png'), fullPage: true, animations: 'disabled' });
+    const toolbarHeights = await page.locator('.mermaid-toolbar [data-mermaid-action]').evaluateAll(buttons => buttons.map(button => Math.round(button.getBoundingClientRect().height)));
+    assert.ok(toolbarHeights.length > 0 && toolbarHeights.every(height => height <= 28), `图形工具栏按钮高度过大: ${JSON.stringify(toolbarHeights)}`);
     for (const width of [1280, 390]) {
         await page.setViewportSize({ width, height: 844 });
         const bounds = await page.locator('.mermaid-card').evaluate(element => ({ content: element.scrollWidth, width: element.clientWidth }));
@@ -126,6 +128,8 @@ test('截图流程图默认预览，源码切换、复制、下载 SVG 与源码
         assert.equal(await page.locator('.mermaid-viewer img').getAttribute('width') !== null, true);
         await page.locator('[data-mermaid-viewer="reset"]').click();
         assert.equal(await page.locator('.mermaid-viewer img').getAttribute('width'), null);
+        const viewerHeights = await page.locator('.mermaid-viewer-actions [data-mermaid-viewer]').evaluateAll(buttons => buttons.map(button => Math.round(button.getBoundingClientRect().height)));
+        assert.ok(viewerHeights.length > 0 && viewerHeights.every(height => height <= 30), `放大预览操作按钮高度过大: ${JSON.stringify(viewerHeights)}`);
         assert.equal(await page.locator('.mermaid-viewer .workspace-modal-header').evaluate(header => {
             const box = header.getBoundingClientRect();
             return [...header.querySelectorAll('button')].every(button => {

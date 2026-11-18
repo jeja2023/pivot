@@ -41,6 +41,7 @@ const { profileViaSql } = require('./profile');
 const { normalizeShareSettings } = require('../unit-visibility');
 const { filterExistingShareUserIds } = require('../share-targets');
 const { importSpreadsheetInWorker } = require('./spreadsheet-import');
+const { importCsvToParquet } = require('./csv-import');
 const { canAccessSharedResource } = require('../unit-visibility');
 
 function sanitizeRows(rows) {
@@ -103,64 +104,6 @@ async function readSpreadsheet(filePath, originalName) {
     const sheet = workbook.Sheets[sheetName];
     const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
     return { ...sanitizeRows(rows), sheetName, sourceType: path.extname(originalName || filePath).toLowerCase().replace(/^\./, '') || 'xlsx' };
-}
-
-// CSV 原生导入：用 DuckDB read_csv_auto 直接把整表 COPY 成 Parquet（列名归一为 c_N），
-// 整表数据不经过 JS 内存。表头取首行（positional column0..），其后数据 OFFSET 1 写入。
-async function importCsvToParquet(sourcePath, parquetPath) {
-    const { instance, connection } = await createDuckConnection();
-    try {
-        const headerRows = (await connection.runAndReadAll(
-            `SELECT * FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true) LIMIT 1`
-        )).getRowObjectsJson();
-        if (!headerRows.length) {
-            const err = new Error('未识别到有效表头或数据行。');
-            err.status = 400;
-            throw err;
-        }
-        const firstRow = headerRows[0];
-        const fieldKeys = Object.keys(firstRow);
-        const seen = new Set();
-        const columns = fieldKeys.slice(0, MAX_UPLOAD_COLUMNS).map((fieldKey, index) => ({
-            key: `c_${index + 1}`,
-            name: normalizeHeader(firstRow[fieldKey], index, seen),
-            index
-        }));
-        const selectList = columns.map(column => `${sqlIdent(`column${column.index}`)} AS ${sqlIdent(column.key)}`).join(', ');
-        await connection.run(
-            `COPY (SELECT ${selectList} FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true) OFFSET 1 LIMIT ${MAX_UPLOAD_ROWS}) TO ${sqlLiteral(parquetPath)} (FORMAT PARQUET, COMPRESSION ZSTD)`
-        );
-        const rowCount = Number((await connection.runAndReadAll(
-            `SELECT COUNT(*) AS n FROM read_parquet(${sqlLiteral(parquetPath)})`
-        )).getRowObjectsJson()[0]?.n || 0);
-        const sourceRowCount = Number((await connection.runAndReadAll(
-            `SELECT GREATEST(COUNT(*) - 1, 0) AS n FROM read_csv_auto(${sqlLiteral(sourcePath)}, header=false, all_varchar=true)`
-        )).getRowObjectsJson()[0]?.n || 0);
-        const sourceColumnCount = fieldKeys.length;
-        const truncatedRows = sourceRowCount > MAX_UPLOAD_ROWS;
-        const truncatedColumns = sourceColumnCount > MAX_UPLOAD_COLUMNS;
-        if (!rowCount) {
-            const err = new Error('表格中没有可分析的数据行。');
-            err.status = 400;
-            throw err;
-        }
-        return {
-            columns,
-            rowCount,
-            sourceRowCount,
-            sourceColumnCount,
-            truncated: truncatedRows || truncatedColumns,
-            truncatedRows,
-            truncatedColumns,
-            truncationReason: [
-                truncatedRows ? `行数超过上限 ${MAX_UPLOAD_ROWS}` : '',
-                truncatedColumns ? `列数超过上限 ${MAX_UPLOAD_COLUMNS}` : ''
-            ].filter(Boolean).join('；')
-        };
-    } finally {
-        connection.closeSync();
-        instance.closeSync();
-    }
 }
 
 function sqliteIdent(value) {
@@ -403,7 +346,7 @@ async function importDataset({ user, file, name }) {
         committed = true;
         return serializeDataset(await getDatasetForUser(user.id, datasetId));
     } catch (err) {
-        if (!committed) bestEffortRemove(datasetDir, { recursive: true });
+        if (!committed) await bestEffortRemove(datasetDir, { recursive: true });
         throw err;
     }
 }

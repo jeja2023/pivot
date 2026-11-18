@@ -10,13 +10,22 @@ const runtime = require('./runtime');
 const THRESHOLD = 500000, MAX_ARCHIVES = 64, MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 
-async function archiveOlderObservations(state) {
-    if (!Array.isArray(state.messages) || JSON.stringify(state.messages).length <= THRESHOLD) return false;
+function reduceObservation(item, archive, index) {
+    const result = item?.result;
+    if (!result || item.error || result.archived || !['read', 'read_runtime', 'read_history', 'list', 'run'].includes(item.action)) return item;
+    const { text, files, stdout, stderr, ...metadata } = result;
+    if (JSON.stringify({ text, files, stdout, stderr }).length < 1000) return item;
+    return { ...item, result: { ...metadata, archived: { archive, index },
+        ...(Array.isArray(files) ? { fileCount: files.length } : {}),
+        note: '完整工具结果已归档。可按 archive、index 分页调用 read_history；核对当前文件时使用 read 或 list。' } };
+}
+
+async function archiveOlderObservations(state, { force = false, recentTurns = 4 } = {}) {
+    if (!Array.isArray(state.messages) || (!force && JSON.stringify(state.messages).length <= THRESHOLD)) return false;
     const existing = Array.isArray(state.historyArchives) ? state.historyArchives : [];
-    if (existing.length >= MAX_ARCHIVES) throw runtime.error('历史检查点已达到保存上限，请分批制作；原任务仍可查看。', 'PPT_MASTER_CONTEXT_LIMIT', 422);
     const before = state.messages, view = compactMessages(before).messages;
     const lastAssistants = [];
-    for (let index = before.length - 1; index >= 0 && lastAssistants.length < 4; index--) if (before[index].role === 'assistant') lastAssistants.push(index);
+    for (let index = before.length - 1; index >= 0 && lastAssistants.length < recentTurns; index--) if (before[index].role === 'assistant') lastAssistants.push(index);
     const protectedFrom = lastAssistants.at(-1) ?? 0, archived = {}, archiveIndex = existing.length;
     for (let index = protectedFrom; index < before.length; index++) view[index] = before[index];
     for (let index = 0; index < protectedFrom; index++) {
@@ -30,20 +39,18 @@ async function archiveOlderObservations(state) {
         let entries;
         try { entries = JSON.parse(original.content); } catch (_) { continue; }
         if (!Array.isArray(entries)) continue;
-        let changed = false;
-        const reduced = entries.map(item => {
-            if (item?.action !== 'read' || item.error || typeof item.result?.text !== 'string' || item.result.text.length < 1000) return item;
-            changed = true;
-            const { text, ...metadata } = item.result;
-            return { ...item, result: { ...metadata, archived: { archive: archiveIndex, index, sha256: digest(Buffer.from(text)) },
-                note: '旧读取结果已保存完整历史，请按需调用 read_history 读取原始消息。' } };
-        });
-        if (changed) { archived[index] = original; view[index] = { ...original, content: JSON.stringify(reduced) }; }
+        const reduced = entries.map(item => reduceObservation(item, archiveIndex, index));
+        if (reduced.some((item, position) => item !== entries[position])) {
+            archived[index] = original;
+            view[index] = { ...original, content: JSON.stringify(reduced) };
+        }
     }
     if (!Object.keys(archived).length || JSON.stringify(view).length >= JSON.stringify(before).length) return false;
     const raw = Buffer.from(JSON.stringify(archived)), zipped = await compress(raw);
     const archivesSize = existing.reduce((sum, item) => sum + String(item.data || '').length, 0) + Math.ceil(zipped.length / 3) * 4;
-    if (raw.length > MAX_ARCHIVE_BYTES || archivesSize > MAX_ARCHIVE_BYTES) throw runtime.error('历史检查点已达到保存上限，请分批制作；原任务仍可查看。', 'PPT_MASTER_CONTEXT_LIMIT', 422);
+    if (existing.length >= MAX_ARCHIVES || raw.length > MAX_ARCHIVE_BYTES || archivesSize > MAX_ARCHIVE_BYTES) {
+        throw runtime.error('历史检查点已达到保存上限，请分批制作；原任务仍可查看。', 'PPT_MASTER_HISTORY_LIMIT', 422);
+    }
     state.historyArchives = [...existing, { data: zipped.toString('base64'), sha256: digest(raw), bytes: raw.length }];
     state.messages = view;
     return true;

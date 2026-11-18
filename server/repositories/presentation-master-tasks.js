@@ -11,6 +11,16 @@ async function read(user, id) {
 async function latest(user, presentationId = '') {
     return queryOne("SELECT id FROM tool_tasks WHERE user_id=? AND tool_name=? AND COALESCE(result_json->'state'->'request'->>'presentationId',input_request->>'presentationId','')=? ORDER BY created_at DESC LIMIT 1", [user.id, TOOL, presentationId]);
 }
+async function findActive(user) {
+    return queryOne("SELECT id FROM tool_tasks WHERE user_id=? AND tool_name=? AND status IN ('working','input_required') AND expires_at>NOW() ORDER BY created_at DESC LIMIT 1", [user.id, TOOL]);
+}
+async function withExecution(user, id, lease, commit) {
+    return transaction(async client => {
+        const owned = await client.queryOne("SELECT id FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW() AND result_json->>'_lease'=? AND (result_json->>'_leaseUntil')::numeric>extract(epoch from NOW()) FOR UPDATE", [id, user.id, TOOL, lease]);
+        if (!owned) throw Object.assign(new Error('制作任务已停止或执行租约已失效。'), { code: 'PPT_MASTER_LEASE_LOST', status: 409 });
+        return commit(client);
+    });
+}
 async function claim(user, id, leaseId) {
     return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object('_lease',?::text, '_leaseUntil', extract(epoch from NOW())+180),updated_at=NOW()
         WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW()
@@ -35,7 +45,8 @@ async function parentActive(runId, user) {
 }
 async function acceptResponse(user, id, state) {
     return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND (status='input_required' AND expires_at>NOW() OR status IN ('expired','failed') AND result_json->'state'->>'pendingKind' IN ('confirmation','clarification')) RETURNING id`, [JSON.stringify(state), id, user.id, TOOL]);
+        WHERE id=? AND user_id=? AND tool_name=? AND result_json->'state'->>'steps' IS NOT DISTINCT FROM ?::text AND COALESCE(result_json->'state'->>'response','')=''
+          AND (status='input_required' AND expires_at>NOW() OR status IN ('expired','failed') AND result_json->'state'->>'pendingKind' IN ('confirmation','clarification')) RETURNING id`, [JSON.stringify(state), id, user.id, TOOL, state.steps == null ? null : String(state.steps)]);
 }
 async function resume(user, id, state) {
     return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',
@@ -53,4 +64,4 @@ async function admit(user, create, excludedTaskId = '') {
     });
 }
 
-module.exports = { TOOL, read, latest, claim, save, renew, release, parentActive, acceptResponse, resume, admit };
+module.exports = { TOOL, read, latest, findActive, withExecution, claim, save, renew, release, parentActive, acceptResponse, resume, admit };

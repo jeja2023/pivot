@@ -11,7 +11,7 @@ COPY docker/ppt-master/preview-requirements.lock /runner/preview-requirements.lo
 RUN pip install --no-cache-dir --disable-pip-version-check -r /runner/preview-requirements.lock
 COPY --chmod=0555 artifacts/ppt-master-runtime/ /engine/
 COPY config/ppt-master-engine.json /runner/engine-lock.json
-COPY --chmod=0555 docker/ppt-master/runner.py docker/ppt-master/tool_catalog.py docker/ppt-master/template_adapter.py /runner/
+COPY --chmod=0555 docker/ppt-master/runner.py docker/ppt-master/tool_catalog.py docker/ppt-master/template_adapter.py docker/ppt-master/delivery_checklist.py /runner/
 COPY --chmod=0555 docker/ppt-master/native_*.py /runner/
 COPY --chmod=0555 docker/ppt-master/service.py docker/ppt-master/service_jobs.py docker/ppt-master/service_worker.py docker/ppt-master/service_sandbox.py /runner/
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUTF8=1 HOME=/tmp OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1 SAL_USE_VCLPLUGIN=svp

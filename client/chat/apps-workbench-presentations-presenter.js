@@ -569,12 +569,18 @@
         const disabledBeforeExport = new Set(exportButtons.filter(button => button.disabled));
         exportButtons.forEach(button => button.setAttribute('disabled', ''));
         let exported = false;
+        const id = state.active.id, epoch = state.activeEpoch, edit = state.editRevision, approval = state.sensitiveExportApproval;
+        const confirmed = window.Pivot.moduleApi('apps.presentations.persistence').exportApproved(state);
+        const options = { ...state.exportOptions };
+        state.sensitiveExportApproval = null;
+        const current = () => state.active?.id === id && state.activeEpoch === epoch;
         setSaveState?.(`正在导出 ${format.toUpperCase()}…`, 'saving');
         try {
-            if (state.dirty) await saveActive?.();
-            const options = state.exportOptions || {};
-            const created = await requestJson(`${API}/${encodeURIComponent(state.active.id)}/export`, jsonOptions({
-                format, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, allowSensitiveExport: options.allowSensitiveExport === true, imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
+            if (state.dirty && await saveActive?.() === false) return;
+            if (!current()) return;
+            const title = state.active.content.title;
+            const created = await requestJson(`${API}/${encodeURIComponent(id)}/export`, jsonOptions({
+                format, baseVersion: state.active.version, baseDigest: approval?.digest, aspectRatio: options.aspectRatio || state.active.content?.aspectRatio || '16:9', includeNotes: options.includeNotes !== false, includePageNumbers: options.includePageNumbers !== false, showSourceRefs: options.showSourceRefs !== false, allowSensitiveExport: Boolean(confirmed && state.editRevision === edit && approval.digest === state.active.contentDigest), imageQuality: options.imageQuality || 'standard', fontStrategy: options.fontStrategy || 'embed',
                 ...(format === 'png' ? { slideIndex: activeSlide?.()?.index || 0 } : {})
             }));
             const rendition = created.rendition;
@@ -583,7 +589,9 @@
             if (!tokenResult?.token) throw new Error('下载令牌获取失败。');
             const response = await apiFetch(`/api/agents/renditions/${encodeURIComponent(rendition.id)}/download?token=${encodeURIComponent(tokenResult.token)}`);
             if (!response.ok) throw new Error('下载导出文件失败。');
-            downloadBlob(exportFilename(state.active.content.title, format), await response.blob());
+            const blob = await response.blob();
+            if (!current()) return;
+            downloadBlob(exportFilename(title, format), blob);
             exported = true;
             toast?.(`${format.toUpperCase()} 已生成并开始下载。`);
         } finally {
@@ -592,7 +600,7 @@
                 if (disabledBeforeExport.has(button)) button.setAttribute('disabled', '');
                 else button.removeAttribute('disabled');
             });
-            setSaveState?.(exported ? '已保存' : '导出失败', exported ? 'saved' : 'error');
+            if (current()) setSaveState?.(exported ? '已保存' : '导出失败', exported ? 'saved' : 'error');
         }
     }
 

@@ -21,24 +21,52 @@
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: 5px;
     min-width: 0;
 }
 .mermaid-toolbar {
-    padding: 10px 12px;
+    padding: 7px 12px;
+    min-height: 38px;
     border-bottom: 1px solid var(--border);
     background: var(--bg-side);
-    gap: 8px 12px;
+    gap: 6px 10px;
 }
 .mermaid-label {
     color: var(--text-muted);
-    font-size: inherit;
+    font-size: 0.78rem;
     font-weight: 600;
+    line-height: 1.2;
 }
 .mermaid-actions { margin-left: auto; }
+.mermaid-card [data-mermaid-action],
+.mermaid-viewer [data-mermaid-viewer] {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 26px;
+    min-height: 26px;
+    padding: 0 9px;
+    border-radius: var(--radius-sm, 6px);
+    font-size: 0.73rem;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+}
+.mermaid-viewer [data-mermaid-viewer] {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 0.75rem;
+}
+.mermaid-card [data-mermaid-action]:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
 .mermaid-tabs [aria-selected="true"] {
     color: var(--primary);
     border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 10%, var(--surface));
 }
 .mermaid-preview {
     min-height: 160px;

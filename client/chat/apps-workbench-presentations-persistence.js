@@ -1,5 +1,44 @@
 (function () {
     'use strict';
+    const byId = id => document.getElementById(id);
+
+    function exportApproved(state) {
+        const approval = state.sensitiveExportApproval, active = state.active;
+        return Boolean(approval && active && approval.id === active.id && approval.version === active.version
+            && approval.digest === active.contentDigest && approval.epoch === state.activeEpoch && approval.revision === state.editRevision);
+    }
+    function openExportOptions(state) {
+        const options = state.exportOptions;
+        for (const [field, value] of Object.entries({ 'aspect-ratio': options.aspectRatio || state.active?.content?.aspectRatio || '16:9',
+            'image-quality': options.imageQuality || 'standard', 'font-strategy': options.fontStrategy || 'embed' })) {
+            const input = byId('presentation-export-' + field);
+            if (input) input.value = value;
+        }
+        for (const [field, checked] of Object.entries({ 'include-notes': options.includeNotes !== false, 'include-page-numbers': options.includePageNumbers !== false,
+            'show-source-refs': options.showSourceRefs !== false, 'allow-sensitive': exportApproved(state) })) {
+            const input = byId('presentation-export-' + field);
+            if (input) input.checked = checked;
+        }
+        byId('presentation-export-options-modal')?.classList.remove('hidden');
+    }
+    async function saveExportOptions(state, flush, toast) {
+        const field = name => byId('presentation-export-' + name);
+        const confirmed = field('allow-sensitive')?.checked === true;
+        const options = { aspectRatio: field('aspect-ratio')?.value || state.active?.content?.aspectRatio || '16:9',
+            includeNotes: Boolean(field('include-notes')?.checked), includePageNumbers: Boolean(field('include-page-numbers')?.checked),
+            showSourceRefs: Boolean(field('show-source-refs')?.checked), imageQuality: field('image-quality')?.value || 'standard',
+            fontStrategy: field('font-strategy')?.value || 'embed' };
+        state.sensitiveExportApproval = null;
+        if (confirmed) {
+            const epoch = state.activeEpoch, revision = state.editRevision;
+            if (!await flush() || epoch !== state.activeEpoch || revision !== state.editRevision || !state.active?.contentDigest) throw new Error('文稿已发生变化，请重新核对敏感内容并确认。');
+            state.sensitiveExportApproval = { id: state.active.id, version: state.active.version, digest: state.active.contentDigest, epoch, revision };
+        }
+        state.exportOptions = options;
+        byId('presentation-export-options-modal')?.classList.add('hidden');
+        toast('导出选项已保存。');
+    }
+
     function create(state, { requestJson, canEdit, setSaveState, renderIssues, toast }) {
         function same(id, epoch) { return state.active?.id === id && (state.activeEpoch || 0) === epoch; }
 
@@ -96,5 +135,5 @@
 
         return { scheduleSave, saveActive, flush, invalidate, beforeUnload };
     }
-    window.Pivot.exposeModule('apps.presentations.persistence', { create });
+    window.Pivot.exposeModule('apps.presentations.persistence', { create, exportApproved, openExportOptions, saveExportOptions });
 })();

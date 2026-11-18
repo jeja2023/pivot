@@ -137,6 +137,7 @@ function toPublicPresentation(row, { includeContent = false } = {}) {
     };
     if (includeContent) {
         output.content = parseJson(row.content_json, null);
+        if (output.content) output.contentDigest = computePresentationDigest(output.content);
         output.validation = parseJson(row.validation_json, { status: 'unknown', issues: [] });
     }
     return output;
@@ -435,7 +436,7 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
         if (current.artifact_id) {
             await execute('UPDATE agent_artifacts SET content = ?, updated_at = NOW() WHERE id = ?', [contentJson, current.artifact_id]).catch(() => {});
         }
-        const output = { ...toPublicPresentation(updated), content, validation, autoSave: true };
+        const output = { ...toPublicPresentation(updated, { includeContent: true }), autoSave: true };
         if (activeTemplate?.definition) {
             output.templateDefinition = activeTemplate.definition;
             output.templateSourceFormat = activeTemplate.sourceFormat || activeTemplate.definition?.importMetadata?.sourceFormat || 'pivot';
@@ -485,7 +486,7 @@ async function savePresentationContent(user, clientId, body = {}, options = {}) 
         `, [current.id, nextVersion, artifact?.current_version_id || null, contentJson, computePresentationDigest(content), serializeJson(validation), String(body.note || '保存演示文稿').trim().slice(0, 500), user.id]);
         return document;
     });
-    const output = { ...toPublicPresentation(updated), content, validation };
+    const output = toPublicPresentation(updated, { includeContent: true });
     if (activeTemplate?.definition) {
         output.templateDefinition = activeTemplate.definition;
         output.templateSourceFormat = activeTemplate.sourceFormat || activeTemplate.definition?.importMetadata?.sourceFormat || 'pivot';

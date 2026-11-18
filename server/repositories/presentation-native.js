@@ -2,6 +2,10 @@
 
 const { query, queryOne, execute, transaction } = require('../db/client');
 const TOOL = 'presentation.native';
+const RECOVERY_ANCHOR = "CASE WHEN status='expired' THEN LEAST(updated_at,expires_at) ELSE updated_at END";
+const DISPOSABLE_WORKSPACE = `((status IN ('completed','cancelled') AND updated_at<NOW()-INTERVAL '1 hour')
+    OR ((status IN ('failed','expired') OR status='working' AND expires_at<=NOW()) AND (${RECOVERY_ANCHOR})<NOW()-INTERVAL '24 hours'))
+    AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()) AND result_json->>'workspaceCleanedAt' IS NULL`;
 const json = value => typeof value === 'string' ? JSON.parse(value || '{}') : value || {};
 const invalid = (message, code = 'PRESENTATION_NATIVE_CONFLICT', status = 409) => Object.assign(new Error(message), { code, status, statusCode: status, expose: true });
 
@@ -51,8 +55,10 @@ async function release(user, id, lease) {
     await execute("UPDATE tool_tasks SET result_json=result_json-'_lease'-'_leaseUntil' WHERE id=? AND user_id=? AND tool_name=? AND result_json->>'_lease'=?", [id, user.id, TOOL, lease]);
 }
 async function resume(user, id) {
-    return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',result_json=result_json-'_lease'-'_leaseUntil'
-        WHERE id=? AND user_id=? AND tool_name=? AND updated_at>NOW()-INTERVAL '24 hours' AND (status='failed' OR status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW())) RETURNING id`, [id, user.id, TOOL]);
+    return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',updated_at=NOW(),result_json=result_json-'_lease'-'_leaseUntil'
+        WHERE id=? AND user_id=? AND tool_name=? AND (${RECOVERY_ANCHOR})>NOW()-INTERVAL '24 hours'
+          AND status IN ('failed','expired','working') AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW())
+          AND result_json->>'workspaceCleanedAt' IS NULL RETURNING id`, [id, user.id, TOOL]);
 }
 async function commit(user, tenantId, id, lease, request, output, executor = null) {
     const persist = async client => {
@@ -82,7 +88,15 @@ async function remove(user, tenantId, id) {
     return queryOne('UPDATE presentation_native_documents SET deleted_at=NOW() WHERE id=? AND tenant_id=? AND owner_user_id=? AND deleted_at IS NULL RETURNING id', [id, tenantId, user.id]);
 }
 async function cleanupCandidates() {
-    return query("SELECT id,user_id FROM tool_tasks WHERE tool_name=? AND ((status IN ('completed','cancelled','expired') AND updated_at<NOW()-INTERVAL '1 hour') OR updated_at<NOW()-INTERVAL '24 hours') AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()) LIMIT 100", [TOOL]);
+    return query(`SELECT id,user_id FROM tool_tasks WHERE tool_name=? AND ${DISPOSABLE_WORKSPACE} LIMIT 100`, [TOOL]);
+}
+async function withWorkspaceCleanup(user, id, cleanup) {
+    return transaction(async client => {
+        const row = await client.queryOne(`SELECT id FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=? AND ${DISPOSABLE_WORKSPACE} FOR UPDATE SKIP LOCKED`, [id, user.id, TOOL]);
+        if (!row) return;
+        await cleanup();
+        await client.execute("UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object('workspaceCleanedAt',NOW()) WHERE id=?", [id]);
+    });
 }
 async function withExecution(user, id, lease, commitResult) {
     return transaction(async client => {
@@ -92,4 +106,4 @@ async function withExecution(user, id, lease, commitResult) {
     });
 }
 
-module.exports = { TOOL, list, read, header, versions, readJob, latestJob, admit, claim, checkpoint, release, resume, commit, remove, cleanupCandidates, withExecution };
+module.exports = { TOOL, list, read, header, versions, readJob, latestJob, admit, claim, checkpoint, release, resume, commit, remove, cleanupCandidates, withExecution, withWorkspaceCleanup };

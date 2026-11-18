@@ -1,7 +1,6 @@
 (function () {
     'use strict';
     const byId = id => document.getElementById(id);
-    const DEFAULT_TOKEN_BUDGET = 1000000;
     function node(tag, className = '', text = '') {
         const element = document.createElement(tag); if (className) element.className = className; if (text) element.textContent = text; return element;
     }
@@ -140,15 +139,6 @@
             if (input) { input.value = ''; input.dispatchEvent(new Event('change')); }
         }
     }
-    function reset() {
-        for (const key of ['title', 'instruction', 'material', 'audience', 'purpose', 'duration']) byId('presentation-master-' + key).value = '';
-        for (const [key, value] of Object.entries({ pages: '8', budget: String(DEFAULT_TOKEN_BUDGET), steps: '80', operation: 'generate', profile: 'default', consumption: 'presentation' })) byId('presentation-master-' + key).value = value;
-        byId('presentation-master-operation').disabled = false;
-        byId('presentation-master-profile').disabled = false;
-        byId('presentation-master-budget').closest('details').open = false;
-        resetFiles();
-        updateTemplateLock(false);
-    }
     function addSuggestions(input, suggestions, label) {
         const chips = node('div', 'presentation-master-chips');
         chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', label);
@@ -248,18 +238,19 @@
 
         const modes = node('div', 'presentation-master-grid-4');
         modes.append(field('工作方式', 'operation', 'text', { generate: '生成完整演示', create_template: '创建可复用模板', edit_native: '保留原稿设计并编辑' }),
-            field('生成方式', 'profile', 'text', { default: '先确认方案再制作', quick: '快速制作（跳过方案确认）', beautify: '美化已有内容', image_to_pptx: '根据图片重建' }), consumption, duration);
+            field('生成方式', 'profile', 'text', { default: '先确认方案再制作', quick: '快速制作（确认页面清单）', beautify: '美化已有内容', image_to_pptx: '根据图片重建' }), consumption, duration);
 
         const advanced = node('details', 'presentation-master-advanced'), limits = node('div', 'presentation-master-grid');
         advanced.appendChild(node('summary', '', '高级设置 · 模型预算与执行轮次'));
-        limits.append(field('累计模型预算（令牌）', 'budget', 'number'), field('执行轮次上限（5至160）', 'steps', 'number'));
+        limits.append(field('累计模型预算（令牌，0 为不限）', 'budget', 'number'), field('执行轮次上限（5至160）', 'steps', 'number'));
         advanced.append(limits); generation.append(modes, advanced);
 
         form.append(columns, generation);
 
-        for (const [key, value, min, max] of [['pages', 8, 1, 40], ['budget', DEFAULT_TOKEN_BUDGET, 10000], ['steps', 80, 5, 160]]) {
+        for (const [key, value, min, max] of [['pages', 8, 1, 40], ['budget', '', 0], ['steps', 80, 5, 160]]) {
             const input = form.querySelector('#presentation-master-' + key); input.value = value; input.min = min; if (max !== undefined) input.max = max; input.step = 1;
         }
+        form.querySelector('#presentation-master-budget').placeholder = '新建不限，续跑沿用原预算';
         for (const [key, max] of [['title', 120], ['instruction', 16000], ['material', 120000]]) form.querySelector('#presentation-master-' + key).maxLength = max;
         form.querySelector('#presentation-master-title').placeholder = '演示文稿主题（如：2026年度业务规划与关键决策）';
         form.querySelector('#presentation-master-instruction').placeholder = '说明主题、重点章节、风格要求（如沉稳严谨、现代简约）及需保留的关键数字或结论';
@@ -289,5 +280,5 @@
         }
         return materials;
     }
-    window.Pivot.exposeModule('apps.presentations.masterForm', { mount, snapshot, extract, reset, resetFiles, updateTemplateLock });
+    window.Pivot.exposeModule('apps.presentations.masterForm', { mount, snapshot, extract, resetFiles, updateTemplateLock });
 })();

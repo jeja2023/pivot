@@ -67,7 +67,7 @@ function buildOutlineMessages(body = {}) {
     const materialItems = Array.isArray(body.materials) ? body.materials.slice(0, 20) : [];
     const sourceIds = materialItems.map((item, index) => String(item?.id || `source_${index + 1}`).trim()).filter(Boolean);
     const sourceRefExample = JSON.stringify(sourceIds.length ? [sourceIds[0]] : []);
-    const materials = materialItems.map((item, index) => `- 来源 ${sourceIds[index] || `source_${index + 1}`} / ${clamp(item?.title || '材料', 120)}：${clamp(materialText(item), 6000)}`).filter(Boolean).join('\n');
+    const materials = materialItems.map((item, index) => `- 来源 ${sourceIds[index] || `source_${index + 1}`} / ${clamp(item?.title || '材料', 120)}：${materialText(item)}`).filter(Boolean).join('\n');
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         {
@@ -100,7 +100,7 @@ function buildSlidesMessages(body = {}) {
     const coverLayoutId = preferredTemplateLayoutId(template, 'cover');
     const compact = body.compact === true;
     const semantic = template.layouts.some(layout => String(layout.id).startsWith('design-'));
-    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${clamp(materialText(item), 5000)}`).filter(Boolean).join('\n') : '';
+    const materials = Array.isArray(body.materials) ? body.materials.slice(0, 20).map(item => `来源 ${item.id || ''} / ${clamp(item.title || '', 120)}：${materialText(item)}`).filter(Boolean).join('\n') : '';
     return [
         { role: 'system', content: presentationAiSystemPrompt() },
         {
@@ -115,7 +115,8 @@ function buildSlidesMessages(body = {}) {
                 `来源引用：${body.retainSourceRefs === false ? '保留内部 sourceRefs，但不要在视觉正文中额外展示。' : '重要数字、结论和材料摘录必须保留 sourceRefs。'}`,
                 body.mustInclude ? `必须包含：${clamp(body.mustInclude, 1000)}` : '',
                 body.prohibitedContent ? `禁止出现：${clamp(body.prohibitedContent, 1000)}` : '',
-                `大纲：${JSON.stringify(outline).slice(0, 24000)}`,
+                `大纲：${JSON.stringify(outline)}`,
+                body.enforcePageIds ? '这里只生成大纲中列出的本批页面。每页在 slides 中填写原样的 outlinePageId，逐一对应，不能重编号、增页、合并或跳页。跨页顺序由宿主恢复。' : '',
                 materials ? `材料：\n${materials}` : '材料：未提供。',
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
@@ -575,4 +576,4 @@ async function compilePresentationProposal(content, options = {}) {
     return { ...raw, ...compiled, warnings: [...(Array.isArray(raw.warnings) ? raw.warnings.map(String) : []), ...compiled.warnings] };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parsePresentationProposal, compilePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parseAiJsonObject, parsePresentationProposal, compilePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };

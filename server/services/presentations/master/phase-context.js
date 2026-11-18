@@ -1,11 +1,12 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { confirmedWrite } = require('./observations');
 const GENERATE_DIGEST = '3639027ce5e3ff8e328cc0056440a4cb308306fc7503d725a62c6b39e1221048';
 
 // 只有真实确认及同一项目的两份文件写入和上游校验均有回执，才能收起已完成的前置章节。
 function validatedProject(state) {
-    if (state.request?.operation !== 'generate' || state.request?.profile !== 'default' || Number(state.confirmedGates || 0) < 2) return '';
+    if (state.request?.operation !== 'generate' || state.request?.profile !== 'default' || state.confirmationRevisionPending || Number(state.confirmedGates || 0) < 2) return '';
     const files = new Map(); let validated = '';
     for (let index = 0; index < (state.messages || []).length; index++) {
         const assistant = state.messages[index], response = state.messages[index + 1];
@@ -23,8 +24,7 @@ function validatedProject(state) {
             }
             if (action.action === 'write') {
                 const path = String(action.path || ''), match = /^(.*)\/(design_spec\.md|spec_lock\.md)$/.exec(path);
-                if (match && result.result?.path === path && typeof action.text === 'string'
-                    && result.result.sha256 === crypto.createHash('sha256').update(action.text).digest('hex')) {
+                if (match && confirmedWrite(action, result)) {
                     const entry = files.get(match[1]) || new Set(); entry.add(match[2]); files.set(match[1], entry); validated = '';
                 } else if (!/^.+\/svg_output\/[^/]+\.svg$/.test(path)) validated = '';
             } else if (action.action === 'run') {

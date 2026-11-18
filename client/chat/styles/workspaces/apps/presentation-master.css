@@ -622,6 +622,7 @@
     margin: 0;
     color: var(--text-muted);
     line-height: 1.4;
+    overflow-wrap: anywhere;
 }
 
 .presentation-master-status-card .presentation-master-task-feedback {

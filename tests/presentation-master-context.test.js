@@ -41,9 +41,20 @@ test('无匹配文件回执、工具失败或不完整消息时不压缩', () =>
     assert.deepEqual(result.messages, messages);
 });
 
+test('操作摘要由正式写入回执决定，保留归档后的证据并区分失败的动作', () => {
+    const { actionSummary } = require('../server/services/presentations/master/observations');
+    const original = [...turn('done.svg', '<svg/>'), ...turn('wrong.svg', '<svg/>', { path: 'wrong.svg', sha256: '0'.repeat(64) }),
+        { role: 'assistant', content: JSON.stringify({ actions: [{ action: 'write', path: 'invalid.svg', text: '无效正文' }] }) },
+        { role: 'user', content: JSON.stringify([{ action: 'write', error: '写入失败' }]) }];
+    const expected = { writes: 1, failedWrites: 1, runtimeReads: 0, lastWrittenPath: 'done.svg', lastActions: [{ action: 'write', failed: true }] };
+    assert.deepEqual(actionSummary(original), expected);
+    assert.deepEqual(actionSummary(compactMessages(original).messages), expected);
+});
+
 test('单轮窗口与累计预算分别限制模型调用，并预留输出和安全余量', () => {
     const messages = [{ role: 'user', content: '内容'.repeat(1000) }];
     assert.throws(() => planRequest(messages, messages, { context_window_tokens: 4000 }, 100000), { code: 'PPT_MASTER_CONTEXT_LIMIT' });
+    assert.throws(() => planRequest(messages, messages, { context_window_tokens: 4000 }, Infinity), { code: 'PPT_MASTER_CONTEXT_LIMIT' });
     assert.throws(() => planRequest(messages, messages, { context_window_tokens: 256000 }, 5000), { code: 'PPT_MASTER_BUDGET_EXHAUSTED' });
     const plan = planRequest(messages, messages, { context_window_tokens: 9000 }, 100000);
     assert.ok(plan.maxTokens >= 2000);

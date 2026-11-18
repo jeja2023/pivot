@@ -7,6 +7,25 @@ const { queryOne, execute } = require('../server/db/client');
 const repository = require('../server/repositories/presentation-native');
 const taskStore = require('../server/services/tool-tasks');
 
+test('原稿过期后在保留期内可续跑，清理和续跑互斥', { skip: !process.env.DATABASE_URL }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const task = await taskStore.create({ user, toolName: repository.TOOL });
+    try {
+        await execute("UPDATE tool_tasks SET expires_at=NOW()-INTERVAL '1 second' WHERE id=?", [task.id]);
+        assert.equal((await taskStore.getForUser(task.id, user)).status, 'expired');
+        await execute("UPDATE tool_tasks SET updated_at=NOW()-INTERVAL '2 hours' WHERE id=?", [task.id]);
+        assert.equal((await repository.cleanupCandidates()).some(row => row.id === task.id), false);
+        assert.ok(await repository.resume(user, task.id));
+        await repository.withWorkspaceCleanup(user, task.id, () => assert.fail('恢复任务仍有权读取工作区'));
+        await execute("UPDATE tool_tasks SET status='expired',updated_at=NOW()-INTERVAL '25 hours',expires_at=NOW()-INTERVAL '1 hour' WHERE id=?", [task.id]);
+        let cleaned = 0;
+        await repository.withWorkspaceCleanup(user, task.id, async () => { cleaned++; });
+        await repository.withWorkspaceCleanup(user, task.id, async () => { cleaned++; });
+        assert.equal(cleaned, 1);
+        assert.equal(await repository.resume(user, task.id), null);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
 test('原生文稿保存受账号、版本及活跃租约共同约束，取消后不能提交，重试不生成重复版本', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1'), tenantId = 1, documentId = 'native_' + crypto.randomUUID().replace(/-/g, '');
     const jobs = [];

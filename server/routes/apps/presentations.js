@@ -83,6 +83,7 @@ const { buildPresentationDataNarrative } = require('../../services/presentations
 const { buildPresentationDeliveryGuide } = require('../../services/presentations/presentation-delivery-guide');
 const { runRenderedPresentationQuality } = require('../../services/presentations/presentation-render-quality');
 const { buildSlideLayoutVariants } = require('../../services/presentations/presentation-layout-variants');
+const { validateGenerationMaterials, prepareGenerationMaterials, materialNotice, confirmedRoster, generateRosterPages, largestPageBatch } = require('../../services/presentations/presentation-generation-coverage');
 
 const MAX_MATERIAL_TEXT = MAX_MATERIAL_TEXT_CHARS;
 const SOURCE_FORMAT_PIVOT = 'pivot';
@@ -114,7 +115,7 @@ async function withResolvedAiTemplate(user, body = {}) {
     return { ...body, templateId: template.id, templateVersion: template.version, template };
 }
 
-async function callPresentationAi({ req, logAction, messages, source, auditAction, maxTokens, signal }) {
+async function resolvePresentationAiModel(req) {
     const modelCfg = await resolveAppsModel(String(req.body?.model || '').trim(), req.user);
     if (!modelCfg) {
         const error = new Error('未找到可用模型，请在当前应用中选择模型或设置默认模型后再使用 AI 功能。');
@@ -137,6 +138,11 @@ async function callPresentationAi({ req, logAction, messages, source, auditActio
             throw error;
         }
     }
+    return modelCfg;
+}
+
+async function callPresentationAi({ req, logAction, messages, source, auditAction, maxTokens, signal, modelCfg }) {
+    modelCfg ||= await resolvePresentationAiModel(req);
     logAction(req, auditAction, `模型: ${modelCfg.name}`);
     const result = await callModelTextWithBudget({ modelCfg, user: req.user, messages, source, maxTokens, maxOutputTokensCap: maxTokens, temperature: 0.25, timeout: 180000, signal });
     return { ...result, model: modelCfg.model_name };
@@ -414,30 +420,41 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
 
     async function runAiRequest(req, res, body, messages, options = {}) {
         const startedAt = Date.now();
-        const idem = await beginAiIdempotency(req, body);
+        const idem = await beginAiIdempotency(req, options.generate ? { ...body, generationContractVersion: 2 } : body);
         if (idem?.cached) return res.json(idem.cached);
         const abort = requestAbortSignal(req, res);
         try {
-            let result = await callPresentationAi({ req, logAction: writeLog, messages, source: options.source || 'presentation_ai', auditAction: options.auditAction || 'PPT AI操作', maxTokens: options.maxTokens || 4000, signal: abort.signal });
-            let payload;
-            try {
-                payload = await options.parse(result);
-            } catch (error) {
-                if (!options.retryMalformedJson || !isPresentationAiJsonError(error) || abort.signal.aborted) throw error;
+            let modelCfg, result, payload;
+            const usage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 };
+            const invoke = async (input, callOptions = {}) => {
+                abort.signal.throwIfAborted();
+                modelCfg ||= await resolvePresentationAiModel(req);
+                result = await callPresentationAi({ req, logAction: writeLog, messages: input, source: (options.source || 'presentation_ai') + (callOptions.sourceSuffix || ''),
+                    auditAction: (options.auditAction || 'PPT AI操作') + (callOptions.auditSuffix || ''), maxTokens: callOptions.maxTokens || options.maxTokens || 4000, signal: abort.signal, modelCfg });
+                for (const key of Object.keys(usage)) usage[key] += Number(result.usage?.[key] || 0);
+                return result;
+            };
+            if (options.generate) {
+                modelCfg = await resolvePresentationAiModel(req);
+                payload = await options.generate(modelCfg, invoke, abort.signal);
+            } else {
+                await invoke(messages);
                 try {
-                    const recoveryMessages = typeof options.buildMalformedJsonRecoveryMessages === 'function'
-                        ? options.buildMalformedJsonRecoveryMessages()
-                        : buildAiJsonRepairMessages(result.content);
-                    result = await callPresentationAi({ req, logAction: writeLog, messages: recoveryMessages, source: (options.source || 'presentation_ai') + (options.malformedJsonRecoverySourceSuffix || '_json_repair'), auditAction: (options.auditAction || 'PPT AI操作') + (options.malformedJsonRecoveryAuditSuffix || ' JSON 修复'), maxTokens: options.maxTokens || 4000, signal: abort.signal });
                     payload = await options.parse(result);
-                } catch (_) {
-                    const failure = new Error(options.malformedJsonFailureMessage || 'AI 返回的页面数据格式不完整，系统已自动重试一次仍无法修复，请重新生成。');
-                    failure.status = 422;
-                    failure.code = 'PRESENTATION_AI_JSON_REPAIR_FAILED';
-                    throw failure;
+                } catch (error) {
+                    if (!options.retryMalformedJson || !isPresentationAiJsonError(error) || abort.signal.aborted) throw error;
+                    try {
+                        await invoke(buildAiJsonRepairMessages(result.content), { sourceSuffix: '_json_repair', auditSuffix: ' JSON 修复' });
+                        payload = await options.parse(result);
+                    } catch (_) {
+                        const failure = new Error('AI 返回的页面数据格式不完整，系统已自动重试一次仍无法修复，请重新生成。');
+                        failure.status = 422;
+                        failure.code = 'PRESENTATION_AI_JSON_REPAIR_FAILED';
+                        throw failure;
+                    }
                 }
             }
-            const response = { ...payload, model: result.model, usage: result.usage, contextBudget: result.contextBudget, requestId: req.id || req.get?.('x-request-id') || '' };
+            const response = { ...payload, model: result.model, usage, contextBudget: result.contextBudget, requestId: req.id || req.get?.('x-request-id') || '' };
             await finishAiIdempotency(idem, response);
             recordPresentationOutcome(options.source || 'ai', { outcome: 'success', durationMs: Date.now() - startedAt, source: options.source || 'ai' });
             return res.json(response);
@@ -450,38 +467,55 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     }
 
     router.post('/apps/presentations/ai/outline', authMiddleware, asyncHandler(async (req, res) => {
+        validateGenerationMaterials(req.body?.materials);
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         if (!String(body.topic || '').trim()) return res.status(400).json({ error: '请输入演示主题。', code: 'PRESENTATION_TOPIC_REQUIRED' });
-        return runAiRequest(req, res, body, buildOutlineMessages(body), { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600, retryMalformedJson: true, parse: async result => {
-            let outline; try { outline = filterOutlineSourceRefs(parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId, template: body.template, aspectRatio: body.aspectRatio, language: body.language }), body.materials); } catch (error) { error.status = error.status || 422; throw error; }
-            return { outline };
-        }});
+        return runAiRequest(req, res, body, null, { source: 'presentation_outline', auditAction: 'PPT AI生成大纲', maxTokens: 2600,
+            generate: async (model, call) => {
+                const build = materials => buildOutlineMessages({ ...body, materials });
+                const prepared = await prepareGenerationMaterials(body.materials, model, build, 2600, call, body.topic);
+                let result = await call(build(prepared.materials)), outline;
+                const parse = () => filterOutlineSourceRefs(parsePresentationProposal(result.content, { title: body.topic, templateId: body.templateId,
+                    template: body.template, aspectRatio: body.aspectRatio, language: body.language }), body.materials);
+                try { outline = parse(); } catch (error) {
+                    if (!isPresentationAiJsonError(error)) throw error;
+                    result = await call(buildAiJsonRepairMessages(result.content), { sourceSuffix: '_json_repair' });
+                    outline = parse();
+                }
+                confirmedRoster(outline);
+                outline.warnings = [...materialNotice(prepared.coverage), ...(Array.isArray(outline.warnings) ? outline.warnings : [])];
+                return { outline, materialCoverage: prepared.coverage };
+            }
+        });
     }));
 
     router.post('/apps/presentations/ai/slides', authMiddleware, asyncHandler(async (req, res) => {
+        validateGenerationMaterials(req.body?.materials);
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });
         const requestBody = { ...body, outline: filterOutlineSourceRefs(body.outline, body.materials) };
-        if (!requestBody.outline || typeof requestBody.outline !== 'object') return res.status(400).json({ error: '请先提供已确认的大纲。', code: 'PRESENTATION_OUTLINE_REQUIRED' });
-        return runAiRequest(req, res, requestBody, buildSlidesMessages(requestBody), {
+        const roster = confirmedRoster(requestBody.outline);
+        return runAiRequest(req, res, requestBody, null, {
             source: 'presentation_slides',
             auditAction: 'PPT AI生成页面',
             maxTokens: 7200,
-            retryMalformedJson: true,
-            // 当原回答在 JSON 尚未闭合时被模型输出上限截断，修复残片无法补回
-            // 缺失的页面。此时从已确认的大纲重新按紧凑契约生成，成功率高于语法修复。
-            buildMalformedJsonRecoveryMessages: () => buildSlidesMessages({ ...requestBody, compact: true }),
-            malformedJsonRecoverySourceSuffix: '_compact_retry',
-            malformedJsonRecoveryAuditSuffix: ' 紧凑格式重试',
-            malformedJsonFailureMessage: 'AI 返回的页面数据格式不完整，系统已按紧凑格式自动重试一次仍无法完成。请减少页数或补充材料后重新生成。',
-            parse: async result => {
-                const proposal = await require('../../services/presentations/presentation-ai').compilePresentationProposal(result.content, { title: requestBody.title || requestBody.outline.title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials,
-                    productionProfile: require('../../services/presentations/presentation-production-profile').fromRequest(requestBody) });
+            generate: async (model, call, signal) => {
+                const build = (materials, pages, compact = false) => buildSlidesMessages({ ...requestBody, materials, compact, enforcePageIds: true,
+                    outline: { title: requestBody.outline.title, assumptions: requestBody.outline.assumptions, slides: pages } });
+                const largest = largestPageBatch(roster, batch => build([], batch, true));
+                const prepared = await prepareGenerationMaterials(requestBody.materials, model, materials => build(materials, largest, true), 7200, call, requestBody.title || requestBody.outline.title);
+                const raw = await generateRosterPages(roster, (pages, compact) => call(build(prepared.materials, pages, compact), {
+                    sourceSuffix: compact ? '_missing_pages' : ''
+                }));
+                const title = requestBody.title || requestBody.outline.title;
+                const proposal = await require('../../services/presentations/presentation-ai').compilePresentationProposal(JSON.stringify({ ...raw, title }), { title, templateId: requestBody.templateId, template: requestBody.template, aspectRatio: requestBody.aspectRatio, language: requestBody.language, sources: requestBody.materials,
+                    signal, productionProfile: require('../../services/presentations/presentation-production-profile').fromRequest(requestBody) });
                 if (proposal.presentation) {
                     const sourceIds = new Set(requestBody.materials.map((item, index) => item.id || 'source_' + (index + 1)));
                     proposal.presentation.slides.forEach(slide => { slide.sourceRefs = (slide.sourceRefs || []).filter(ref => sourceIds.has(ref)); (slide.elements || []).forEach(element => { element.sourceRefs = (element.sourceRefs || []).filter(ref => sourceIds.has(ref)); }); });
                     proposal.presentation = normalizePresentation(proposal.presentation);
                 }
-                return { proposal, validation: runPresentationValidation(proposal.presentation) };
+                proposal.warnings = [...materialNotice(prepared.coverage), ...(proposal.warnings || [])];
+                return { proposal, materialCoverage: prepared.coverage, validation: runPresentationValidation(proposal.presentation) };
             }
         });
     }));
@@ -691,7 +725,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     router.post('/apps/presentations/:id/export', authMiddleware, asyncHandler(async (req, res) => {
         const startedAt = Date.now(); const format = req.body?.format || '';
         try {
-            const result = await createPresentationExport(req.user, req.params.id, format, { slideIndex: req.body?.slideIndex, aspectRatio: req.body?.aspectRatio, includeNotes: req.body?.includeNotes, includePageNumbers: req.body?.includePageNumbers, showSourceRefs: req.body?.showSourceRefs, imageQuality: req.body?.imageQuality, fontStrategy: req.body?.fontStrategy });
+            const result = await createPresentationExport(req.user, req.params.id, format, { slideIndex: req.body?.slideIndex, aspectRatio: req.body?.aspectRatio, includeNotes: req.body?.includeNotes, includePageNumbers: req.body?.includePageNumbers, showSourceRefs: req.body?.showSourceRefs, allowSensitiveExport: req.body?.allowSensitiveExport === true, baseVersion: req.body?.baseVersion, baseDigest: req.body?.baseDigest, imageQuality: req.body?.imageQuality, fontStrategy: req.body?.fontStrategy });
             recordPresentationOutcome('export', { outcome: 'success', durationMs: Date.now() - startedAt, format });
             writeLog(req, '导出PPT演示文稿', `文稿: ${req.params.id}，格式: ${format}，复用: ${result.reused ? '是' : '否'}`);
             res.status(result.reused ? 200 : 201).json({ success: true, rendition: result.rendition, reused: result.reused, validation: result.validation, durationMs: result.durationMs || 0 });

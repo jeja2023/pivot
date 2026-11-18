@@ -3,8 +3,21 @@
     const API = '/api/apps/presentations/native';
     let bound = false, helpers, presentationState, documentValue = null, slideIndex = 0, selected = '', readPatch = null, job = null, epoch = 0;
     const byId = id => document.getElementById(id);
+    const actor = () => String(window.Pivot.legacy?.currentUser?.id || '');
+    function current(sequence) {
+        const modal = byId('presentation-native-modal');
+        return sequence === epoch && modal?.dataset.owner === actor() && !modal.classList.contains('hidden');
+    }
     function node(tag, className = '', text = '') { const item = document.createElement(tag); item.className = className; item.textContent = text; return item; }
-    function button(text, action, primary = false) { const item = node('button', primary ? 'btn-primary' : 'btn-secondary', text); item.type = 'button'; item.addEventListener('click', () => Promise.resolve(action()).catch(showError)); return item; }
+    function button(text, action, primary = false) {
+        const item = node('button', primary ? 'btn-primary' : 'btn-secondary', text);
+        item.type = 'button';
+        item.addEventListener('click', async () => {
+            const sequence = epoch;
+            try { await action(); } catch (error) { if (current(sequence)) showError(error); }
+        });
+        return item;
+    }
     function field(label, type, value = '', options = {}) {
         const wrapper = node('label', 'presentation-native-field'), input = node(type === 'select' ? 'select' : type === 'textarea' ? 'textarea' : 'input', 'form-input');
         wrapper.append(node('span', '', label), input); input.setAttribute('aria-label', label);
@@ -49,10 +62,16 @@
         const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭');
         closeBtn.type = 'button'; closeBtn.setAttribute('aria-label', '关闭');
         closeBtn.addEventListener('click', async () => {
-            if (await discardAllowed()) {
+            const sequence = epoch;
+            if (await discardAllowed() && current(sequence)) {
                 overlay.classList.add('hidden');
                 modal.classList.remove('has-document');
                 epoch++;
+                documentValue = null; job = null; selected = ''; readPatch = null; slideIndex = 0;
+                byId('presentation-native-upload').value = '';
+                byId('presentation-native-preview').removeAttribute('src');
+                byId('presentation-native-status').replaceChildren();
+                byId('presentation-native-narration').replaceChildren();
             }
         });
         titleRow.append(titleGroup, closeBtn);
@@ -92,7 +111,10 @@
         const cardExistingDesc = node('p', 'presentation-native-card-desc', '选择历史导入的原稿版本继续编辑，或直接载入当前工作台文稿微调。');
         const docs = field('已有原稿', 'select'); docs.input.id = 'presentation-native-documents';
         const existingActions = node('div', 'presentation-native-existing-actions');
-        const openBtn = button('打开原稿', async () => { if (await discardAllowed() && docs.input.value) await loadDocument(docs.input.value); });
+        const openBtn = button('打开原稿', async () => {
+            const sequence = epoch, id = docs.input.value;
+            if (id && await discardAllowed() && current(sequence)) await loadDocument(id);
+        });
         const currentBtn = button('打开当前工作台文稿', async () => { if (!presentationState.active?.id) throw new Error('请先在工作台打开一份文稿。'); await begin({ kind: 'import', presentationId: presentationState.active.id, title: presentationState.active.title }); });
         existingActions.append(openBtn, currentBtn);
         cardExisting.append(cardExistingHead, cardExistingDesc, docs.wrapper, existingActions);
@@ -107,8 +129,14 @@
         const editor = node('div', 'presentation-native-editor hidden'); editor.id = 'presentation-native-editor';
         const top = node('div', 'presentation-native-toolbar'), slides = field('页面', 'select'), versions = field('版本', 'select');
         slides.input.id = 'presentation-native-slide'; versions.input.id = 'presentation-native-version';
-        slides.input.addEventListener('change', async () => { if (await discardAllowed()) { slideIndex = Number(slides.input.value); selected = ''; renderSlide(); } });
-        versions.input.addEventListener('change', async () => { if (await discardAllowed()) await loadDocument(documentValue.id, Number(versions.input.value)); });
+        slides.input.addEventListener('change', async () => {
+            const sequence = epoch, next = Number(slides.input.value);
+            if (await discardAllowed() && current(sequence)) { slideIndex = next; selected = ''; renderSlide(); }
+        });
+        versions.input.addEventListener('change', async () => {
+            const sequence = epoch, id = documentValue?.id, version = Number(versions.input.value);
+            if (id && await discardAllowed() && current(sequence)) await loadDocument(id, version);
+        });
         const download = button('下载此版本PPTX', () => downloadPackage());
         const restore = button('恢复所选历史版本', async () => {
             if (documentValue.version === documentValue.currentVersion) throw new Error('当前已是最新版本。');
@@ -144,18 +172,31 @@
         panel.append(grid, node('p', 'presentation-empty-note', '可为每页上传WAV、MP3或OGG旁白。停留时间会延长至旁白结束后；单页最多60秒、整稿最多10分钟。'), narration, accepted.wrapper, button('开始离线视频导出', startVideo, true));
         return panel;
     }
-    async function library() {
-        const data = await helpers.requestJson(API + '/documents'), selector = byId('presentation-native-documents'); selector.replaceChildren(new Option('选择已有原稿', ''));
+    async function library(sequence) {
+        const data = await helpers.requestJson(API + '/documents');
+        if (!current(sequence)) return;
+        const selector = byId('presentation-native-documents'); selector.replaceChildren(new Option('选择已有原稿', ''));
         data.documents.forEach(item => selector.appendChild(new Option(`${item.title} · v${item.current_version}`, item.id)));
         if (documentValue) selector.value = documentValue.id;
     }
     async function open(source = null) {
         ensureView();
-        byId('presentation-native-modal').classList.remove('hidden');
+        const sequence = ++epoch, modal = byId('presentation-native-modal');
+        if (modal.dataset.owner !== actor()) {
+            documentValue = null; job = null; selected = ''; readPatch = null; slideIndex = 0;
+            byId('presentation-native-status').replaceChildren();
+        }
+        modal.dataset.owner = actor();
+        modal.classList.remove('hidden');
         byId('presentation-native-dialog')?.classList.remove('has-document');
         byId('presentation-native-entry-grid')?.classList.remove('hidden');
         byId('presentation-native-editor')?.classList.add('hidden');
+        try { await loadEntry(source, sequence); }
+        catch (error) { if (current(sequence)) showError(error); }
+    }
+    async function loadEntry(source, sequence) {
         const { engine } = await helpers.requestJson(API + '/info');
+        if (!current(sequence)) return;
         byId('presentation-native-import').disabled = !engine.enabled;
         const banner = byId('presentation-native-banner');
         if (banner) {
@@ -165,38 +206,52 @@
             banner.append(pill, msg);
         }
         if (!engine.enabled) { showError(new Error(engine.message)); return; }
-        await library();
+        await library(sequence);
+        if (!current(sequence)) return;
         if (source?.sourceRenditionId) { await begin({ kind: 'import', ...source }); return; }
         const data = await helpers.requestJson(API + '/jobs/latest');
-        if (data.task) { job = data.task; await poll(job.id, ++epoch); }
+        if (!current(sequence)) return;
+        if (data.task) { job = data.task; await poll(job.id, sequence); }
         else byId('presentation-native-status').replaceChildren(node('p', 'presentation-empty-hint', '上传原稿或打开已有文稿，无需调用模型或访问互联网。'));
     }
     async function importFile() {
+        const sequence = epoch;
         const file = byId('presentation-native-upload').files?.[0];
         if (!file || !/\.pptx$/i.test(file.name)) throw new Error('请选择PPTX原稿。');
         const body = new FormData(); body.append('file', file); body.append('assetType', 'attachment');
         const { asset } = await helpers.requestJson('/api/apps/presentations/assets', { method: 'POST', body });
+        if (!current(sequence)) return;
         await begin({ kind: 'import', sourceAssetId: String(asset.id), title: file.name.replace(/\.pptx$/i, '') });
     }
     async function begin(input) {
+        const sequence = epoch;
         if (job?.status === 'working') throw new Error('已有原稿任务正在执行，请等待完成或停止后再操作。');
         if (input.kind !== 'patch' && !await discardAllowed()) return;
-        const data = await helpers.requestJson(API + '/jobs', post(input)); job = data.task; await poll(job.id, ++epoch);
+        if (!current(sequence)) return;
+        const data = await helpers.requestJson(API + '/jobs', post(input));
+        if (!current(sequence)) return;
+        job = data.task; await poll(job.id, sequence);
     }
     async function poll(id, sequence, retries = 0) {
+        if (!current(sequence)) return;
         let data;
         try { data = await helpers.requestJson(API + '/jobs/' + encodeURIComponent(id)); }
         catch (error) {
-            if (sequence === epoch && retries < 8 && (!error.status || error.status >= 500) && !byId('presentation-native-modal').classList.contains('hidden')) {
+            if (!current(sequence)) return;
+            if (retries < 8 && (!error.status || error.status >= 500)) {
                 byId('presentation-native-status').appendChild(node('p', 'presentation-empty-note', '暂时无法读取进度，正在重新连接；不会重复创建任务。'));
-                window.setTimeout(() => poll(id, sequence, retries + 1).catch(showError), 3000); return;
+                window.setTimeout(() => poll(id, sequence, retries + 1).catch(error => { if (current(sequence)) showError(error); }), 3000); return;
             }
             throw error;
         }
-        if (sequence !== epoch) return;
+        if (!current(sequence)) return;
         job = data.task; renderJob();
-        if (job.status === 'working' && !byId('presentation-native-modal').classList.contains('hidden')) window.setTimeout(() => poll(id, sequence).catch(showError), 1500);
-        else if (job.status === 'completed' && job.result?.documentId && !job.result.file) { readPatch = null; await library(); await loadDocument(job.result.documentId); }
+        if (job.status === 'working') window.setTimeout(() => poll(id, sequence).catch(error => { if (current(sequence)) showError(error); }), 1500);
+        else if (job.status === 'completed' && job.result?.documentId && !job.result.file) {
+            const result = job.result; readPatch = null;
+            await library(sequence);
+            if (current(sequence)) await loadDocument(result.documentId);
+        }
     }
     function renderJob() {
         const panel = byId('presentation-native-status'); panel.replaceChildren();
@@ -206,23 +261,46 @@
             else if (!busy && control.dataset.nativeBusy !== undefined) { control.disabled = control.dataset.nativeBusy === 'disabled'; delete control.dataset.nativeBusy; }
         }
         panel.append(node('strong', '', { working: '正在处理', completed: '处理完成', failed: '处理未完成', cancelled: '已停止', expired: '任务已过期' }[job.status] || '原稿任务'), node('p', '', job.error?.message || job.progress?.message || '正在准备。'));
-        if (job.status === 'working') panel.appendChild(button('停止任务', async () => { const data = await helpers.requestJson(API + '/jobs/' + job.id + '/cancel', post({})); job = data.task; renderJob(); }));
-        if (job.recoverable) panel.appendChild(button('从检查点继续', async () => { await helpers.requestJson(API + '/jobs/' + job.id + '/resume', post({})); await poll(job.id, ++epoch); }));
+        const jobId = job.id;
+        if (job.status === 'working') panel.appendChild(button('停止任务', async () => {
+            const sequence = ++epoch;
+            try {
+                const data = await helpers.requestJson(API + '/jobs/' + jobId + '/cancel', post({}));
+                if (current(sequence)) { job = data.task; renderJob(); }
+            } catch (error) {
+                if (current(sequence)) {
+                    panel.appendChild(node('p', 'presentation-empty-note', error.message));
+                    window.setTimeout(() => poll(jobId, sequence).catch(failure => { if (current(sequence)) showError(failure); }), 3000);
+                }
+            }
+        }));
+        if (job.recoverable) panel.appendChild(button('从检查点继续', async () => {
+            const sequence = ++epoch;
+            try { await helpers.requestJson(API + '/jobs/' + jobId + '/resume', post({})); await poll(jobId, sequence); }
+            catch (error) { if (current(sequence)) panel.appendChild(node('p', 'presentation-empty-note', error.message)); }
+        }));
         if (job.result?.file) panel.appendChild(button('下载MP4视频', async () => {
-            const file = job.result.file, data = await helpers.requestJson('/api/agents/renditions/' + file.renditionId + '/download-token', post({}));
-            triggerDownload('/api/agents/renditions/' + file.renditionId + '/download?token=' + encodeURIComponent(data.token), file.filename);
+            const sequence = epoch, file = job.result.file, data = await helpers.requestJson('/api/agents/renditions/' + file.renditionId + '/download-token', post({}));
+            if (current(sequence)) triggerDownload('/api/agents/renditions/' + file.renditionId + '/download?token=' + encodeURIComponent(data.token), file.filename);
         }));
     }
     async function loadDocument(id, version = null) {
+        const sequence = ++epoch;
+        if (!current(sequence)) return;
         const suffix = version === null ? '' : '/versions/' + version;
-        const data = await helpers.requestJson(API + '/documents/' + encodeURIComponent(id) + suffix); documentValue = data.document;
+        const url = API + '/documents/' + encodeURIComponent(id);
+        let data, history;
+        try { [data, history] = await Promise.all([helpers.requestJson(url + suffix), helpers.requestJson(url + '/versions')]); }
+        catch (error) { if (current(sequence)) showError(error); return; }
+        if (!current(sequence)) return;
+        documentValue = data.document;
         byId('presentation-native-dialog')?.classList.add('has-document');
         byId('presentation-native-entry-grid')?.classList.add('hidden');
         byId('presentation-native-documents').value = documentValue.id;
         selected = ''; slideIndex = Math.min(slideIndex, documentValue.manifest.slides.length - 1); readPatch = null;
         const selector = byId('presentation-native-slide'); selector.replaceChildren();
         documentValue.manifest.slides.forEach(slide => selector.appendChild(new Option('第' + (slide.index + 1) + '页', String(slide.index)))); selector.value = String(slideIndex);
-        const history = await helpers.requestJson(API + '/documents/' + id + '/versions'), versions = byId('presentation-native-version'); versions.replaceChildren();
+        const versions = byId('presentation-native-version'); versions.replaceChildren();
         history.versions.forEach(item => versions.appendChild(new Option('版本' + item.version, String(item.version)))); versions.value = String(documentValue.version);
         byId('presentation-native-notice').textContent = `${documentValue.title} · v${documentValue.version}。${documentValue.manifest.previewNotice} 拖动对象后点击“保存对象修改”。`;
         byId('presentation-native-editor').classList.remove('hidden');
@@ -240,7 +318,11 @@
         byId('presentation-native-save').disabled = documentValue.version !== documentValue.currentVersion;
         renderSelection();
     }
-    async function chooseObject(id) { if (id === selected || !await discardAllowed()) return; selected = id; renderSlide(); }
+    async function chooseObject(id) {
+        const sequence = epoch, page = slideIndex;
+        if (id === selected || !await discardAllowed() || !current(sequence) || page !== slideIndex) return;
+        selected = id; renderSlide();
+    }
     function renderSelection() {
         const svg = byId('presentation-native-selection'), manifest = documentValue.manifest, objects = manifest.slides[slideIndex].objects;
         svg.replaceChildren(); svg.setAttribute('viewBox', `0 0 ${manifest.width} ${manifest.height}`);
@@ -278,12 +360,14 @@
     function triggerDownload(url, filename) { const link = node('a'); link.href = url; link.download = filename; document.body.appendChild(link); link.click(); link.remove(); }
     function downloadPackage() { triggerDownload(API + '/documents/' + documentValue.id + '/download?version=' + documentValue.version, documentValue.title + '.pptx'); }
     async function startVideo() {
+        const sequence = epoch;
         if (dirty()) throw new Error('请先保存当前对象修改，再导出视频。');
         if (!byId('presentation-native-video-accept').checked) throw new Error('请先确认页面视频模式及静态预览。');
         const narration = [];
         for (const input of byId('presentation-native-narration').querySelectorAll('input[type="file"]')) if (input.files?.[0]) {
             const body = new FormData(); body.append('file', input.files[0]); body.append('assetType', 'audio');
             const { asset } = await helpers.requestJson('/api/apps/presentations/assets', { method: 'POST', body }); narration.push({ slideIndex: Number(input.dataset.narrationSlide), assetId: String(asset.id) });
+            if (!current(sequence)) return;
         }
         await begin({
             kind: 'video', documentId: documentValue.id, baseVersion: documentValue.version, title: documentValue.title, mode: 'page_video', acknowledgeStatic: true,

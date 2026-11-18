@@ -3,6 +3,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const { TextDecoder } = require('node:util');
 const { getKnowledgeLimits, getUploadLimits } = require('./services/resource-limits');
 const { clearDirSizeCache } = require('./services/dir-size-cache');
 
@@ -119,7 +120,7 @@ async function cleanupRequestUploads(req, root = uploadRoot) {
     ]);
 }
 
-async function verifyUploadedMagic(file) {
+async function verifyUploadedMagic(file, { allowUtf16Csv = false } = {}) {
     if (!file?.path) return true;
 
     const buffer = Buffer.alloc(1024);
@@ -158,21 +159,37 @@ async function verifyUploadedMagic(file) {
     if (ext === '.mp4' || ext === '.m4a' || ext === '.mov') return actualData.length >= 12 && actualData.subarray(4, 8).toString('ascii') === 'ftyp';
     if (ext === '.webm') return actualData.length >= 4 && actualData[0] === 0x1a && actualData[1] === 0x45 && actualData[2] === 0xdf && actualData[3] === 0xa3;
 
+    if (ext === '.csv' && allowUtf16Csv) {
+        const marker = actualData.length >= 2 ? actualData.readUInt16BE(0) : 0;
+        if (marker === 0xfffe || marker === 0xfeff) {
+            try {
+                // 样本末尾可能落在字符中间，完整文件由 CSV 导入器继续校验。
+                return !new TextDecoder(marker === 0xfffe ? 'utf-16le' : 'utf-16be', { fatal: true })
+                    .decode(actualData, { stream: true }).includes('\0');
+            } catch {
+                return false;
+            }
+        }
+    }
     const checkLen = Math.min(bytesRead, 512);
     return checkLen === 0 || !actualData.subarray(0, checkLen).includes(0);
 }
 
-async function uploadSecurityMiddleware(req, res, next) {
-    const root = req._pivotUploadRoot || uploadRoot;
-    const files = collectRequestFiles(req);
-    for (const file of files) {
-        if (!await verifyUploadedMagic(file)) {
-            await cleanupRequestUploads(req, root);
-            return res.status(400).json({ error: '文件内容与扩展名不匹配，已拒绝上传' });
+function createUploadSecurityMiddleware(options) {
+    return async (req, res, next) => {
+        const root = req._pivotUploadRoot || uploadRoot;
+        const files = collectRequestFiles(req);
+        for (const file of files) {
+            if (!await verifyUploadedMagic(file, options)) {
+                await cleanupRequestUploads(req, root);
+                return res.status(400).json({ error: '文件内容与扩展名不匹配，已拒绝上传' });
+            }
         }
-    }
-    next();
+        next();
+    };
 }
+
+const uploadSecurityMiddleware = createUploadSecurityMiddleware();
 
 function countObjectDepth(value, depth = 0, seen = new Set()) {
     if (!value || typeof value !== 'object') return depth;
@@ -310,6 +327,7 @@ module.exports = {
     createKnowledgeUploadMiddleware,
     createSafeUpload,
     createUploadMiddleware,
+    createUploadSecurityMiddleware,
     normalizeUploadedOriginalName,
     removeUploadedFile,
     verifyUploadedMagic,

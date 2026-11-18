@@ -91,7 +91,7 @@ def validate_svg(source: str, target: Path) -> None:
         relative_path(candidate.resolve().relative_to(WORKSPACE.resolve()).as_posix(), WORKSPACE, must_exist=True)
 
 
-def package_report(data: bytes) -> dict:
+def package_report(data: bytes, checklist=None) -> dict:
     if len(data) > 60 * 1024 * 1024:
         raise ValueError("PPTX 超过输出上限。")
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
@@ -111,7 +111,11 @@ def package_report(data: bytes) -> dict:
                 if b"<!DOCTYPE" in text or b"<!ENTITY" in text:
                     raise ValueError("最终文件含不支持的 XML 声明。")
                 ET.fromstring(text)
-        return {"status": "passed", "slideCount": len(slide_names), "charts": len([name for name in names if re.fullmatch(r"ppt/charts/chart\d+\.xml", name)]), "officeVisual": "not_checked"}
+        report = {"status": "passed", "slideCount": len(slide_names), "charts": len([name for name in names if re.fullmatch(r"ppt/charts/chart\d+\.xml", name)]), "officeVisual": "not_checked"}
+        if checklist is not None:
+            from delivery_checklist import verify_checklist
+            report.update(verify_checklist(archive, slide_names, checklist))
+        return report
 
 
 def main(request: dict) -> dict:
@@ -132,7 +136,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action in {"native_inspect", "native_patch", "native_video_prepare", "native_video_clip", "native_video_finish"}:
         from native_adapter import execute
@@ -236,7 +240,7 @@ def main(request: dict) -> dict:
         receipt = json.loads((WORKSPACE / ".pivot/export.json").read_text(encoding="utf-8"))
         if receipt.get("sourceFingerprint") != source_fingerprint() or receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != hashlib.sha256(data).hexdigest():
             raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。")
-        report = package_report(data)
+        report = package_report(data, request.get("checklist"))
         delivery = WORKSPACE / "delivery"
         delivery.mkdir(exist_ok=True)
         (delivery / "presentation.pptx").write_bytes(data)
@@ -245,7 +249,9 @@ def main(request: dict) -> dict:
                 relative = entry.relative_to(WORKSPACE)
                 if relative.parts[0] != "delivery":
                     archive.write(entry, relative.as_posix())
-        return {"path": "delivery/presentation.pptx", "projectPath": "delivery/project.zip", "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data), "packageCheck": report}
+        with (delivery / "project.zip").open("rb") as project_file:
+            project_digest = hashlib.file_digest(project_file, "sha256").hexdigest()
+        return {"path": "delivery/presentation.pptx", "projectPath": "delivery/project.zip", "sha256": hashlib.sha256(data).hexdigest(), "projectSha256": project_digest, "byteSize": len(data), "packageCheck": report}
     raise ValueError("执行动作未登记。")
 
 

@@ -4,6 +4,7 @@ import re
 
 
 TOOLS = {
+    "analyze_images": ("analyze_images.py", set()),
     "text_measure": ("text_measure.py", {"--outline"}),
     "project": ("project_manager.py", {"--format", "--dir", "--quick-generate", "--copy", "--no-image-propagation", "--json", "--pretty", "--bundle", "--record-usage"}),
     "check_svg": ("svg_quality_checker.py", {"--quick-generate", "--canonical-authoring", "--stage", "--json", "--template-mode", "--template-kind"}),
@@ -51,6 +52,16 @@ def command(tool: str, args: list, skill: Path, workspace: Path) -> list[str]:
         parts = project.relative_to(workspace).parts
         if not project.is_dir() or not parts or parts[0] in {"inputs", "delivery"}:
             raise ValueError("文字校准需要可写的任务项目目录。")
+    if tool == "analyze_images":
+        if len(args) != 1:
+            raise ValueError("图片盘点只接受当前项目的 images 目录。")
+        directory = relative_path(args[0], workspace, must_exist=True)
+        parts = directory.relative_to(workspace).parts
+        if len(parts) < 2 or parts[-1] != "images" or parts[0] in {"inputs", "delivery"} or not directory.is_dir():
+            raise ValueError("图片盘点只接受当前项目的 images 目录。")
+        for child in directory.rglob("*"):
+            if child.is_symlink():
+                raise ValueError("图片盘点不接受符号链接。")
     script, flags = TOOLS[tool]
     script_path = skill / "scripts" / script
     if not script_path.is_file():

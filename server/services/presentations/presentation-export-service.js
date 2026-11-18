@@ -102,6 +102,9 @@ function createExportService(deps) {
         if (!currentRow) throw publicError('演示文稿不存在或无权访问。', 404, 'PRESENTATION_NOT_FOUND');
         assertPresentationOwnerOrAdmin(user, currentRow);
         const current = toPublicPresentation(currentRow, { includeContent: true });
+        if (options.allowSensitiveExport === true && (options.baseVersion !== Number(current.version) || options.baseDigest !== current.contentDigest)) {
+            throw publicError('请在当前文稿版本重新确认敏感内容后导出。', 409, 'PRESENTATION_SENSITIVE_EXPORT_VERSION_CHANGED');
+        }
         const tenant = await assertTenantContext(user);
         let artifact = await getAgentArtifactForUser(current.artifactId, user);
         if (!artifact) throw publicError('演示文稿产物不存在或无权导出。', 404, 'PRESENTATION_ARTIFACT_NOT_FOUND');
@@ -119,7 +122,12 @@ function createExportService(deps) {
             SELECT * FROM agent_artifact_renditions
             WHERE tenant_id = ? AND artifact_id = ? AND ir_digest = ? AND format = ? AND renderer_version = ? AND status = 'ready'
         `, [tenant.tenantId, artifact.id, irDigest, normalizedFormat, rendererVersion]);
-        if (existing) return { rendition: existing, reused: true, validation: exportValidation };
+        if (existing) {
+            if (sensitiveIssues.length) await recordDeliveryEvent({ tenantId: tenant.tenantId, renditionId: existing.id, runId: existing.run_id,
+                toolCallId: existing.tool_call_id, actorType: 'user', actorId: String(user.id), eventType: 'presentation_render',
+                pathHint: `${current.title}.${normalizedFormat}`, contentDigest: existing.content_digest, decisionReason: `用户已确认 ${sensitiveIssues.length} 项可能的敏感内容后复用导出。` });
+            return { rendition: existing, reused: true, validation: exportValidation };
+        }
         const contentBuffer = Buffer.from(serializeJson(exportContent), 'utf8');
         const irObject = await putBuffer({ buffer: contentBuffer, mimeType: 'application/json; charset=utf-8', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'presentation_ir' });
         const assets = await resolvePresentationAssets(user, exportContent, { presentationId: current.id });

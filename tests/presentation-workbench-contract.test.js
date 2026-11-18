@@ -156,8 +156,8 @@ test('PPT 迁移建立版本、模板、素材和导出审计业务表', () => {
     assert.match(presentationRoutes, /PRESENTATION_AI_CANCELLED/);
     assert.match(presentationRoutes, /retryMalformedJson:\s*true/);
     assert.match(presentationRoutes, /PRESENTATION_AI_JSON_REPAIR_FAILED/);
-    assert.match(presentationRoutes, /buildMalformedJsonRecoveryMessages/);
-    assert.match(presentationRoutes, /_compact_retry/);
+    assert.match(presentationRoutes, /generateRosterPages/);
+    assert.match(presentationRoutes, /_missing_pages/);
     assert.match(presentationRoutes, /filterOutlineSourceRefs/);
     const service = source('server/services/presentations/presentation-service.js');
     const templateService = source('server/services/presentations/presentation-template-service.js');
@@ -242,7 +242,8 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     const renderer = source('server/services/presentations/presentation-renderer.js');
     const qualityMigration = source('server/db/migrations/presentation-quality-metadata.js');
     ['presentation-library-created-by', 'presentation-library-template', 'presentation-library-status', 'presentation-library-updated-from', 'presentation-library-updated-to', 'presentation-create-duration', 'presentation-create-language', 'presentation-create-needs-charts', 'presentation-create-retain-sources', 'presentation-create-must-include', 'presentation-create-prohibited-content', 'presentation-copy-element-btn', 'presentation-group-elements-btn', 'presentation-replace-image-btn', 'presentation-table-add-row-btn', 'presentation-export-options-modal', 'presentation-export-allow-sensitive'].forEach(id => assert.ok(workspace.includes('id="' + id + '"'), id));
-    ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage', 'saveExportOptions'].forEach(name => assert.ok(editor.includes('function ' + name), name));
+    ['syncLibraryFilters', 'copySelectedElements', 'pasteSelectedElements', 'groupSelectedElements', 'ungroupSelectedElements', 'alignSelectedElements', 'adjustTableStructure', 'replaceSelectedImage'].forEach(name => assert.ok(editor.includes('function ' + name), name));
+    assert.match(source('client/chat/apps-workbench-presentations-persistence.js'), /function saveExportOptions/);
     assert.ok(presenter.includes('aspectRatio: options.aspectRatio'));
     assert.match(source('server/routes/apps/presentations.js'), /aspectRatio: req\.body\?\.aspectRatio/);
     const assetService = source('server/services/presentations/presentation-asset-service.js');

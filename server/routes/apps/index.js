@@ -11,7 +11,7 @@ const { registerDataAnalysisProductRoutes } = require('./data-analysis-product-r
 const { asyncHandler, normalizeLimit } = require('../../http');
 const { handler: analysisDeliveryHandler } = require('../../services/data-analysis/bi/delivery');
 const { logger } = require('../../logger');
-const { createSafeUpload, uploadSecurityMiddleware } = require('../../upload');
+const { createSafeUpload, createUploadSecurityMiddleware, uploadSecurityMiddleware } = require('../../upload');
 
 
 
@@ -274,6 +274,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
         maxFields: 4,
         errorMessage: '数据分析仅支持 CSV、XLS/XLSX 或 SQLite 数据库文件'
     });
+    const dataAnalysisUploadSecurity = createUploadSecurityMiddleware({ allowUtf16Csv: true });
     // PDF 工具的可选参数较多。保留明确且有界的独立 multipart 字段预算，
     // 兼容已发布客户端，同时不放宽其它上传接口的通用 20 字段上限。
     const pdfToolsUpload = createSafeUpload({
@@ -436,7 +437,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
     router.get('/apps/data-analysis/alerts/:alertId', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ alert: await getAlertRule(req.user, req.params.alertId) });
     }));
-    router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, asyncHandler(async (req, res) => {
+    router.post('/apps/data-analysis/datasets', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), dataAnalysisUploadSecurity, asyncHandler(async (req, res) => {
         try {
             const dataset = await importDataset({ user: req.user, file: req.file, name: req.body?.name });
             logAction(req, '数据分析-上传数据集', `数据集: ${dataset.name} (${dataset.rowCount} 行)`);
@@ -448,7 +449,7 @@ function createAppsRouter({ authMiddleware, logAction, uploadLimiter, upload }) 
             throw e;
         }
     }));
-    router.post('/apps/data-analysis/datasets/:id/increments', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), uploadSecurityMiddleware, analysisDeliveryHandler(async (req, res) => {
+    router.post('/apps/data-analysis/datasets/:id/increments', authMiddleware, uploadLimiter, dataAnalysisUpload.single('file'), dataAnalysisUploadSecurity, analysisDeliveryHandler(async (req, res) => {
         try {
             const result = await appendIncrementalDataset({ user: req.user, datasetId: req.params.id, file: req.file, input: { inputBatchId: req.body?.inputBatchId, expectedSourceRevision: req.body?.expectedSourceRevision } });
             logAction(req, '数据分析-增量导入', `数据集: ${req.params.id}，新增行: ${result.appendedRows}，版本: ${result.sourceVersion}`);

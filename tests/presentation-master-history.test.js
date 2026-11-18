@@ -9,6 +9,148 @@ const { archiveOlderObservations, readHistory } = require('../server/services/pr
 const { phaseMessages } = require('../server/services/presentations/master/phase-context');
 const { estimateMessagesTokens } = require('../server/services/context-budget');
 
+function referenceCheckpoint(turns, pageLength) {
+    const messages = [{ role: 'system', content: '原始制作指引' }, { role: 'user', content: '保留材料中的金额和来源' }];
+    for (let index = 0; index < turns; index++) {
+        const page = { path: `references/${index}.md`, offset: 0, length: pageLength };
+        messages.push({ role: 'assistant', content: JSON.stringify({ actions: [{ action: 'read_runtime', ...page }] }) });
+        messages.push({ role: 'user', content: JSON.stringify([{ action: 'read_runtime', result: {
+            path: page.path, text: '制作流程'.repeat(pageLength / 4), offset: 0, nextOffset: pageLength
+        } }]) });
+    }
+    return { bootstrapped: true, steps: turns, usedTokens: 1184708, confirmedGates: 2, request: { operation: 'generate', profile: 'default',
+        inputFiles: [], materials: [], maxSteps: 80, tokenBudget: 10000000 }, messages };
+}
+
+test('256K 模型从连续 28 步指引读取后的检查点继续，保留确认和分页并执行文件写入', async t => {
+    const directory = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'pivot-ppt-history-'));
+    t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
+    const { drive } = require('../server/services/presentations/master/driver');
+    const { actionSummary } = require('../server/services/presentations/master/observations');
+    const state = referenceCheckpoint(28, 5000);
+    state.messages.push({ role: 'user', content: '用户对本次确认问题的实际答复：保留原有口径。' });
+    const sourcePage = state.messages[3].content, file = path.join(directory, 'page.svg');
+    assert.ok(estimateMessagesTokens(state.messages) > 256000);
+    assert.ok(JSON.stringify(state.messages).length < 500000);
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+    let calls = 0;
+    await drive({ id: 1 }, 'fixture', state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000, max_tokens: 12000 }),
+        callModel: async (_model, messages, options) => {
+            assert.ok(estimateMessagesTokens(messages) + options.maxTokens + 256 <= 256000);
+            assert.match(messages[0].content, /原始制作指引/);
+            assert.ok(messages.some(message => message.content.includes('保留原有口径。')));
+            assert.equal(options.maxTokens, 12000);
+            calls++;
+            if (calls === 1) {
+                const page = JSON.parse(messages[3].content)[0].result;
+                assert.equal(page.path, 'references/0.md');
+                assert.equal(page.nextOffset, 5000);
+                assert.equal((await readHistory(state, page.archived)).text, sourcePage);
+                return { actions: [{ action: 'write', path: 'project/svg_output/page.svg', text: '<svg/>' }] };
+            }
+            return { complete: { path: 'project/exports/final.pptx' } };
+        },
+        execute: async (_user, _id, action) => {
+            if (action.action === 'deliver') return { packageCheck: { status: 'passed' } };
+            assert.equal(action.action, 'write');
+            await fs.promises.writeFile(file, action.text, { flag: 'wx' });
+            return { path: action.path, sha256: crypto.createHash('sha256').update(await fs.promises.readFile(file)).digest('hex') };
+        }
+    });
+    assert.equal(calls, 2);
+    assert.equal(state.confirmedGates, 2);
+    assert.deepEqual(actionSummary(state.messages), { writes: 1, failedWrites: 0, runtimeReads: 28, lastWrittenPath: 'project/svg_output/page.svg', lastActions: [{ action: 'write', failed: false }] });
+});
+
+test('供应商拒绝上下文时只在归档确实缩小请求后重试，超时与限流各只调用一次', async () => {
+    const { drive } = require('../server/services/presentations/master/driver');
+    const { AbortSignal } = globalThis;
+    const hooks = { signal: AbortSignal.timeout(10000), ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const model = { context_window_tokens: 256000, max_tokens: 12000 };
+    const upstream = () => Object.assign(new Error('Request failed'), { response: { status: 400, data: { error: { code: 'context_length_exceeded' } } } });
+    const state = referenceCheckpoint(5, 4000), estimates = [];
+    let executed = 0;
+    await drive({ id: 1 }, 'fixture', state, hooks, {
+        resolveModel: async () => model,
+        callModel: async (_model, messages) => {
+            estimates.push(estimateMessagesTokens(messages));
+            if (estimates.length === 1) throw upstream();
+            return { complete: { path: 'project/exports/final.pptx' } };
+        },
+        execute: async () => { executed++; return {}; }
+    });
+    assert.equal(estimates.length, 2);
+    assert.ok(estimates[1] < estimates[0]);
+    assert.equal(executed, 1);
+    assert.equal(state.usageDiagnostics.length, 1);
+    for (const [error, code] of [[upstream(), 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT'],
+        [Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED' }), 'PPT_MASTER_MODEL_TIMEOUT'],
+        [Object.assign(new Error('Request failed'), { response: { status: 429 } }), 'PPT_MASTER_MODEL_RATE_LIMIT']]) {
+        const checkpoint = referenceCheckpoint(1, 1000);
+        let calls = 0;
+        await assert.rejects(drive({ id: 1 }, 'fixture', checkpoint, hooks, {
+            resolveModel: async () => model,
+            callModel: async () => { calls++; throw error; },
+            execute: async () => assert.fail('失败后不能执行动作')
+        }), { code });
+        assert.equal(calls, 1);
+        assert.equal(checkpoint.usedTokens, 1184708);
+        assert.equal(checkpoint.modelRequest.contextWindow, 256000);
+    }
+});
+
+test('超时和熔断保留续跑标记，256K 检查点整理后可以继续写入', async () => {
+    const { drive } = require('../server/services/presentations/master/driver');
+    const { AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS } = require('../server/services/agent-model');
+    const current = referenceCheckpoint(7, 4000);
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const requests = [], operations = [];
+    const deps = {
+        resolveModel: async () => ({ context_window_tokens: 256000, max_tokens: 12000 }),
+        callModel: async (_model, messages, options) => {
+            assert.equal(options.timeoutMs, undefined);
+            assert.equal(current.modelRequest.timeoutSeconds, Math.ceil(AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS / 1000));
+            requests.push(estimateMessagesTokens(messages));
+            if (requests.length === 1) throw Object.assign(new Error('timeout of 300000ms exceeded'), { code: 'ECONNABORTED' });
+            if (requests.length === 2) throw Object.assign(new Error('模型端点暂时熔断。'), { code: 'AI_ENDPOINT_CIRCUIT_OPEN' });
+            if (requests.length === 3) return { actions: [{ action: 'write', path: 'project/spec_lock.md', text: '方案正文' }] };
+            return { complete: { path: 'project/exports/final.pptx' } };
+        },
+        execute: async (_user, _id, action) => { operations.push(action.action); return {}; }
+    };
+    await assert.rejects(drive({ id: 1 }, 'fixture', current, hooks, deps), { code: 'PPT_MASTER_MODEL_TIMEOUT' });
+    assert.equal(current.focusModelHistory, true);
+    assert.equal(current.steps, 7);
+    await assert.rejects(drive({ id: 1 }, 'fixture', current, hooks, deps), { code: 'AI_ENDPOINT_CIRCUIT_OPEN' });
+    assert.equal(current.focusModelHistory, true);
+    await drive({ id: 1 }, 'fixture', current, hooks, deps);
+    assert.equal(current.focusModelHistory, undefined);
+    assert.ok(requests[1] < requests[0]);
+    assert.ok(requests[2] < requests[0]);
+    assert.deepEqual(operations, ['write', 'deliver']);
+});
+
+test('已到归档容量但本轮仍能容纳时继续制作', async () => {
+    const { drive } = require('../server/services/presentations/master/driver');
+    const state = referenceCheckpoint(28, 2800);
+    state.historyArchives = Array.from({ length: 64 }, () => ({ data: '' }));
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+    let calls = 0;
+    await drive({ id: 1 }, 'fixture', state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async (_model, messages, options) => {
+            const estimate = estimateMessagesTokens(messages);
+            assert.ok(estimate >= 256000 * 0.6 && estimate + options.maxTokens + 256 <= 256000);
+            calls++;
+            return { complete: { path: 'project/exports/final.pptx' } };
+        },
+        execute: async () => ({})
+    });
+    assert.equal(calls, 1);
+    assert.equal(state.historyArchives.length, 64);
+});
+
 test('长任务归档旧观察后保留用户答复、近期动作和原始内容，按页恢复并拒绝损坏', async () => {
     const state = { messages: [{ role: 'system', content: '安全指引' }, { role: 'user', content: '用户要求保留金额与来源' }] };
     for (let i = 0; i < 12; i++) {

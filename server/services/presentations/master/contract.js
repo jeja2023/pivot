@@ -4,11 +4,14 @@ const { error } = require('./runtime');
 const { normalizeMaterials, sha256 } = require('../presentation-evidence');
 const OPERATIONS = ['generate', 'create_template', 'edit_native'];
 const PROFILES = ['default', 'quick', 'beautify', 'image_to_pptx'];
-function normalizeTokenBudget(value, minimum = 10000) {
-    const source = value ?? 1000000;
-    if (typeof source !== 'number' && (typeof source !== 'string' || !/^\d+$/.test(source))) throw error(`累计模型预算必须是不小于${minimum}的有效整数。`);
+function normalizeTokenBudget(value, previousBudget) {
+    const source = value ?? previousBudget ?? 0;
+    const minimum = previousBudget || 10000;
+    const invalid = `累计模型预算请填写 0（不限）或不小于 ${minimum} 的整数。`;
+    if (typeof source !== 'number' && (typeof source !== 'string' || !/^\d+$/.test(source))) throw error(invalid);
     const tokenBudget = Number(source);
-    if (!Number.isSafeInteger(tokenBudget) || tokenBudget < minimum) throw error(`累计模型预算必须是不小于${minimum}的有效整数。`);
+    if (!Number.isSafeInteger(tokenBudget) || (tokenBudget !== 0 && tokenBudget < minimum)) throw error(invalid);
+    if (previousBudget === 0 && tokenBudget !== 0) throw error('本任务累计模型预算为不限，请填写 0 后继续。');
     return tokenBudget;
 }
 function text(value, max, label, required = false) {

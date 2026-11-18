@@ -28,28 +28,36 @@ test('完整引擎合同保留原稿流程和明确预算，拒绝越界规模�
     const value = request({ operation: 'edit_native', profile: 'default', sourceAssetId: '12' });
     assert.equal(value.operation, 'edit_native'); assert.equal(value.sourceAssetId, '12');
     assert.equal(value.materials[0].excerpt, '收入120万元，成本80万元。');
-    assert.equal(request().tokenBudget, 1000000);
+    assert.equal(request().tokenBudget, 0);
     assert.equal(request({ tokenBudget: 400000 }).tokenBudget, 400000);
+    assert.equal(request({ tokenBudget: 0 }).tokenBudget, 0);
+    assert.equal(request({ tokenBudget: '0' }).tokenBudget, 0);
     assert.throws(() => request({ operation: 'edit_native', profile: 'default' }), /PPTX/);
     assert.throws(() => request({ operation: 'create_template', profile: 'quick' }), /流程/);
     assert.throws(() => request({ pageCount: 100 }), /四十页/);
     assert.equal(request({ tokenBudget: 999999 }).tokenBudget, 999999);
-    for (const tokenBudget of [0, 9999, 10000.5, Number.MAX_SAFE_INTEGER + 1, Infinity, [10000], true, '']) assert.throws(() => request({ tokenBudget }), /预算/);
+    for (const tokenBudget of [-1, 9999, 10000.5, Number.MAX_SAFE_INTEGER + 1, Infinity, [10000], true, '']) assert.throws(() => request({ tokenBudget }), /预算/);
     await assert.rejects(() => runtime.workspace({ id: 1 }, '../../outside'), /任务标识/);
 });
 
-test('继续任务允许增加至五十万以上，拒绝降低或不安全的累计预算', () => {
+test('继续任务保留原预算，可提高或取消上限，并拒绝降低预算', () => {
     const { normalizeTokenBudget } = require('../server/services/presentations/master/contract');
+    assert.equal(normalizeTokenBudget(undefined, 500000), 500000);
     assert.equal(normalizeTokenBudget(800000, 500000), 800000);
-    for (const value of [499999, 0, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => normalizeTokenBudget(value, 500000), /预算/);
+    assert.equal(normalizeTokenBudget(0, 500000), 0);
+    assert.equal(normalizeTokenBudget(undefined, 0), 0);
+    assert.throws(() => normalizeTokenBudget(1000000, 0), /请填写 0/);
+    for (const value of [499999, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => normalizeTokenBudget(value, 500000), /预算/);
 });
 
-test('智能体工具的预算上限与完整制作合同一致，允许显式指定一百万', () => {
+test('智能体工具允许显式取消累计上限并拒绝无效预算', () => {
     const definition = require('../server/services/agent-tools-presentations').presentationToolDefinitions().find(item => item.name === 'presentation.master');
     const { normalizeToolContract, validateToolInput } = require('../server/services/agent-contracts');
     const tool = normalizeToolContract(definition);
     assert.deepEqual(validateToolInput(tool, { action: 'start', tokenBudget: 1000000 }), []);
     assert.deepEqual(validateToolInput(tool, { action: 'resume', taskId: 'example', tokenBudget: 1200000 }), []);
+    assert.deepEqual(validateToolInput(tool, { action: 'start', tokenBudget: 0 }), []);
+    assert.ok(validateToolInput(tool, { tokenBudget: 9999 }).length);
     assert.ok(validateToolInput(tool, { tokenBudget: Number.MAX_SAFE_INTEGER + 1 }).length);
 });
 
@@ -120,10 +128,14 @@ test('用户确认单独等待，实际答复随检查点继续；模型不能�
     const first = driverFixture([{ requestInput: { kind: 'confirmation', question: '确认设计方向？', context: '两页，结论与证据。' } }]), current = state();
     const pending = await drive({ id: 1 }, 'id', current, first.hooks, first.deps);
     assert.equal(pending.pending.question, '确认设计方向？'); assert.ok(!first.calls.some(item => item.action === 'deliver'));
-    current.response = '确认，保留全部金额。';
+    const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
+    const question = pendingInput('id', current);
+    assert.throws(() => parseDecision({ decision: 'approve', promptId: '旧方案' }, question), { code: 'PPT_MASTER_CONFIRMATION_CHANGED' });
+    assert.throws(() => parseDecision({ decision: 'approve', promptId: question.promptId, answer: '不同意' }, question), /修改意见/);
+    current.response = parseDecision({ decision: 'approve', promptId: question.promptId }, question);
     const second = driverFixture([{ complete: { path: 'project/exports/final.pptx' } }]);
     await drive({ id: 1 }, 'id', current, second.hooks, second.deps);
-    assert.ok(current.messages.some(item => item.content.includes('实际答复：确认，保留全部金额。')));
+    assert.ok(current.messages.some(item => item.content.includes('实际答复：已明确确认当前方案。')));
     assert.equal(second.calls.filter(item => item.action === 'health').length, 0);
     const mixed = driverFixture([{ actions: [{ action: 'list' }], complete: { path: 'x' } }]);
     await assert.rejects(() => drive({ id: 1 }, 'id', state(), mixed.hooks, mixed.deps), /不能混合/);
@@ -133,8 +145,38 @@ test('用户确认单独等待，实际答复随检查点继续；模型不能�
     assert.ok(!unconfirmed.calls.some(item => item.action === 'deliver'));
 });
 
+test('提交方案修改意见后必须重新确认，旧的确认次数不能放行交付', async () => {
+    const current = state({ confirmedGates: 2 });
+    current.request.profile = 'default';
+    const first = driverFixture([{ requestInput: { kind: 'confirmation', question: '是否同意本次改版？' } }]);
+    await drive({ id: 1 }, 'id', current, first.hooks, first.deps);
+    const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
+    const question = pendingInput('id', current);
+    current.response = parseDecision({ decision: 'revise', promptId: question.promptId, answer: '不同意，请更改口径。' }, question);
+    const next = driverFixture([{ complete: { path: 'project/exports/final.pptx' } }]);
+    await assert.rejects(drive({ id: 1 }, 'id', current, next.hooks, next.deps), { code: 'PPT_MASTER_CONFIRMATION_REQUIRED' });
+    assert.equal(current.confirmedGates, 2);
+    assert.equal(next.calls.some(action => action.action === 'deliver'), false);
+});
+
+test('不同轮次重复确认同一份方案只增加一个确认回执', async () => {
+    const current = state();
+    current.request.profile = 'default';
+    const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
+    for (let index = 0; index < 2; index++) {
+        const plan = driverFixture([{ requestInput: { kind: 'confirmation', question: '原则方案是否同意？', context: '保留全部原始数据。' } }]);
+        await drive({ id: 1 }, 'id', current, plan.hooks, plan.deps);
+        const question = pendingInput('id', current);
+        current.response = parseDecision({ decision: 'approve', promptId: question.promptId }, question);
+    }
+    const next = driverFixture([{ complete: { path: 'project/exports/final.pptx' } }]);
+    await assert.rejects(drive({ id: 1 }, 'id', current, next.hooks, next.deps), { code: 'PPT_MASTER_CONFIRMATION_REQUIRED' });
+    assert.equal(current.confirmedGates, 1);
+});
+
 test('预算耗尽与取消在后续动作前生效，不执行伪造的完整交付', async () => {
     const fixture = driverFixture([{ complete: { path: 'x.pptx' } }]), current = state();
+    current.request.tokenBudget = 1000000;
     current.usedTokens = current.request.tokenBudget;
     await assert.rejects(() => drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), /预算/);
     assert.ok(!fixture.calls.some(item => item.action === 'deliver'));
@@ -164,6 +206,49 @@ test('供应商实际用量进入累计预算，超额返回不再执行本轮�
     await assert.rejects(() => drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), /实际模型用量/);
     assert.equal(current.usedTokens, 160011);
     assert.ok(!fixture.calls.some(item => item.action === 'write'));
+});
+
+test('默认不限累计预算的任务可超过一百万并保留用量记录、单轮输出限制和执行轮次', async () => {
+    const fixture = driverFixture([]), current = state({ steps: 4, usedTokens: 999950 });
+    current.request.maxSteps = 5;
+    fixture.deps.resolveModel = async () => ({ context_window_tokens: 256000, max_tokens: 3000 });
+    fixture.deps.callModel = async (_model, _messages, options) => {
+        assert.equal(options.maxTokens, 3000);
+        options.usageRef.usage = { prompt_tokens: 100, completion_tokens: 25 };
+        return { actions: [{ action: 'list' }] };
+    };
+    await assert.rejects(() => drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), { code: 'PPT_MASTER_STEP_LIMIT' });
+    assert.equal(fixture.calls.at(-1).action, 'list');
+    assert.equal(current.steps, 5);
+    assert.equal(current.usedTokens, 1000075);
+    assert.equal(current.usageDiagnostics[0].cumulativeTokens, 1000075);
+});
+
+test('重复读取同一资料会停止空转，后续新分页可推进至实际写入', async () => {
+    const fixture = driverFixture([]), current = state();
+    let calls = 0;
+    const page = { action: 'read_runtime', path: 'references/guide.md', offset: 0 };
+    const execute = fixture.deps.execute;
+    fixture.deps.execute = async (user, id, action) => {
+        if (action.path === page.path) return { path: action.path, offset: action.offset,
+            text: '制作要求', nextOffset: action.offset === 0 ? 4 : null, totalChars: 8 };
+        return execute(user, id, action);
+    };
+    fixture.deps.callModel = async (_model, messages) => {
+        if (++calls >= 3) assert.match(messages[0].content, /避免再次请求相同文件页/);
+        return JSON.stringify({ actions: [page] });
+    };
+    await assert.rejects(drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps), { code: 'PPT_MASTER_NO_PROGRESS' });
+    assert.equal(calls, 4);
+    assert.equal(current.steps, 4);
+    const next = [
+        { actions: [{ ...page, offset: 4 }] },
+        { actions: [{ action: 'write', path: 'project/page.svg', text: '<svg/>' }] },
+        { complete: { path: 'project/exports/final.pptx' } }
+    ];
+    fixture.deps.callModel = async () => next.shift();
+    await drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps);
+    assert.deepEqual(fixture.calls.slice(-2).map(action => action.action), ['write', 'deliver']);
 });
 
 test('图片重建传递真实图片给视觉模型，检查点不保存图片编码，拒绝纯文本模型', async () => {
@@ -206,22 +291,43 @@ test('任务保存持久检查点和等待问题，取消或权限撤回不会�
     await tasks.run('test-id', { id: 1 }, deps); assert.equal(status, 'failed'); assert.equal(delivered, 0);
 });
 
+test('恢复已导出的检查点只继续交付并登记用量里程碑', async () => {
+    const plan = { summary: '交付样例', project: 'demo', pages: [{ title: '核验', values: [] }] };
+    const digest = value => require('node:crypto').createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const current = { ...state({ steps: 32, usedTokens: 1509415 }), prepared: true,
+        review: { version: 1, approvals: { design: { plan, digest: digest(plan) } } },
+        deliveryReview: { project: 'demo', templateOnly: false },
+        deliveryReceipt: { sha256: 'a'.repeat(64), packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 0, checklistDigest: digest([['核验', []]]) } } };
+    let lease, saved;
+    await tasks.run('delivery-retry', { id: 1 }, {
+        repository: { claim: async (_user, _id, value) => { lease = value; return true; }, release: async () => {},
+            read: async () => ({ result_json: { state: current, _lease: lease, _leaseUntil: Date.now() / 1000 + 180 } }) },
+        store: { beginExecution: () => new AbortController(), endExecution: () => {}, getForUser: async () => ({ status: 'working' }),
+            complete: async (_id, _user, result) => { saved = result; } },
+        parentActive: async () => true, ensureAccess: async () => {}, drive: async () => assert.fail('已有导出回执时不得重新请求模型'),
+        deliver: async (_user, _id, _request, receipt) => { assert.equal(receipt.sha256, current.deliveryReceipt.sha256); return { files: [{ format: 'pptx' }] }; }
+    });
+    assert.equal(saved.publicResult.files.length, 1);
+    assert.equal(saved.state.milestones.delivered.steps, 32);
+    assert.equal(saved.state.milestones.delivered.usedTokens, 1509415);
+});
+
 test('确认在前一执行器退出期间到达时，退出后启动续接并保留真实答复', async () => {
     let status = 'working', leaseId, releaseExit, enteredWaiting, continued = 0;
     const exiting = new Promise(resolve => { releaseExit = resolve; });
     const waiting = new Promise(resolve => { enteredWaiting = resolve; });
-    const current = { ...state(), prepared: true };
+    const current = { ...state(), prepared: true, review: { version: 1, approvals: {} }, pendingKind: 'clarification', pendingInput: { question: '请补充金额。' } };
     const store = { beginExecution: () => new AbortController(), endExecution() {}, getForUser: async () => ({ status }),
         requestInput: async () => { status = 'input_required'; enteredWaiting(); await exiting; }, complete: async () => {} };
     const repository = { claim: async (_user, _id, lease) => { leaseId = lease; return true; }, save: async () => true,
         renew: async () => true, release: async () => {}, read: async () => ({ result_json: { _lease: leaseId, _leaseUntil: Date.now() / 1000 + 180, state: current } }),
-        acceptResponse: async (_user, _id, saved) => { assert.equal(saved.response, '确认保留金额'); status = 'working'; return true; } };
+        acceptResponse: async (_user, _id, saved) => { assert.equal(saved.response.answer, '补充金额为120万元'); assert.equal(saved.response.decision, 'clarify'); status = 'working'; return true; } };
     const user = { id: 1 }, id = 'confirmation-race';
     const running = tasks.run(id, user, { store, repository, ensureAccess: async () => {}, parentActive: async () => true,
         drive: async () => ({ pending: { question: '确认方案？' } }) });
     await waiting;
     try {
-        await tasks.respond(user, id, '确认保留金额', { store, repository, identity: async () => '', ensureAccess: async () => {},
+        await tasks.respond(user, id, '补充金额为120万元', { store, repository, identity: async () => '', ensureAccess: async () => {},
             get: async () => ({ status }), run: async () => { continued++; } });
         await new Promise(resolve => setImmediate(resolve));
         assert.equal(continued, 0);

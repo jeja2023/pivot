@@ -68,6 +68,16 @@ test('应用内模型选择器使用默认模型初始化，并按应用和用�
     assert.equal(values.get('pivot_app_model:user-1:data-analysis'), 'model-a');
 });
 
+test('弹窗关闭后迟到的模型列表不写入选择器或应用偏好', async () => {
+    const { select, values, api } = createSelectorHarness([{ id: 'model-a', name: '模型 A' }], 'model-a');
+    let current = true;
+    const pending = api.refresh('presentations', select, { isCurrent: () => current });
+    current = false;
+    assert.equal(await pending, '');
+    assert.equal(select.children.length, 0);
+    assert.equal(values.size, 0);
+});
+
 test('三个应用的 AI 请求均使用应用内模型选择器，而不读取主会话选择器', () => {
     const officialWriting = read('client/chat/apps-workbench-ai.js');
     const dataAnalysis = read('client/chat/data-analysis/ai.js');

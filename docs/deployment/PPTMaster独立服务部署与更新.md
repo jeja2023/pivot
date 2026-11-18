@@ -12,7 +12,7 @@ PPT Master作为独立常驻HTTP服务运行，Pivot只通过内网服务协议�
 npm run build:ppt-master-service -- --checkout E:/ppt-master-upstream --output E:/releases/ppt-master-service
 ```
 
-已有新服务镜像时可加`--skip-build --image ppt-master:6.8.0`。工具检查实际服务启动并导出固定文件名`ppt-master.tar`，附独立Compose和配置示例。旧的仅stdin动作镜像需要首次更新为带HTTP服务的新镜像。
+已有目标版本对应的服务镜像时可加`--skip-build --image ppt-master:6.8.0`。工具检查实际服务启动并导出固定文件名`ppt-master.tar`，附独立Compose和配置示例。旧的仅stdin动作镜像需要首次更新为带HTTP服务的新镜像。
 
 ## 首次启动服务
 
@@ -51,9 +51,11 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 
 页面配置使用现有`DATA_ENCRYPTION_KEY`整体加密，服务地址和密钥不写入普通审计详情。仅系统`admin`可以修改和测试，其他账号不获得服务地址和密钥。测试草稿不改变配置；页面停用后以停用状态为准，不自动回退环境中的旧服务。服务镜像更新仍按下面的独立更新步骤，不需要随前端配置功能重建服务镜像。
 
-## 以后只更新服务镜像
+## 更新服务镜像与主应用
 
-等待完整制作和原稿任务结束后，复制新版`ppt-master.tar`，只执行：
+升级到 Pivot v0.7.172 时，使用该版源码重建 PPT Master 服务镜像，使其包含更新后的 `runner.py`、`tool_catalog.py` 和 `delivery_checklist.py`，并同时更新 Pivot 主应用。建议在切换前结束运行中或等待确认的任务，保存已有交付文件。服务数据卷与现有连接配置可继续使用；运行身份改变后，原检查点需在原运行环境完成，切换后按需新建任务。[v0.7.172 发布说明](../releases/v0.7.172-PPTMaster分阶段确认与交付核验.md)
+
+等待完整制作和原稿任务结束后，复制新版 `ppt-master.tar` 到服务目录，再替换服务容器。
 
 ```bash
 cd /data/ppt-master
@@ -61,7 +63,7 @@ docker load -i ppt-master.tar
 docker compose -f docker-compose.ppt-master.yml up -d --no-build --pull never --force-recreate ppt-master
 ```
 
-服务使用相同镜像标签时无需改Pivot。使用其他标签则只改服务目录`.env`的`PPT_MASTER_IMAGE`。访问密钥与数据卷保留，正常兼容协议1的升级不需要重新构建或重启Pivot。协议不兼容时Pivot明确禁用完整引擎，标准功能继续可用；正在进行或旧检查点的任务不会跨新旧运行包混用，需要新建任务。
+使用其他镜像标签时修改服务目录 `.env` 的 `PPT_MASTER_IMAGE`。访问密钥与数据卷保留。仅升级运行包且兼容当前 Pivot 时，可独立替换服务镜像。v0.7.172 部署后，管理员先测试连接，再检查已登录请求 `GET /api/apps/presentations/master/info` 返回 `engine.checklistReady: true`。协议不兼容时 Pivot 会禁用完整引擎，标准功能继续可用。
 
 v0.7.159归档的模板校验修复：模板制作反复提示“所选模板未通过上游工作区校验”时，旧版服务的模板适配器可能仍把工作区限定为`/workspace`，与独立服务的`/data/jobs/<任务标识>/workspace`不一致。修复需要使用包含更新后`runner.py`和`template_adapter.py`的源码重新构建并更新PPT Master服务镜像；仅更新Pivot页面或重启旧服务不会生效。更新后新建制作任务，模板继续由固定上游校验器检查，不能通过放宽任务目录边界绕过校验。上游技能仍固定为6.8.0，服务协议仍为1，源码版本不替代镜像自身的运行身份。
 

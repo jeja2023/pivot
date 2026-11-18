@@ -39,6 +39,43 @@ async function createTenantScopedUser() {
     };
 }
 
+test('真实导出路由使用当前内容摘要确认敏感内容，同版本草稿变化后须重新确认', skipWithoutDatabase, async () => {
+    const express = require('express'), { createPresentationsRouter } = require('../server/routes/apps/presentations');
+    const { user } = await createTenantScopedUser();
+    const initial = await createPresentation(user, { title: '敏感内容导出回归', templateId: 'business-blue' });
+    const content = JSON.parse(JSON.stringify(initial.content));
+    content.slides[0].speakerNotes = '访问令牌：演示专用占位内容';
+    const sensitive = await savePresentationContent(user, initial.id, { baseVersion: initial.version, content, title: initial.title, autoSave: true });
+    const app = express();
+    const passthrough = (_req, _res, next) => next();
+    app.use(express.json(), createPresentationsRouter({ authMiddleware: (req, _res, next) => { req.user = user; next(); },
+        upload: { single: () => passthrough }, uploadLimiter: passthrough, writeLog: () => {} }));
+    app.use((error, _req, res, _next) => res.status(error.status || 500).json({ code: error.code, error: error.message }));
+    const server = await new Promise(resolve => { const listening = app.listen(0, '127.0.0.1', () => resolve(listening)); });
+    const send = async approval => fetch(`http://127.0.0.1:${server.address().port}/apps/presentations/${initial.id}/export`, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ format: 'pptx', ...approval })
+    });
+    const approval = { allowSensitiveExport: true, baseVersion: sensitive.version, baseDigest: sensitive.contentDigest };
+    try {
+        const denied = await send({});
+        assert.equal(denied.status, 409);
+        assert.equal((await denied.json()).code, 'PRESENTATION_SENSITIVE_EXPORT_CONFIRMATION_REQUIRED');
+        const allowed = await send(approval), result = await allowed.json();
+        assert.equal(allowed.status, 201, JSON.stringify(result));
+        assert.equal(result.rendition.format, 'pptx');
+        content.slides[0].speakerNotes += '，内容已更新。';
+        const changed = await savePresentationContent(user, initial.id, { baseVersion: sensitive.version, content, title: sensitive.title, autoSave: true });
+        assert.equal(changed.version, sensitive.version);
+        assert.notEqual(changed.contentDigest, sensitive.contentDigest);
+        const stale = await send(approval);
+        assert.equal(stale.status, 409);
+        assert.equal((await stale.json()).code, 'PRESENTATION_SENSITIVE_EXPORT_VERSION_CHANGED');
+    } finally {
+        await new Promise(resolve => { server.close(resolve); server.closeAllConnections(); });
+        await deletePresentation(user, initial.id);
+    }
+});
+
 test('PPT 文稿服务在 PostgreSQL 中保存版本、渲染受控产物并保持所有者隔离', skipWithoutDatabase, async () => {
     const { tenantId, user } = await createTenantScopedUser();
     let presentation;

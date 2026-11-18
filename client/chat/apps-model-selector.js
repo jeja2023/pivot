@@ -62,7 +62,7 @@
         return String(readSavedModelId(appId) || select?.value || '').trim();
     }
 
-    async function refresh(appId, selectorId) {
+    async function refresh(appId, selectorId, { isCurrent = () => true } = {}) {
         const select = typeof selectorId === 'string' ? document.getElementById(selectorId) : selectorId;
         if (!select) return '';
 
@@ -75,6 +75,7 @@
         select.disabled = true;
         try {
             const { models = [], defaultModelId } = await window.Pivot.legacy.loadSelectableModels();
+            if (!isCurrent()) return '';
             if (!models.length) {
                 setSelectorMessage(select, '暂无可用模型');
                 return '';
@@ -112,6 +113,7 @@
             }
             return selectedId;
         } catch (error) {
+            if (!isCurrent()) return '';
             console.error('加载应用模型列表失败:', error);
             setSelectorMessage(select, '模型列表加载失败');
             return '';

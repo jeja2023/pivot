@@ -114,6 +114,16 @@ input, textarea, select, button { font-family: inherit; }
     border-radius: var(--radius-sm, 6px);
 }
 
+.btn-sm {
+    height: 28px;
+    min-height: 28px;
+    padding: 0 10px;
+    font-size: 0.76rem;
+    font-weight: 500;
+    line-height: 1;
+    border-radius: var(--radius-sm, 6px);
+}
+
 .btn-red-outline,
 .btn-danger-outline {
     background: transparent;

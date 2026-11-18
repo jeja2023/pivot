@@ -173,7 +173,11 @@ test('数据分析支持受控增量导入、分区 Parquet、版本记录和物
             sourceType: 'database'
         });
         fs.mkdirSync(incrementDir, { recursive: true });
-        fs.writeFileSync(incrementPath, 'region,amount\n华东,50\n', 'utf8');
+        fs.writeFileSync(incrementPath, Buffer.concat([
+            Buffer.from('region,amount\n'),
+            Buffer.from('bbaab6ab', 'hex'),
+            Buffer.from(',50\n')
+        ]));
         const appended = await appendIncrementalDataset({
             user,
             datasetId: dataset.id,

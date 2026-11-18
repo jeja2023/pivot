@@ -68,15 +68,15 @@
     },
     {
       "file": "server/repositories/presentation-master-renditions.js",
-      "count": 1,
-      "rationale": "最终文件先在受限引擎通过上游导出和摘要核验，再由已鉴权Artifact服务创建用户产物；仓储仅接收服务端租户、产物、CAS摘要和受控格式登记不可变rendition，不接受外部存储路径。",
-      "verification": "真实完整PPT引擎端到端验证原生PPTX与源包登记、一次性令牌下载和刷新恢复；交付仍按原有Artifact/CAS授权读取。"
+      "count": 4,
+      "rationale": "交付事务使用绑定参数按租户、所有者、任务标识、格式和元数据摘要核对既有文件。关联上游运行前锁定当前账号尚在执行的运行行。受控文件引用仍通过产物权限和摘要核验。",
+      "verification": "tests/presentation-master-postgres.test.js 验证源包读取失败不留产物、事务中断回滚、再次登记复用及完成后拒绝旧租约。"
     },
     {
       "file": "server/repositories/presentation-master-tasks.js",
-      "count": 11,
-      "rationale": "完整PPT引擎复用tool_tasks；所有读取/更新绑定user_id与固定tool_name，租约、期限、状态在条件更新中核对。确认答复与恢复采用原子状态条件，取消后的旧执行不能登记进度；内部检查点仅服务端投影，不原样返回模型提示词。所有业务参数绑定。；启动/恢复使用统一事务锁核对单用户与全局并发上限，避免多个实例超额接纳。",
-      "verification": "presentation-master-postgres验证真实并发领取、输家写入拒绝、跨账号、确认重复提交、最近任务、有效租约不能接管和取消后拒绝；presentation-master验证权限、取消、预算与有限动作。"
+      "count": 13,
+      "rationale": "活动任务、确认和交付继续绑定当前账号与固定工具名称。确认提交原子校验检查点所在步骤和未答复状态。交付在任务行锁内核对期限和租约并登记，启动和续跑继续由接纳事务限制并发。所有业务参数绑定。",
+      "verification": "tests/presentation-master-postgres.test.js 验证活动任务账号范围、并发确认与领取、旧租约和交付回滚。"
     },
     {
       "file": "server/repositories/presentation-quality-tasks.js",
@@ -794,9 +794,9 @@
     },
     {
       "file": "server/repositories/presentation-native.js",
-      "count": 22,
-      "rationale": "原稿离线工作台仓储集中封装租户与所有者隔离、版本读取、条件租约、并发接纳和事务提交。原稿版本写入同时锁定所属任务与文稿，校验活跃租约、取消/到期及预期版本；清理候选只供后台维护使用，文件删除仍由受控任务目录校验。 CAS引用计数随版本在同一事务中增加，避免版本已提交但引用登记失败导致内容被回收。 最终版本/交付登记与任务完成共同受事务内任务行锁约束，取消与提交按同一行锁串行化，避免已取消任务登记部分成功。",
-      "verification": "tests/presentation-native-postgres.test.js 覆盖跨账号拒绝、旧租约、取消、版本冲突、幂等重试与并发接纳；浏览器和真实容器验证编辑及视频交付。"
+      "count": 24,
+      "rationale": "原稿仓储维护租户、所有者、版本和执行租约约束。过期续跑与工作区清理复用保留期，后台清理在删除前锁定任务行重新确认状态和租约，并在成功后登记清理时间。工作区路径仍由服务端校验，版本及内容引用共同提交。",
+      "verification": "tests/presentation-native-postgres.test.js 复核原稿过期后续跑、候选失效、清理幂等、旧租约和取消后阻止提交。"
     },
     {
       "file": "server/repositories/agent-goal-context.js",

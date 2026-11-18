@@ -51,7 +51,7 @@ function createToolTaskStore(deps = {}) {
         await write(`
             UPDATE tool_tasks
             SET status = 'expired', error_code = 'TOOL_TASK_EXPIRED', error_message = '工具任务已过期。', updated_at = ?
-            WHERE id = ? AND status IN ('working', 'input_required')
+            WHERE id = ? AND status IN ('working', 'input_required') AND expires_at <= NOW()
         `, [now(), row.id]);
         return await readOne('SELECT * FROM tool_tasks WHERE id = ?', [row.id]);
     }

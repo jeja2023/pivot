@@ -20,7 +20,7 @@ function reserveInflightQuota(userId, modelId, tokens) {
     };
 }
 
-async function ensureModelQuota(user, model, messages, maxOutputTokens, { signal } = {}) {
+async function ensureModelQuota(user, model, messages, maxOutputTokens, { signal, inputEstimate } = {}) {
     const limit = Number(model?.daily_token_limit || 0);
     if (limit <= 0) return () => {};
     const key = `${user.id}:${model.id}`;
@@ -40,7 +40,8 @@ async function ensureModelQuota(user, model, messages, maxOutputTokens, { signal
             used = await require('./models').getModelDailyUsageAsync(user.id, model.id);
             signal?.throwIfAborted();
         } while (revision !== admission.settlementRevision);
-        const estimated = estimateTokens(JSON.stringify(messages)) + Math.max(1, Number(maxOutputTokens) || 1200);
+        const inputTokens = Number.isFinite(inputEstimate) && inputEstimate >= 0 ? inputEstimate : estimateTokens(JSON.stringify(messages));
+        const estimated = inputTokens + Math.max(1, Number(maxOutputTokens) || 1200);
         if (used + getInflightQuota(user.id, model.id) + estimated > limit) {
             throw Object.assign(new Error('模型今日额度不足以继续调用，请提高额度或切换模型。'), { status: 429, statusCode: 429, code: 'INSUFFICIENT_QUOTA' });
         }

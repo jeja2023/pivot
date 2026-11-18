@@ -18,9 +18,14 @@ function presentationToolDefinitions() {
                 operation: { type: 'string', enum: ['generate', 'create_template', 'edit_native'] }, profile: { type: 'string', enum: ['default', 'quick', 'beautify', 'image_to_pptx'] },
                 title: { type: 'string', maxLength: 120 }, instruction: { type: 'string', maxLength: 16000 }, modelId: { type: 'string' }, pageCount: { type: 'integer', minimum: 1, maximum: 40 },
                 presentationId: { type: 'string' }, sourceAssetId: { type: 'string' }, assetIds: { type: 'array', maxItems: 20, items: { type: 'string' } }, answer: { type: 'string', maxLength: 12000 },
+                decision: { type: 'string', enum: ['approve', 'revise', 'clarify'], description: '仅在用户明确批准所展示的方案时填写 approve。' },
+                promptId: { type: 'string', pattern: '^[a-f0-9]{64}$' },
                 template: schema({ type: { type: 'string', enum: ['runtime', 'organization'] }, id: { type: 'string', maxLength: 96 }, version: { type: 'integer', minimum: 1 } }, ['type', 'id']),
                 materials: { type: 'array', maxItems: 20, items: schema({ title: { type: 'string' }, text: { type: 'string', maxLength: 120000 } }, ['text']) },
-                maxSteps: { type: 'integer', minimum: 5, maximum: 160 }, tokenBudget: { type: 'integer', minimum: 10000, maximum: Number.MAX_SAFE_INTEGER } }) },
+                maxSteps: { type: 'integer', minimum: 5, maximum: 160 },
+                tokenBudget: { description: '累计模型用量上限。新建时省略或填写 0 表示不限，续跑时省略则沿用任务预算。', anyOf: [
+                    { type: 'integer', enum: [0] }, { type: 'integer', minimum: 10000, maximum: Number.MAX_SAFE_INTEGER }
+                ] } }) },
         { name: 'presentation.review_deck', title: '整稿检查与排版优化任务', capabilities: ['document.render', 'model.invoke'], idempotent: true, side_effect: true, concurrency: 'write', cancellable: true,
             description: '启动整稿视觉复核、保留内容的排版优化或mode=production交付检查。production核对事实证据/计算、真实字体、素材和最终PPTX原生对象/嵌入工作簿，不调用模型。后台返回taskId后用operation=status查询，operation=cancel停止。layout只提出排版建议，visual_repair复核建议稿。原稿变化或所属Agent停止时终止。结构/原生检查不等于视觉或Office通过。',
             input_schema: schema({ presentationId: { type: 'string' }, operation: { type: 'string', enum: ['start', 'status', 'cancel'], default: 'start' },
@@ -58,7 +63,7 @@ async function executePresentationTool(name, input, user, context = {}) {
         const tasks = require('./presentations/master/tasks'), action = input.action || 'start';
         if (action !== 'start' && !input.taskId) throw new Error('请提供完整制作任务的taskId。');
         const task = action === 'start' ? await tasks.start(user, { ...input, modelId: input.modelId || String(context.run?.chosen_model_id || context.run?.model_id || '') }, context)
-            : action === 'respond' ? await tasks.respond(user, input.taskId, input.answer) : action === 'cancel' ? await tasks.cancel(user, input.taskId) : action === 'resume' ? await tasks.resume(user, input.taskId, input) : await tasks.get(user, input.taskId);
+            : action === 'respond' ? await tasks.respond(user, input.taskId, input) : action === 'cancel' ? await tasks.cancel(user, input.taskId) : action === 'resume' ? await tasks.resume(user, input.taskId, input) : await tasks.get(user, input.taskId);
         if (!task) throw new Error('制作任务不存在或无权访问。');
         return { ...task, taskId: task.id, text: task.result?.message || task.progress?.message || '任务已登记，请查询实际制作结果。' };
     }

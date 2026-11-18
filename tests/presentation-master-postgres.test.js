@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
+const { setTimeout: delay } = require('node:timers/promises');
 const { queryOne, execute } = require('../server/db/client');
 const taskStore = require('../server/services/tool-tasks');
 const repository = require('../server/repositories/presentation-master-tasks');
@@ -72,6 +73,123 @@ test('过期检查点可续跑，待确认任务必须先提交实际答复，�
         await taskStore.requestCancel(task.id, user);
         assert.equal(await repository.resume(user, task.id, base), null);
         assert.equal(await repository.acceptResponse(user, task.id, pending), null);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('从旧检查点取消累计上限后保留已用量，再次续跑沿用不限', { skip: !process.env.DATABASE_URL }, async () => {
+    const { resume } = require('../server/services/presentations/master/tasks');
+    const { identity } = require('../server/services/presentations/master/runtime');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', modelId: '1', tokenBudget: 1000000, maxSteps: 5 };
+    const state = { request, usedTokens: 1000200, steps: 5, prepared: true, bootstrapped: true, runtimeImage: await identity(), messages: [] };
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 600000 });
+    try {
+        await taskStore.complete(task.id, user, { state }, { failed: true, errorCode: 'PPT_MASTER_BUDGET_EXHAUSTED' });
+        await assert.rejects(resume({ id: Number(user.id) + 99999 }, task.id, { tokenBudget: 0 }), { code: 'PPT_MASTER_BUSY' });
+        await assert.rejects(resume(user, task.id, { tokenBudget: 900000 }), { code: 'PPT_MASTER_INVALID' });
+        for (const input of [{ tokenBudget: 0 }, {}]) {
+            const resumed = await resume(user, task.id, input);
+            assert.equal(resumed.request.tokenBudget, 0);
+            assert.equal(resumed.usedTokens, state.usedTokens);
+            assert.equal(resumed.steps, state.steps);
+            let row;
+            for (let attempt = 0; attempt < 100; attempt++) {
+                row = await repository.read(user, task.id);
+                if (row.status === 'failed' && !row.result_json._lease) break;
+                await delay(20);
+            }
+            assert.equal(row.error_code, 'PPT_MASTER_STEP_LIMIT');
+            assert.equal(row.result_json.state.request.tokenBudget, 0);
+        }
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('旧的 120 秒超时熔断检查点续跑时登记优先整理历史', { skip: !process.env.DATABASE_URL }, async () => {
+    const { resume } = require('../server/services/presentations/master/tasks');
+    const { identity } = require('../server/services/presentations/master/runtime');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', modelId: '1', tokenBudget: 10000000, maxSteps: 32 };
+    const state = { request, usedTokens: 1509415, steps: 32, prepared: true, bootstrapped: true, runtimeImage: await identity(), messages: [] };
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 600000 });
+    try {
+        await taskStore.complete(task.id, user, { state }, { failed: true, errorCode: 'AI_ENDPOINT_CIRCUIT_OPEN',
+            errorMessage: '模型端点暂时熔断，约 55 秒后可重试。上次错误：timeout of 120000ms exceeded' });
+        await resume(user, task.id);
+        let row;
+        for (let attempt = 0; attempt < 100; attempt++) {
+            row = await repository.read(user, task.id);
+            if (row.status === 'failed' && !row.result_json._lease) break;
+            await delay(20);
+        }
+        assert.equal(row.error_code, 'PPT_MASTER_STEP_LIMIT');
+        assert.equal(row.result_json.state.focusModelHistory, true);
+        assert.equal(row.result_json.state.usedTokens, 1509415);
+        assert.equal(row.result_json.state.steps, 32);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('活动制作可以跨文稿查询，过期读请求不会撤销刚延长的截止时间', { skip: !process.env.DATABASE_URL }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: { presentationId: 'previous-document' } });
+    try {
+        assert.equal(await repository.latest(user, 'current-document'), null);
+        assert.equal((await repository.findActive(user)).id, task.id);
+        assert.equal(await repository.findActive({ id: Number(user.id) + 99999 }), null);
+        await execute("UPDATE tool_tasks SET expires_at=NOW()-INTERVAL '1 second' WHERE id=?", [task.id]);
+        let extended = false;
+        const reader = taskStore.createToolTaskStore({ execute, queryOne: async (sql, params) => {
+            const row = await queryOne(sql, params);
+            if (!extended) {
+                extended = true;
+                await execute("UPDATE tool_tasks SET expires_at=NOW()+INTERVAL '1 hour' WHERE id=?", [task.id]);
+            }
+            return row;
+        } });
+        assert.equal((await reader.getForUser(task.id, user)).status, 'working');
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('PPT 交付事务中断不留下产物，重试同一回执原子提交并复用文件', { skip: !process.env.DATABASE_URL }, async t => {
+    const { prepareDelivery, commitDelivery } = require('../server/services/presentations/master/delivery');
+    const runtime = require('../server/services/presentations/master/runtime');
+    const { query } = require('../server/db/client');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { title: '交付事务测试 ' + crypto.randomUUID() };
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
+    const lease = crypto.randomUUID(), pptx = Buffer.from('用于事务验收的合成主输出'), zip = Buffer.from('用于事务验收的合成源包');
+    const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+    const receipt = { sha256: digest(pptx), projectSha256: digest(zip), packageCheck: { status: 'passed', slideCount: 1 } };
+    const deliveryContext = { engine: { runtimeId: 'sha256:' + 'a'.repeat(64), revision: 'synthetic-runtime' } };
+    const artifacts = () => query('SELECT id FROM agent_artifacts WHERE user_id=? AND title=?', [user.id, request.title]);
+    let broken = true;
+    t.mock.method(runtime, 'readOutput', async (_user, _id, file) => {
+        if (file === 'presentation.pptx') return pptx;
+        if (broken) throw new Error('模拟源包传输失败');
+        return zip;
+    });
+    try {
+        assert.ok(await repository.claim(user, task.id, lease));
+        await assert.rejects(prepareDelivery(user, task.id, request, receipt, deliveryContext), /传输失败/);
+        assert.equal((await artifacts()).length, 0);
+        broken = false;
+        const prepared = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
+        await assert.rejects(repository.withExecution(user, task.id, lease, async executor => {
+            await commitDelivery(user, task.id, request, prepared, executor);
+            throw new Error('模拟任务状态写入失败');
+        }), /写入失败/);
+        assert.equal((await artifacts()).length, 0);
+        const result = await repository.withExecution(user, task.id, lease, async executor => {
+            const first = await commitDelivery(user, task.id, request, prepared, executor);
+            const replay = await commitDelivery(user, task.id, request, prepared, executor);
+            assert.deepEqual(first, replay);
+            const txStore = taskStore.createToolTaskStore({ queryOne: executor.queryOne, execute: executor.execute });
+            assert.equal((await txStore.complete(task.id, user, { publicResult: replay }, { expectedLease: lease })).status, 'completed');
+            return first;
+        });
+        assert.equal((await artifacts()).length, 1);
+        assert.equal(result.files.length, 2);
+        assert.match((await queryOne('SELECT renderer_version FROM agent_artifact_renditions WHERE id=?', [result.files[0].renditionId])).renderer_version, /^ppt-master-[a-f0-9]{20}$/);
+        await assert.rejects(repository.withExecution(user, task.id, lease, () => assert.fail('成功任务不能再次登记')), { code: 'PPT_MASTER_LEASE_LOST' });
     } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
 });
 

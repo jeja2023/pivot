@@ -15,8 +15,12 @@ async function get(user, id) {
     const task = await taskStore.getForUser(id, user);
     const state = row.result_json.state || { request: row.input_request };
     if (state?.request) await storage.access(user, state.request);
+    const updatedAt = Date.parse(row.updated_at);
+    const retentionStart = task.status === 'expired' ? Math.min(updatedAt, Date.parse(row.expires_at)) : updatedAt;
     return { id: task.id, status: task.status, error: task.error, progress: row.result_json.progress || { message: '正在准备离线原稿任务。' },
-        result: row.result_json.publicResult || null, recoverable: Boolean(Date.parse(row.updated_at) > Date.now() - 86400000 && (task.status === 'failed' || task.status === 'working' && Date.parse(row.updated_at) < Date.now() - 30000 && Number(row.result_json._leaseUntil || 0) < Date.now() / 1000)) };
+        result: row.result_json.publicResult || null, recoverable: Boolean(!row.result_json.workspaceCleanedAt && retentionStart > Date.now() - 86400000
+            && Number(row.result_json._leaseUntil || 0) < Date.now() / 1000
+            && (['failed', 'expired'].includes(task.status) || task.status === 'working' && updatedAt < Date.now() - 30000)) };
 }
 async function run(user, id, deps = {}) {
     if (active.has(id)) return;
@@ -126,7 +130,10 @@ async function resume(user, id) {
 }
 async function latest(user) { const row = await repository.latestJob(user); return row ? get(user, row.id) : null; }
 async function cleanup() {
-    for (const row of await repository.cleanupCandidates()) if (!active.has(row.id)) await runtime.cleanupWorkspace({ id: row.user_id }, row.id);
+    for (const row of await repository.cleanupCandidates()) {
+        const user = { id: row.user_id };
+        if (!active.has(row.id)) await repository.withWorkspaceCleanup(user, row.id, () => runtime.cleanupWorkspace(user, row.id));
+    }
 }
 
 module.exports = { start, get, cancel, resume, run, latest, cleanup };
