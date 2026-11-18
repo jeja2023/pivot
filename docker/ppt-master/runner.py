@@ -123,6 +123,13 @@ def package_report(data: bytes, checklist=None, preservation=None) -> dict:
         return report
 
 
+def page_sources(file, receipt, checklist):
+    export = receipt.get("pageSources", {}).get(file.relative_to(WORKSPACE).as_posix(), [])
+    if len(export) != len(checklist or []) or len(set(export)) != len(export):
+        return []
+    return export
+
+
 def deliver_presentation(request: dict) -> dict:
     file = relative_path(request.get("path"), WORKSPACE, must_exist=True)
     if file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
@@ -136,6 +143,8 @@ def deliver_presentation(request: dict) -> dict:
     repair = request.get("repair")
     draft = WORKSPACE / REVIEW_DRAFT
     if repair is not None:
+        if not isinstance(repair, dict):
+            raise ValueError("按页修复参数无效。")
         baseline_digest = repair.get("sha256")
         pages = repair.get("pages")
         if not isinstance(baseline_digest, str) or not re.fullmatch(r"[a-f0-9]{64}", baseline_digest) or not isinstance(pages, list) or not pages or any(type(page) is not int or not 1 <= page <= 100 for page in pages):
@@ -154,7 +163,7 @@ def deliver_presentation(request: dict) -> dict:
         # 仅保留与本次成功导出回执一致且结构可读的草稿，正式交付仍须通过清单核验。
         result = {"reviewFailure": str(error)}
         if error.report is not None:
-            result["pageReview"] = error.report
+            result["pageReview"] = {**error.report, "pageSources": page_sources(file, receipt, request.get("checklist"))}
         files = inventory()
         if sum(entry.stat().st_size for entry in files if entry != draft) + len(data) > MAX_WORKSPACE or (draft not in files and len(files) >= 16_000):
             return result
@@ -266,13 +275,26 @@ def main(request: dict) -> dict:
         return {"path": request["path"], "bytes": file.stat().st_size, "sha256": hashlib.sha256(file.read_bytes()).hexdigest()}
     if action == "run":
         args = command(request.get("tool"), request.get("args"), SKILL, WORKSPACE)
+        previous_exports = {}
+        if request.get("tool") == "export":
+            previous_exports = {file: file.stat().st_mtime_ns for file in inventory() if file.suffix == ".pptx" and "exports" in file.parts}
         result = run(args)
-        inventory()
+        files = inventory()
         if request.get("tool") == "export" and result["exitCode"] == 0:
             metadata = WORKSPACE / ".pivot"
             metadata.mkdir(exist_ok=True)
-            exports = {file.relative_to(WORKSPACE).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest() for file in inventory() if file.suffix == ".pptx" and "exports" in file.parts}
-            (metadata / "export.json").write_text(json.dumps({"sourceFingerprint": source_fingerprint(), "exports": exports}), encoding="utf-8")
+            args = request["args"]
+            project = relative_path(args[0], WORKSPACE, must_exist=True)
+            outputs = [file for file in files if file.suffix == ".pptx" and "exports" in file.parts]
+            exports = {file.relative_to(WORKSPACE).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest() for file in outputs}
+            page_sources_by_export = {}
+            if project.is_dir() and "--roundtrip" not in args and not any(arg in {"-s", "--source"} or arg.startswith("--source=") for arg in args):
+                sys.path.insert(0, str(SKILL / "scripts"))
+                from slide_roster import discover_slide_svgs
+                sources = [page.relative_to(WORKSPACE).as_posix() for page in discover_slide_svgs(project / "svg_output")]
+                page_sources_by_export = {file.relative_to(WORKSPACE).as_posix(): sources for file in outputs
+                                          if file.is_relative_to(project / "exports") and file.stat().st_mtime_ns != previous_exports.get(file)}
+            (metadata / "export.json").write_text(json.dumps({"sourceFingerprint": source_fingerprint(), "exports": exports, "pageSources": page_sources_by_export}), encoding="utf-8")
         return result
     if action == "validate_template":
         root = relative_path(request.get("path"), WORKSPACE, must_exist=True)

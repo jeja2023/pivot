@@ -228,6 +228,30 @@ test('待核验草稿仅在任务仍可访问且失败状态和文件摘要一�
     } }), { buffer, filename: '经营回顾-待核验草稿.pptx' });
 });
 
+test('按页恢复只能写指定源稿并复用原有确认，导出仍绑定范围', async () => {
+    const state = makeState('quick');
+    const sha256 = 'b'.repeat(64);
+    state.pageRepair = { sha256, pages: [1], sourceFiles: ['report/svg_output/page1.svg'] };
+    await assert.rejects(validateTurn({ actions: [{ action: 'write', path: 'report/svg_output/page2.svg', text: '<svg/>' }] }, state), /未选页面/);
+    await assert.rejects(validateTurn(design, state, async () => state.request.instruction), /原已确认清单/);
+    await assert.doesNotReject(validateTurn({ actions: [{ action: 'write', path: 'report/svg_output/page1.svg', text: '<svg/>' }] }, state));
+});
+
+test('重新生成从授权快照恢复完整材料并以新任务关联原任务', async () => {
+    const { regenerate } = require('../server/services/presentations/master/tasks');
+    const user = { id: 1 }, bytes = Buffer.from('完整原始材料');
+    const request = { title: '经营回顾', materials: [{ id: 'a', path: 'inputs/material-1.md', digest: createHash('sha256').update(bytes).digest('hex') }] };
+    const previous = { row: { result_json: { state: { request } } }, task: { status: 'failed' } };
+    const options = { lookup: async () => previous, readOriginal: async () => bytes, start: async (_user, input, context) => {
+        assert.equal(input.materials[0].text, '完整原始材料');
+        assert.equal(context.regeneratedFrom, 'previous');
+        return { id: 'new' };
+    } };
+    assert.deepEqual(await regenerate(user, 'previous', options), { id: 'new' });
+    assert.equal(request.materials[0].text, undefined);
+    await assert.rejects(regenerate(user, 'previous', { ...options, readOriginal: async () => Buffer.from('被更换的材料') }), /原材料快照已不可用/);
+});
+
 test('预检先校验窗口和图片能力，仅合格配置使用端点探针', async () => {
     const request = { operation: 'generate', profile: 'default', modelId: 'model' }, probes = [];
     const model = { id: 5, context_window_tokens: 256000, max_tokens: 12000, supports_vision: 1 };

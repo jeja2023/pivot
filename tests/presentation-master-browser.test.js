@@ -59,7 +59,7 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
             if (!response.ok) throw new Error(data.error); return data;
         } };
     });
-    for (const file of ['apps-model-selector.js', 'apps-workbench-presentation-goals.js', 'apps-workbench-presentation-master-form.js', 'apps-workbench-presentation-master.js']) await page.addScriptTag({ path: path.join(root, 'client/chat', file) });
+    for (const file of ['apps-model-selector.js', 'apps-workbench-presentation-goals.js', 'apps-workbench-presentation-master-form.js', 'apps-workbench-presentation-master-page-review.js', 'apps-workbench-presentation-master.js']) await page.addScriptTag({ path: path.join(root, 'client/chat', file) });
     await page.evaluate(template => {
         window.Pivot.moduleApi('apps.presentations.master').bind(window.fixtureState, window.fixtureHelpers);
         document.getElementById('entry').addEventListener('click', () => window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', template }));
@@ -91,6 +91,65 @@ test('待核验草稿在失败面板可单独下载，保留继续制作入口',
         await panel.getByRole('button', { name: '下载待核验草稿（.pptx）' }).click();
         assert.equal((await download).suggestedFilename(), '经营回顾-待核验草稿.pptx');
         await expect(panel).toContainText('制作未完成');
+    } finally { await context.close(); }
+});
+
+test('逐页核验显示应有数据，提交时只修复勾选页', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        const revision = 'b'.repeat(64);
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, canRepairPages: true, canRegenerate: true, draftRevision: revision,
+            request: { title: '经营回顾', maxSteps: 80 }, pageReview: { passedPages: [1], failedPages: [
+                { page: 2, title: '营收', items: [{ index: 1, text: '收入120万元' }] },
+                { page: 3, title: '成本', items: [{ index: 1, text: '成本80万元' }] }
+            ] }, error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '第 2 页关键数据待核验。' }
+        } } }));
+        let submitted;
+        await page.route('**/master/tasks/fixture-task/resume', route => {
+            submitted = route.request().postDataJSON();
+            return route.fulfill({ json: {} });
+        });
+        await page.locator('#presentation-master-start').click();
+        await expect(panel).toContainText('已通过 1 页');
+        await expect(panel).toContainText('收入120万元');
+        await expect(panel.getByRole('button', { name: '重新生成整份' })).toBeVisible();
+        await panel.getByRole('checkbox', { name: /第 3 页/ }).uncheck();
+        await panel.getByRole('textbox', { name: '本次修改意见（选填）' }).fill('在图表旁补上数值。');
+        await panel.getByRole('button', { name: '仅修复所选页面' }).click();
+        await expect.poll(() => submitted?.pages).toEqual([2]);
+        assert.equal(submitted.draftRevision, revision);
+        assert.equal(submitted.repairNote, '在图表旁补上数值。');
+    } finally { await context.close(); }
+});
+
+test('整份重新生成需经确认，新任务可以返回查看原草稿', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context), panel = page.locator('#presentation-master-status');
+        await page.evaluate(() => { window.Pivot.legacy.showConfirm = async () => window.fixtureRegenerateApproved === true; });
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'failed', canRegenerate: true, hasReviewDraft: true, request: { title: '原稿' }, error: { message: '需要修改。' }
+        } } }));
+        let calls = 0;
+        await page.route('**/master/tasks/fixture-task/regenerate', route => {
+            calls++;
+            return route.fulfill({ json: { task: { id: 'new-task' } } });
+        });
+        await page.route('**/master/tasks/new-task', route => route.fulfill({ json: { task: {
+            id: 'new-task', status: 'completed', regeneratedFrom: 'fixture-task', request: { title: '重生成的新稿' }
+        } } }));
+        await page.locator('#presentation-master-start').click();
+        const regenerate = panel.getByRole('button', { name: '重新生成整份' });
+        await regenerate.click();
+        assert.equal(calls, 0);
+        await page.evaluate(() => { window.fixtureRegenerateApproved = true; });
+        await regenerate.click();
+        await expect(panel).toContainText('重生成的新稿');
+        assert.equal(calls, 1);
+        await panel.getByRole('button', { name: '查看原任务' }).click();
+        await expect(panel.getByRole('button', { name: '下载待核验草稿（.pptx）' })).toBeVisible();
     } finally { await context.close(); }
 });
 

@@ -167,7 +167,7 @@ def slide_identity(archive, slide_path, parts, part_hashes):
 def verify_preserved_pages(baseline, archive, ordered, selected):
     previous_names = baseline.namelist()
     previous = read_slide_order(baseline, [name for name in previous_names if re.fullmatch(r"ppt/slides/slide\d+\.xml", name)])
-    if len(ordered) != len(previous):
+    if len(ordered) != len(previous) or any(page > len(previous) for page in selected):
         raise ValueError("按页修复须保留原页数，请按指定页面修正后重新导出。")
     before_parts, after_parts = set(previous_names), set(archive.namelist())
     before_hashes, after_hashes = {}, {}

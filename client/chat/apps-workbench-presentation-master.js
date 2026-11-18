@@ -384,6 +384,7 @@
         const sequence = ++epoch, actor = actorId(), target = presentationId(), focus = document.activeElement;
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-goals.js');
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-form.js');
+        await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-page-review.js');
         if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
         closeProcessModal({ restoreFocus: false, resetEpoch: false });
         const previous = byId('presentation-master-modal');
@@ -764,9 +765,10 @@
 
             const resumeActions = node('div', 'presentation-master-task-actions presentation-master-resume-actions');
             const resume = node('button', 'btn-primary presentation-master-resume-btn'); resume.type = 'button';
+            const readRepair = window.Pivot.moduleApi('apps.presentations.masterPageReview').mount(resumePanel, value, node);
             const playIcon = svgIcon([['polygon', { points: '6 4 20 12 6 20 6 4' }]], 13);
             playIcon.setAttribute('aria-hidden', 'true');
-            resume.append(playIcon, node('span', '', '从检查点继续'));
+            resume.append(playIcon, node('span', '', readRepair ? '仅修复所选页面' : '从检查点继续'));
             resume.addEventListener('click', async () => { const sequence = ++epoch; resume.disabled = true; feedback.textContent = ''; try {
                 const tokenBudget = readTokenBudget(resumeBudget);
                 if (currentBudget === 0 && tokenBudget > 0) throw new Error('本任务累计模型预算为不限，请清空预算或填写 0 后继续。');
@@ -777,7 +779,8 @@
                 await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', post({
                     tokenBudget: tokenBudget > 0 ? Math.max(tokenBudget, currentBudget ?? 0) : tokenBudget,
                     maxSteps: Math.max(Number(resumeSteps.value), Number(value.request?.maxSteps || 0)),
-                    modelId: resumeModel.value || formModel?.value || ''
+                    modelId: resumeModel.value || formModel?.value || '',
+                    ...readRepair?.()
                 }));
                 await poll(value.id, sequence);
             } catch (error) { if (isProcessCurrent(sequence)) { resume.disabled = false; feedback.textContent = errorText(error); } } });
@@ -786,38 +789,20 @@
             panel.appendChild(resumePanel);
         }
         const actionRow = node('div', 'presentation-master-task-actions');
-        if (value.hasReviewDraft) {
-            panel.appendChild(node('p', 'presentation-master-task-summary', '已保留待核验草稿，供检查版面与内容。正式交付须通过清单核验。'));
-            const draft = node('button', 'btn-secondary', '下载待核验草稿（.pptx）');
-            draft.type = 'button';
-            draft.addEventListener('click', async () => {
-                const sequence = epoch;
-                draft.disabled = true;
-                feedback.textContent = '';
+        window.Pivot.moduleApi('apps.presentations.masterPageReview').mountActions(actionRow, panel, value, {
+            node, getEpoch: () => epoch, isCurrent: isProcessCurrent, showError: errorText, feedback,
+            async restart(id, regenerate) {
+                const sequence = ++epoch;
+                if (!regenerate) return poll(id, sequence).catch(error => showError(error, sequence));
+                regenerate.disabled = true;
                 try {
-                    const response = await window.Pivot.api.fetch(API + '/tasks/' + encodeURIComponent(value.id) + '/review-draft');
-                    if (!response.ok) {
-                        const data = await response.json().catch(() => ({}));
-                        throw new Error(data.error?.message || data.error || '草稿下载失败，请刷新任务状态后重试。');
-                    }
-                    const blob = await response.blob();
-                    if (!isProcessCurrent(sequence)) return;
-                    const url = URL.createObjectURL(blob);
-                    const link = node('a');
-                    link.href = url;
-                    link.download = String(value.request?.title || '演示文稿').replace(/[\r\n\\/]/g, '_') + '-待核验草稿.pptx';
-                    document.body.appendChild(link);
-                    link.click();
-                    link.remove();
-                    URL.revokeObjectURL(url);
+                    const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id) + '/regenerate', post({}));
+                    if (isProcessCurrent(sequence)) await poll(data.task.id, sequence);
                 } catch (error) {
-                    if (isProcessCurrent(sequence)) feedback.textContent = errorText(error);
-                } finally {
-                    if (isProcessCurrent(sequence)) draft.disabled = false;
+                    if (isProcessCurrent(sequence)) { feedback.textContent = errorText(error); regenerate.disabled = false; }
                 }
-            });
-            actionRow.appendChild(draft);
-        }
+            }
+        });
         for (const file of value.result?.files || []) {
             const download = node('button', 'btn-secondary', file.format === 'pptx' ? '下载演示文件（.pptx）' : '下载完整项目源包'); download.type = 'button';
             download.addEventListener('click', async () => {

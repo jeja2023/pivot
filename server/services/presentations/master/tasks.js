@@ -48,7 +48,9 @@ function publicResult(row, task) {
         recoverable: Boolean(state && (!state.pendingKind || state.response) && (task.status === 'failed' || task.status === 'expired' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
         ...(reviewDraftFor(row, task) ? { hasReviewDraft: true } : {}),
         ...(reviewDraftFor(row, task) && state.pageReview ? { pageReview: state.pageReview, draftRevision: state.reviewDraft.sha256,
-            canRepairPages: state.engine?.pageRepair === 1 } : {}),
+            canRepairPages: state.engine?.pageRepair === 1 && Boolean(state.pageSources?.length) } : {}),
+        canRegenerate: ['failed', 'expired'].includes(task.status) && Boolean(state?.request?.title) && !state.request.runId,
+        ...(state?.request?.regeneratedFrom ? { regeneratedFrom: state.request.regeneratedFrom } : {}),
         ...((task.status === 'input_required' || ['expired', 'failed'].includes(task.status)) && !state?.response && pending ? { inputRequest: pending } : {}),
         result: ['completed', 'failed', 'cancelled', 'expired'].includes(task.status) ? data.publicResult || { message: data.message || '' } : undefined };
 }
@@ -206,7 +208,8 @@ async function start(user, input, context = {}) {
     if (available.transport === 'service' && !available.checklistReady) {
         throw runtime.error('独立PPT制作服务尚未支持交付清单核验，请更新执行镜像。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
     }
-    const request = { ...contract.normalize(input), runId: String(context.run?.id || context.runId || '') };
+    const request = { ...contract.normalize(input), runId: String(context.run?.id || context.runId || ''),
+        ...(context.regeneratedFrom ? { regeneratedFrom: context.regeneratedFrom } : {}) };
     const visionRequired = await ensureAccess(user, request);
     await checkModel(user, request, { visionRequired });
     const task = await repository.admit(user, client => { deployment.assertAccepting(); return taskStore.createToolTaskStore({ queryOne: client.queryOne, execute: client.execute }).create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 60 * 60 * 1000 }); });
@@ -252,7 +255,7 @@ async function resume(user, id, input = {}) {
     deployment.assertCheckpoint(state, await runtime.identity());
     await ensureAccess(user, state.request);
     if (input.pages !== undefined) {
-        if (!['failed', 'expired'].includes(row.status) || !state.reviewDraft || !state.pageReview || state.engine?.pageRepair !== 1) {
+        if (!['failed', 'expired'].includes(row.status) || !state.reviewDraft || !state.pageReview || !state.pageSources?.length || state.engine?.pageRepair !== 1) {
             throw runtime.error('当前任务没有可按页修复的草稿，请检查任务或重新生成整份。', 'PPT_MASTER_PAGE_REPAIR_UNAVAILABLE', 409);
         }
         if (input.draftRevision !== state.reviewDraft.sha256) throw runtime.error('草稿已更新，请刷新后重新选择页面。', 'PPT_MASTER_DRAFT_CHANGED', 409);
@@ -264,7 +267,8 @@ async function resume(user, id, input = {}) {
         if (input.repairNote !== undefined && (typeof input.repairNote !== 'string' || input.repairNote.length > 1000)) {
             throw runtime.error('修改意见请填写一千字以内的文字。');
         }
-        state.pageRepair = { sha256: state.reviewDraft.sha256, pages: [...input.pages].sort((a, b) => a - b) };
+        const pages = [...input.pages].sort((a, b) => a - b);
+        state.pageRepair = { sha256: state.reviewDraft.sha256, pages, sourceFiles: pages.map(page => state.pageSources[page - 1]) };
         const issues = state.pageReview.failedPages.filter(page => input.pages.includes(page.page));
         state.messages.push({ role: 'user', content: '用户要求只修复选中的页面，保留其他页面。以下是已确认清单与本次修改意见：'
             + JSON.stringify({ issues, note: input.repairNote?.trim() || '' }) });
@@ -291,7 +295,7 @@ async function resume(user, id, input = {}) {
         const repair = reviewRecoveryGuidance(state, row.error_code, row.error_message);
         state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' + repair });
     }
-    if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);
+    if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state, input.pages === undefined ? null : input.draftRevision); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);
     setImmediate(() => run(id, user).catch(() => {})); return get(user, id);
 }
 
@@ -315,7 +319,7 @@ async function regenerate(user, id, dependencies = {}) {
         }
     }));
     const { sourceAssetId, ...settings } = request;
-    return (dependencies.start || start)(user, { ...settings, ...(sourceAssetId ? { sourceAssetId } : {}), materials });
+    return (dependencies.start || start)(user, { ...settings, ...(sourceAssetId ? { sourceAssetId } : {}), materials }, { regeneratedFrom: id });
 }
 
 module.exports = { start, get, readReviewDraft, respond, cancel, latest, activeTask, run, resume, regenerate };

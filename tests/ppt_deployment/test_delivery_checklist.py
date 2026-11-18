@@ -14,7 +14,7 @@ from delivery_checklist import A, C, P, R, REL, verify_checklist  # noqa: E402
 import runner  # noqa: E402
 
 
-def deck():
+def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("ppt/presentation.xml", f'<p:presentation xmlns:p="{P}" xmlns:r="{R}"><p:sldIdLst>'
@@ -26,18 +26,35 @@ def deck():
             chart = f'<p:graphicFrame><a:graphic><a:graphicData><c:chart xmlns:c="{C}" r:id="c1"/></a:graphicData></a:graphic></p:graphicFrame>' if index == 2 else ''
             archive.writestr(f"ppt/slides/slide{index}.xml", f'<p:sld xmlns:p="{P}" xmlns:a="{A}" xmlns:r="{R}">'
                             f'<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{title}</a:t></a:r></a:p>'
-                            '<a:p><a:r><a:t>成本1200</a:t></a:r></a:p></p:txBody></p:sp>'
+                            f'<a:p><a:r><a:t>{front_value if index == 2 else back_value}</a:t></a:r></a:p></p:txBody></p:sp>'
                             '<p:sp><p:nvSpPr><p:cNvPr hidden="1"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>隐藏数据30</a:t></a:r></a:p></p:txBody></p:sp>'
                             f'{chart}</p:spTree></p:cSld></p:sld>')
         archive.writestr("ppt/slides/_rels/slide2.xml.rels", f'<Relationships xmlns="{REL}"><Relationship Id="c1" Type="{R}/chart" Target="../charts/chart1.xml"/></Relationships>')
         archive.writestr("ppt/charts/chart1.xml", f'<c:chartSpace xmlns:c="{C}"><c:chart><c:plotArea><c:barChart><c:ser><c:tx><c:v>实际</c:v></c:tx>'
                         '<c:cat><c:strLit><c:pt idx="0"><c:v>一季度</c:v></c:pt></c:strLit></c:cat>'
-                        '<c:val><c:numLit><c:pt idx="0"><c:v>120.00</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>')
+                        f'<c:val><c:numLit><c:pt idx="0"><c:v>{chart_value}</c:v></c:pt></c:numLit></c:val></c:ser></c:barChart></c:plotArea></c:chart></c:chartSpace>')
         archive.writestr("ppt/notesSlides/notesSlide2.xml", "<note>只写在备注的数据30</note>")
     return buffer
 
 
 class DeliveryChecklistTests(unittest.TestCase):
+    def test_full_review_lists_all_pages_and_checks(self):
+        with self.assertRaises(runner.ChecklistMismatch) as failure:
+            runner.package_report(deck().getvalue(), [["首页", []], ["另一个标题", ["成本1000", "成本2000"]]])
+        self.assertEqual(failure.exception.report, {"passedPages": [1], "failedPages": [
+            {"page": 2, "missingTitle": True, "missingValues": [1, 2]}
+        ]})
+
+    def test_selected_page_can_be_corrected_but_other_content_and_chart_are_locked(self):
+        baseline = deck().getvalue()
+        checklist = [["首页", []], ["后页", ["成本1500"]]]
+        repaired = deck(back_value="成本1500").getvalue()
+        report = runner.package_report(repaired, checklist, (baseline, {2}))
+        self.assertEqual(report["checkedPages"], 2)
+        for modified in [deck(back_value="成本1500", front_value="成本1400"), deck(back_value="成本1500", chart_value="138")]:
+            with self.assertRaisesRegex(ValueError, "改变了第 1 页"):
+                runner.package_report(modified.getvalue(), checklist, (baseline, {2}))
+
     def test_actual_order_and_native_chart_value_are_verified(self):
         with zipfile.ZipFile(deck()) as archive:
             result = verify_checklist(archive, ["ppt/slides/slide1.xml", "ppt/slides/slide2.xml"],

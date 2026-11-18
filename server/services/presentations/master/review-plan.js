@@ -24,6 +24,7 @@ function initializeReview(state) {
     delete state.deliveryReview;
     delete state.reviewDraft;
     delete state.pageReview;
+    delete state.pageSources;
     delete state.pageRepair;
     delete state.pendingKind; delete state.pendingInput; delete state.response;
     state.confirmedGates = 0;
@@ -147,6 +148,7 @@ function applyReviewDecision(state, pending, approved) {
     delete state.deliveryReview;
     delete state.reviewDraft;
     delete state.pageReview;
+    delete state.pageSources;
     delete state.pageRepair;
     if (approved) approvals[pending.stage] = { promptId: pending.promptId, digest: postingDigest, plan: pending.plan };
     state.confirmedGates = Object.keys(approvals).length;
@@ -197,13 +199,20 @@ function repairActionAllowed(state, action) {
     const project = state.review.approvals?.design?.plan?.project;
     if (['read', 'read_runtime', 'read_history', 'read_images', 'list'].includes(action.action)) return true;
     if (action.action === 'write') {
-        // 只编辑当前项目的页面源文件。最终导出还会核对每个未选页面及依赖资源。
-        return typeof project === 'string' && typeof action.path === 'string' && action.path.startsWith(project + '/')
-            && /^(?:svg_output|svg_final)\/[^/]+\.svg$/i.test(action.path.slice(project.length + 1));
+        return state.pageRepair.sourceFiles.includes(action.path);
     }
     if (action.action !== 'run') return false;
     if (action.tool === 'project') return ['info', 'page-context', 'page-context-report', 'validate'].includes(action.args?.[0]) && action.args[1] === project;
-    return ['check_svg', 'finalize', 'export'].includes(action.tool) && action.args?.[0] === project;
+    if (!['check_svg', 'export'].includes(action.tool) || action.args?.[0] !== project) return false;
+    if (action.tool === 'export') return !action.args.some(arg => arg === '--roundtrip' || arg === '-s' || arg.startsWith('--source'));
+    return true;
+}
+
+function pageRepairSources(report, project, count) {
+    const files = report?.pageSources, prefix = project + '/svg_output/';
+    if (!Array.isArray(files) || files.length !== count || new Set(files).size !== count) return null;
+    return files.every(file => typeof file === 'string' && file.startsWith(prefix)
+        && /^[^/\\:]+\.svg$/.test(file.slice(prefix.length)) && !file.slice(prefix.length).startsWith('.')) ? files : null;
 }
 
 function reviewGuidance(state) {
@@ -233,4 +242,4 @@ function reviewRecoveryGuidance(state, code, message) {
         + '\n完整标题及文字型关键数据各放在单个可回读的文本对象中，可在同一对象内换行。';
 }
 
-module.exports = { initializeReview, normalizeStage, applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };
+module.exports = { initializeReview, normalizeStage, applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };

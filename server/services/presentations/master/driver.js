@@ -9,7 +9,7 @@ const { createInspectionProgress } = require('./inspection-progress');
 const { pendingInput, planDigest } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
-const { applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, reviewGuidance } = require('./review-plan');
+const { applyReviewDecision, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance } = require('./review-plan');
 const { selectImagePage, imageCoverage } = require('./model-input');
 
 const AUTHORITY = {
@@ -47,6 +47,7 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
         const guidance = [inspection.guidance(), reviewGuidance(state), imageHint, correction,
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
+            state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
             state.citationRepair && CITATION_REPAIR_GUIDANCE, state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
         const { output, usageRef } = await runModelTurn(user, id, state, model, hooks, deps, guidance, state.citationRepair);
         await hooks.ensureCurrent();
@@ -172,6 +173,7 @@ async function drive(user, id, state, hooks, deps = {}) {
                 if (typeof sha256 === 'string' && /^[a-f0-9]{64}$/.test(sha256) && Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= 60 * 1024 * 1024) {
                     state.reviewDraft = { sha256, byteSize };
                     state.pageReview = pageReviewFor(state, receipt.pageReview, expected.checklist);
+                    state.pageSources = pageRepairSources(receipt.pageReview, project, expected.checklist.length);
                     if (state.pageRepair) state.pageRepair.sha256 = sha256;
                 }
                 await hooks.checkpoint(state, { phase: 'delivery_review', message: '交付内容待复核，已保留当前制作检查点。' });

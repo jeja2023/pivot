@@ -48,11 +48,12 @@ async function acceptResponse(user, id, state) {
         WHERE id=? AND user_id=? AND tool_name=? AND result_json->'state'->>'steps' IS NOT DISTINCT FROM ?::text AND COALESCE(result_json->'state'->>'response','')=''
           AND (status='input_required' AND expires_at>NOW() OR status IN ('expired','failed') AND result_json->'state'->>'pendingKind' IN ('confirmation','clarification')) RETURNING id`, [JSON.stringify(state), id, user.id, TOOL, state.steps == null ? null : String(state.steps)]);
 }
-async function resume(user, id, state) {
+async function resume(user, id, state, expectedDraft = null) {
     return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',
         result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND (COALESCE(result_json->'state'->>'pendingKind','')='' OR COALESCE(result_json->'state'->>'response','')<>'') AND (status IN ('failed','expired') OR (status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()))) RETURNING id`,
-    [JSON.stringify(state), id, user.id, TOOL]);
+        WHERE id=? AND user_id=? AND tool_name=? AND (?::text IS NULL OR (status IN ('failed','expired') AND result_json->'state'->'reviewDraft'->>'sha256'=?))
+          AND (COALESCE(result_json->'state'->>'pendingKind','')='' OR COALESCE(result_json->'state'->>'response','')<>'') AND (status IN ('failed','expired') OR (status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()))) RETURNING id`,
+    [JSON.stringify(state), id, user.id, TOOL, expectedDraft, expectedDraft]);
 }
 async function admit(user, create, excludedTaskId = '') {
     return transaction(async client => {
