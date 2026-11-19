@@ -1,6 +1,6 @@
 # PPT Master 完整引擎
 
-镜像统一命名为`ppt-master:6.8.0`，默认启动独立HTTP服务，其他项目可按服务协议1接入。服务以非特权用户和只读根运行，动作进程通过seccomp拒绝Internet socket，继续使用固定上游完整技能包和工具白名单。Pivot只配置服务地址和密钥，不需要Docker socket或共享工作区；原stdin执行入口仍可显式调用，供兼容旧部署。
+构建默认标签为 `ppt-master:6.10.0`，离线升级包可用单独标签区分构建批次。镜像默认启动独立 HTTP 服务，其他项目可按服务协议 1 接入。服务以非特权用户和只读根运行，动作进程通过 seccomp 拒绝 Internet socket，继续使用固定上游完整技能包和工具白名单。Pivot 通过服务地址和密钥接入。原 stdin 执行入口仍可显式调用，供兼容旧部署。
 
 ## 构建
 
@@ -8,8 +8,8 @@
 
 ```powershell
 python scripts/prepare_ppt_master.py --checkout <已固定提交的本地仓库>
-python scripts/build_ppt_master.py --checkout <已固定提交的本地仓库> --tag ppt-master:6.8.0
-docker image inspect ppt-master:6.8.0 --format '{{json .RepoDigests}}'
+python scripts/build_ppt_master.py --checkout <已固定提交的本地仓库> --tag ppt-master:6.10.0
+docker image inspect ppt-master:6.10.0 --format '{{json .RepoDigests}}'
 ```
 
 未提供 checkout 时，准备器只在构建阶段从登记仓库获取固定提交。已有输出目录不会被覆盖。构建使用完整发行包与精确版本的 Python 依赖；上游文件不修改，运行时不联网安装或更新。

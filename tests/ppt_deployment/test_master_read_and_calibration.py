@@ -1,5 +1,7 @@
 """完整制作工具读取范围和文字校准权限边界回归。"""
 import sys
+import shutil
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,6 +14,33 @@ from tool_catalog import command  # noqa: E402
 
 
 class MasterToolTests(unittest.TestCase):
+    def test_readonly_template_copy_keeps_source_and_allows_task_cleanup(self):
+        engine = ROOT / 'artifacts' / 'ppt-master-runtime'
+        if not (engine / 'manifest.json').exists():
+            self.skipTest('未准备固定 PPT Master 运行包')
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / 'skill/templates/example'
+            nested = source / 'templates'
+            nested.mkdir(parents=True)
+            (nested / 'design_spec.md').write_text('模板示例', encoding='utf-8')
+            workspace = root / 'workspace'
+            workspace.mkdir()
+            for folder in (nested, source):
+                folder.chmod(0o555)
+            try:
+                with patch.object(runner, 'ENGINE', engine), patch.object(runner, 'SKILL', root / 'skill'), patch.object(runner, 'WORKSPACE', workspace), patch.object(runner, 'run', return_value={'exitCode': 0}):
+                    result = runner.main({'action': 'copy_template', 'source': 'templates/example', 'path': 'selected-template'})
+                target = workspace / result['path']
+                self.assertEqual((target / 'templates/design_spec.md').read_text(encoding='utf-8'), '模板示例')
+                if sys.platform != 'win32':
+                    self.assertFalse(nested.stat().st_mode & stat.S_IWUSR)
+                    self.assertTrue((target / 'templates').stat().st_mode & stat.S_IWUSR)
+                shutil.rmtree(target)
+            finally:
+                for folder in (nested, source):
+                    folder.chmod(0o755)
+
     def test_read_honors_length_and_preserves_unicode_offsets(self):
         engine = ROOT / 'artifacts' / 'ppt-master-runtime'
         if not (engine / 'manifest.json').exists():

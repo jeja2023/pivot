@@ -6,6 +6,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const Zip = require('jszip');
 const fixture = require('../../scripts/test_support/ppt_master_default_model');
+const engineLock = require('../../config/ppt-master-engine.json');
 
 const API = '/api/apps/presentations';
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -50,9 +51,19 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         test.setTimeout(240000);
         test.skip(!process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL, '需要本地独立 PPT Master 服务');
         const { user, ids } = await member(page, browser, ['ppt-master-automatic-e2e-' + style], true);
+        const info = await user.request.get(API + '/master/info');
+        expect(info.ok()).toBeTruthy();
+        expect((await info.json()).engine).toMatchObject({
+            revision: engineLock.revision, version: engineLock.skillVersion, currentExportReady: true, pageRepairReady: true
+        });
         await user.getByRole('button', { name: '模板库', exact: true }).click();
         await user.locator('#presentation-catalog-tabs [data-catalog-group="engine"]').click();
-        await user.locator('#presentation-catalog-body tr').filter({ hasText: name }).getByRole('button', { name: '使用此制作模板' }).click();
+        const row = user.locator('#presentation-catalog-body tr').filter({ hasText: name });
+        await expect(row.getByRole('cell', { name: engineLock.skillVersion, exact: true })).toBeVisible();
+        await row.getByRole('button', { name: '预览 ' + name, exact: true }).click();
+        const preview = user.locator('.presentation-catalog-preview');
+        await expect(preview.getByRole('img', { name: name + ' · 风格示例' })).toBeVisible();
+        await preview.getByRole('button', { name: '使用此制作模板' }).click();
         await user.locator('#presentation-master-title').fill(name + '经营复核');
         await user.locator('#presentation-master-instruction').fill('按所选模板和提供的材料制作三页经营汇报。');
         await user.locator('#presentation-master-material').fill(fixture.pages.map(item => item.fact).join('\n'));

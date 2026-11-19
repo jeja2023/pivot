@@ -11,7 +11,7 @@
 | ECharts | 图表渲染 | Apache-2.0 |
 | Apache POI DrawingML 预设形状数据（187 类） | 原生形状的浏览器/服务端几何求值 | Apache-2.0 |
 | PPT Master 形状/几何接口参考 | DrawingML 数据来源追溯与公式/圆弧行为参考 | MIT |
-| PPT Master 6.8.0 完整技能发行包 | 固定工作流、模板、转换与公式工具 | MIT；包内第三方资源各自许可随原包保留 |
+| PPT Master 6.10.0 完整技能发行包 | 固定工作流、模板、转换与公式工具 | MIT；包内第三方资源各自许可随原包保留 |
 | LibreOffice Impress（Debian发行包） | 离线原稿静态预览 | MPL-2.0 / LGPL及所含组件各自许可，详见镜像内copyright文件 |
 | Poppler（Debian poppler-utils） | 本地PDF页面栅格化 | GPL及所含组件各自许可，详见镜像内copyright文件 |
 | FFmpeg / libx264（Debian发行包） | 本地页面视频与音频编码 | 构建配置决定的GPL/LGPL及相关许可，详见镜像内copyright文件 |

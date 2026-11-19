@@ -50,7 +50,11 @@ class TemplateAdapterTests(unittest.TestCase):
 
     def test_invalid_spec_still_fails_upstream_validation_and_delivery(self):
         root = self.copy_template()
-        (root / "templates/design_spec.md").write_text("无效的模板规范", encoding="utf-8")
+        # 任务中的原始规范文件沿用只读模式，用替换文件构造损坏副本。
+        spec = root / "templates/design_spec.md"
+        changed = spec.with_suffix(".invalid.md")
+        changed.write_text("无效的模板规范", encoding="utf-8")
+        changed.replace(spec)
         result = runner.main({"action": "validate_template", "path": "selected-template", "kind": "style"})
         self.assertNotEqual(result["exitCode"], 0)
         with self.assertRaisesRegex(ValueError, "上游模板校验未通过"):

@@ -1,7 +1,7 @@
 # 独立PPT服务，可单独启动/更新；不依赖Pivot，不挂载Docker socket。
 services:
   ppt-master:
-    image: ${PPT_MASTER_IMAGE:-ppt-master:6.8.0}
+    image: ${PPT_MASTER_IMAGE:-ppt-master:6.10.0}
     pull_policy: never
     container_name: ppt-master
     restart: unless-stopped

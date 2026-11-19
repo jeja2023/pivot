@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -407,6 +408,10 @@ def main(request: dict) -> dict:
         if len(entries) > 2000 or sum(file.stat().st_size for file in entries) > 50 * 1024 * 1024 or any(file.is_symlink() for file in entries):
             raise ValueError("模板工作区超过单次复制范围。")
         shutil.copytree(source, target)
+        # 发行包目录为只读，任务副本的目录须允许当前服务用户清理。
+        for directory, _, _ in os.walk(target):
+            copied = Path(directory)
+            copied.chmod(stat.S_IMODE(copied.stat().st_mode) | stat.S_IWUSR)
         inventory()
         return {"path": request["path"], "files": len(entries)}
     if action == "read":

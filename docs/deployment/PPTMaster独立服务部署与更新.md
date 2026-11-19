@@ -12,7 +12,7 @@ PPT Master作为独立常驻HTTP服务运行，Pivot只通过内网服务协议�
 npm run build:ppt-master-service -- --checkout E:/ppt-master-upstream --output E:/releases/ppt-master-service
 ```
 
-镜像默认使用 `ppt-master:6.8.0`，也可通过 `--image ppt-master:6.8.0` 显式指定。重用同名标签时，以随包 `image.json` 的镜像 ID 和 `ppt-master.tar.sha256` 区分交付批次。已有目标版本对应的服务镜像时可加 `--skip-build --image <镜像标签>`。打包工具检查服务启动和交付核验能力，导出固定文件名 `ppt-master.tar`，附独立 Compose 和配置示例。旧的仅 stdin 动作镜像需要首次更新为带 HTTP 服务的新镜像。
+镜像默认使用 `ppt-master:6.10.0`，可通过 `--image` 指定本批独立标签。以随包 `image.json` 的镜像 ID 和 `ppt-master.tar.sha256` 区分交付批次。已有与当前源码锁定信息一致的服务镜像时可加 `--skip-build --image <镜像标签>`。打包工具检查服务启动、上游版本、交付核验、修页和快照能力，导出 `ppt-master.tar` 及其 SHA-256，附独立 Compose 和配置示例。旧的仅 stdin 动作镜像需要首次更新为带 HTTP 服务的新镜像。
 
 ## 首次启动服务
 
@@ -52,6 +52,10 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 页面配置使用现有`DATA_ENCRYPTION_KEY`整体加密，服务地址和密钥不写入普通审计详情。仅系统`admin`可以修改和测试，其他账号不获得服务地址和密钥。测试草稿不改变配置；页面停用后以停用状态为准，不自动回退环境中的旧服务。服务镜像更新仍按下面的独立更新步骤，不需要随前端配置功能重建服务镜像。
 
 ## 更新服务镜像与主应用
+
+### v0.7.181 上游 v6.10.0
+
+将 Pivot 主应用与 `ppt-master:6.10.0-pivot0.7.181` 配套更新。先在旧环境处理待续跑任务，保留原服务的 Compose 项目、访问密钥和 `/data` 命名卷。更新后登录查看 `GET /api/apps/presentations/master/info`，确认 `engine.version` 为 `6.10.0`，且 `engine.currentExportReady`、`engine.pageRepairReady` 和 `engine.progressSnapshotsReady` 均为 `true`。[v0.7.181 发布说明](../releases/v0.7.181-PPTMaster-v6.10.0升级.md)
 
 ### v0.7.180 模板库预览
 

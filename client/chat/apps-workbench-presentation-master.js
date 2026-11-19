@@ -107,8 +107,8 @@
 
             const title = node('strong', 'presentation-master-hero-title', `制作模板：${selectedTemplate.name || '所选模板'}`);
             const badge = node('span', 'presentation-source-badge is-engine', 'PPT Master 官方模板');
-            const versionBadge = node('span', 'presentation-version-badge', selectedTemplate.version ? 'v' + selectedTemplate.version : 'v6.8.0');
-            headerRow.append(title, badge, versionBadge);
+            headerRow.append(title, badge);
+            if (selectedTemplate.version) headerRow.append(node('span', 'presentation-version-badge', 'v' + selectedTemplate.version));
 
             const descText = selectedTemplate.description || '结论先行，以证据支持决策；内置结构化版式与论证骨架。';
             const desc = node('p', 'presentation-master-hero-desc', descText);

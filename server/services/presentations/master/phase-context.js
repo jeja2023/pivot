@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const { confirmedWrite } = require('./observations');
-const GENERATE_DIGEST = '3639027ce5e3ff8e328cc0056440a4cb308306fc7503d725a62c6b39e1221048';
+const GENERATE_DIGEST = 'ab30c3c0ff8b4351d31d99f5fad77285e37d6830ab185da82f38475347c2203f';
 
 // 只有真实确认及同一项目的两份文件写入和上游校验均有回执，才能收起已完成的前置章节。
 function validatedProject(state) {

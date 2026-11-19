@@ -10,7 +10,7 @@ const { canonicalJson } = require('../server/services/canonical-json');
 
 async function main() {
     const imageIndex = process.argv.indexOf('--image');
-    const imageName = imageIndex >= 0 ? process.argv[imageIndex + 1] : 'ppt-master:6.8.0';
+    const imageName = imageIndex >= 0 ? process.argv[imageIndex + 1] : 'ppt-master:' + require('../config/ppt-master-engine.json').skillVersion;
     const inspected = JSON.parse(execFileSync('docker', ['image', 'inspect', imageName], { encoding: 'utf8', windowsHide: true }))[0];
     const image = inspected.Id;
     assert.match(image || '', /^sha256:[a-f0-9]{64}$/, '所选镜像缺少完整不可变镜像ID。');
@@ -35,7 +35,10 @@ async function main() {
         await fs.writeFile(path.join(output, `step-${actions.length}.json`), JSON.stringify(result, null, 2));
         return result;
     };
-    const health = await run({ action: 'health' }); assert.equal(health.fileCount, 13089); assert.equal(health.network, 'disabled');
+    const health = await run({ action: 'health' });
+    assert.equal(health.contentDigest, runtime.lock.contentDigest);
+    assert.ok(Number.isSafeInteger(health.fileCount) && health.fileCount >= runtime.lock.requiredFiles.length);
+    assert.equal(health.network, 'disabled');
     await assert.rejects(() => run({ action: 'read_runtime', path: '../../etc/passwd' }), /路径|目录/);
     await assert.rejects(() => run({ action: 'write', path: 'scripts/arbitrary.py', text: 'print(1)' }), /脚本|受限文稿/);
     await assert.rejects(() => run({ action: 'run', tool: 'export', args: ['project', '--enable-dangerous-nonconforming-svg-export'] }), /选项/);

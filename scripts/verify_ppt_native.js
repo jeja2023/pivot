@@ -11,7 +11,7 @@ const { canonicalJson } = require('../server/services/canonical-json');
 const { fixture } = require('./test_support/ppt_native_fixture');
 
 async function main() {
-    const tag = process.argv[2] || 'ppt-master:6.8.0';
+    const tag = process.argv[2] || 'ppt-master:' + require('../config/ppt-master-engine.json').skillVersion;
     const inspected = JSON.parse(execFileSync('docker', ['image', 'inspect', tag], { encoding: 'utf8', windowsHide: true }))[0];
     const image = inspected.Id;
     const output = path.resolve('artifacts/ppt-native-acceptance', new Date().toISOString().replace(/[:.]/g, '-')); await fs.mkdir(output, { recursive: true });

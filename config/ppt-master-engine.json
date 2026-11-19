@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/hugohe3/ppt-master.git",
-  "revision": "769547394107870a0c7b5ad8d1c0c75035123aef",
+  "revision": "d8f704bc8c1552d53a8769b55d1eecd22c782042",
   "skillPath": "skills/ppt-master",
-  "skillVersion": "6.8.0",
+  "skillVersion": "6.10.0",
   "protocolVersion": 1,
   "requiredFiles": [
     "SKILL.md",
@@ -22,6 +22,6 @@
     "scripts/pptx_to_svg.py",
     "scripts/pptx_template_import.py"
   ],
-  "tree": "47705749ef2f9f01933904c854ea065386490cc1",
-  "contentDigest": "3c2d0346f658b45fe764e7fcfe045461f6e10de04d23227dda8f466624793041"
+  "tree": "19fedfb16c85070346fddf3318f77971cbf14556",
+  "contentDigest": "773acff2eeca585f7358a79802492c013782a7884d68830da4ad26199b2ab0d5"
 }
