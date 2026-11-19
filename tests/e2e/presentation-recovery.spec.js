@@ -2,10 +2,13 @@
 /* global window */
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs/promises');
+const path = require('node:path');
+const { createHash } = require('node:crypto');
 const Zip = require('jszip');
 const fixture = require('../../scripts/test_support/ppt_master_default_model');
 
 const API = '/api/apps/presentations';
+const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const csrf = async context => ({ 'x-csrf-token': (await context.cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value });
 const post = async (page, url, data) => page.request.post(url, { headers: await csrf(page.context()), data });
 
@@ -40,6 +43,62 @@ async function member(page, browser, models, engine = false) {
 async function openWorkbench(page) {
     await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+}
+
+for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收入已核定，成本仍待复核'], ['学术研究', 'academic-research', '研究问题与经营复核方法']]) {
+    test(name + '模板确认后自动修正错误金额，下载修订稿', async ({ page, browser }) => {
+        test.setTimeout(240000);
+        test.skip(!process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL, '需要本地独立 PPT Master 服务');
+        const { user, ids } = await member(page, browser, ['ppt-master-automatic-e2e-' + style], true);
+        await user.getByRole('button', { name: '模板库', exact: true }).click();
+        await user.locator('#presentation-catalog-tabs [data-catalog-group="engine"]').click();
+        await user.locator('#presentation-catalog-body tr').filter({ hasText: name }).getByRole('button', { name: '使用此制作模板' }).click();
+        await user.locator('#presentation-master-title').fill(name + '经营复核');
+        await user.locator('#presentation-master-instruction').fill('按所选模板和提供的材料制作三页经营汇报。');
+        await user.locator('#presentation-master-material').fill(fixture.pages.map(item => item.fact).join('\n'));
+        await user.locator('#presentation-master-pages').fill('3');
+        await user.locator('#presentation-master-model').selectOption(ids[0]);
+        const starting = user.waitForResponse(r => r.url().endsWith('/master/tasks') && r.request().method() === 'POST');
+        await user.locator('#presentation-master-start').click();
+        const started = await starting;
+        expect(started.status(), await started.text()).toBe(202);
+        const { task: { id } } = await started.json();
+        const read = async () => (await (await user.request.get(API + '/master/tasks/' + id)).json()).task;
+        const panel = user.locator('#presentation-master-status');
+        for (const stage of ['direction', 'design']) {
+            await expect.poll(async () => { const t = await read(); return t.error?.message || t.inputRequest?.stage; }, { timeout: 60000 }).toBe(stage);
+            if (stage === 'design') expect((await read()).inputRequest.plan.templateUse.visibleText).toBe(title);
+            await panel.getByRole('button', { name: '确认并继续' }).click();
+        }
+        await expect.poll(async () => (await read()).status, { timeout: 120000 }).toMatch(/^(completed|failed)$/);
+        const done = await read();
+        expect(done.status, done.error?.message || done.inputRequest?.question).toBe('completed');
+        expect(done.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, preservation: { pages: [2] }, templateSpecDigest: expect.any(String) });
+        async function download(label) {
+            const event = user.waitForEvent('download');
+            await panel.getByRole('button', { name: label }).click();
+            return fs.readFile(await (await event).path());
+        }
+        const bytes = await download('下载演示文件（.pptx）');
+        const sources = await Zip.loadAsync(await download('下载完整项目源包'));
+        const original = await sources.file(/\/exports\/final\.pptx$/)[0].async('nodebuffer');
+        const revised = await sources.file(/\/exports\/repair-[^/]+\.pptx$/)[0].async('nodebuffer');
+        const installed = sources.file(new RegExp('/templates/design_spec\\.style\\.' + style + '\\.md$'));
+        expect(installed).toHaveLength(1);
+        expect(sha256(original)).toBe(done.result.checks.preservation.sha256);
+        expect(sha256(bytes)).toBe(done.result.checks.currentExportSha256);
+        expect(bytes.equals(revised)).toBeTruthy();
+        const oldFile = await Zip.loadAsync(original), finalFile = await Zip.loadAsync(bytes);
+        expect(await oldFile.file('ppt/slides/slide2.xml').async('string')).toContain('全年核定成本90.25万元');
+        expect(await finalFile.file('ppt/slides/slide1.xml').async('string')).toContain(title);
+        const repaired = await finalFile.file('ppt/slides/slide2.xml').async('string');
+        expect(repaired).toContain('全年核定成本80.25万元');
+        expect(repaired).not.toContain('全年核定成本90.25万元');
+        if (process.env.E2E_PPT_MASTER_EVIDENCE_DIR) {
+            await fs.mkdir(process.env.E2E_PPT_MASTER_EVIDENCE_DIR, { recursive: true });
+            await fs.writeFile(path.join(process.env.E2E_PPT_MASTER_EVIDENCE_DIR, name + '经营复核.pptx'), bytes);
+        }
+    });
 }
 
 test('普通用户从文稿库回看标准制作的五页草稿，编辑后只补原大纲缺页', async ({ page, browser }) => {
@@ -159,7 +218,10 @@ test('普通用户补充事实、核对重排清单，并在引文失败后继�
     test.setTimeout(240000);
     test.skip(!process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL, '需要本地独立 PPT Master 服务');
     const { user, ids } = await member(page, browser, ['ppt-master-citations-e2e'], true);
-    await user.getByRole('button', { name: 'AI 自由设计', exact: true }).click();
+    await user.getByRole('button', { name: '模板库', exact: true }).click();
+    await user.locator('#presentation-catalog-tabs [data-catalog-group="engine"]').click();
+    await user.locator('#presentation-catalog-body tr').filter({ hasText: '咨询决策' }).getByRole('button', { name: '使用此制作模板' }).click();
+    await expect(user.locator('#presentation-master-template-note')).toContainText('咨询决策');
     await user.locator('#presentation-master-title').fill('引文补充断点验收');
     await user.locator('#presentation-master-instruction').fill('按已确认材料制作三页经营汇报');
     await user.locator('#presentation-master-material').fill(fixture.pages.map(item => item.fact).join('\n'));
@@ -180,6 +242,7 @@ test('普通用户补充事实、核对重排清单，并在引文失败后继�
     await panel.getByRole('button', { name: '提交答复并继续' }).click();
     await expect(panel).toContainText('用户补充 1', { timeout: 90000 });
     const proposal = await read();
+    expect(proposal.request.template?.type).toBe('runtime');
     expect(proposal.inputRequest.plan.pages[0].values.map(value => value.text)).toEqual(['项目预算80万元', fixture.pages[0].fact]);
     expect(proposal.inputRequest.plan.pages[0].values[0].source.path).toBe('user-supplement:1');
     await panel.getByRole('button', { name: '确认并继续' }).click();
@@ -199,7 +262,7 @@ test('普通用户补充事实、核对重排清单，并在引文失败后继�
     await openWorkbench(user);
     await user.getByRole('button', { name: '完整制作记录' }).click();
     await user.getByRole('button', { name: /引文补充断点验收.*已保存制作快照/ }).click();
-    await panel.getByRole('textbox', { name: '补充说明或修改意见（选填）' }).fill('复核后确认，全年核定成本80.25万元。');
+    await panel.getByRole('textbox', { name: '补充说明或修改意见（选填）' }).fill('复核后确认，全年决算成本80.25万元。');
     await panel.getByRole('button', { name: '从检查点继续' }).click();
     await expect(panel).toContainText('用户补充 2', { timeout: 90000 });
     const revised = await read();
@@ -210,4 +273,10 @@ test('普通用户补充事实、核对重排清单，并在引文失败后继�
     await panel.getByRole('button', { name: '确认并继续' }).click();
     await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toBeVisible({ timeout: 90000 });
     expect((await read()).result.checks).toMatchObject({ checkedPages: 3, checkedValues: 4 });
+    const download = user.waitForEvent('download');
+    await panel.getByRole('button', { name: '下载演示文件（.pptx）' }).click();
+    const file = await Zip.loadAsync(await fs.readFile(await (await download).path()));
+    const repaired = await file.file('ppt/slides/slide2.xml').async('string');
+    expect(repaired).toContain('全年决算成本80.25万元');
+    expect(repaired).not.toContain('全年核定成本90.25万元');
 });

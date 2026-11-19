@@ -9,6 +9,9 @@ const { createInspectionProgress } = require('./inspection-progress');
 const { pendingInput, planDigest } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
+const { recordCheck, requireChecks } = require('./tool-checks');
+const { beginPageRepair, automaticTurn, recordRepairResult, stopAutomaticRepair } = require('./automatic-page-repair');
+const { loadTemplateSpec, installTemplate } = require('./template-application');
 const { applyReviewDecision, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance, CITATION_REVIEW_REQUIRED } = require('./review-plan');
 const { selectImagePage, imageCoverage } = require('./model-input');
 const { registerSupplement, getSupplement, readSupplement, supplementGuidance } = require('./user-supplements');
@@ -37,7 +40,8 @@ async function resolveModel(user, request) {
 const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 'PPT_MASTER_MODEL_TRUNCATED', 'PPT_MASTER_CHECKLIST_REQUIRED']);
 const MAX_CITATION_REPAIRS = 3;
 const MAX_INSPECTION_REPAIRS = 2;
-const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。按实际数据项核对引用，清单重排后仍须为原数据项提供来源。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。未读原文时先读取；仍缺少必要事实时提交具体的补充问题。仅在用户明确要求时删改原数据项。';
+const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。按实际数据项核对引用，清单重排后仍须为原数据项提供来源。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。先查阅已有材料，仅在仍然缺少必要事实时提交具体的补充问题。已批准的数据变更须取得用户确认。';
+const CITATION_PATCH_GUIDANCE = '宿主已保存本次待修清单。仅改引文可返回 {"repairCitations":[{"page":2,"item":1,"text":"该项原文","path":"inputs/material-1.md","quote":"含该项的连续原文"}]}。按下列实际页码、项号和数据原文填写，一并修正所有待核对项，无须重写其他页面。标记 missing 的数据已从本次清单移除，须重提完整清单。';
 const INSPECTION_REPAIR_GUIDANCE = '当前正在从重复检查中恢复。先根据已有文件和回执选择下一项实际制作步骤，适用时提交本阶段确认、局部写入、校验或导出。需要继续读资料时，只请求明确尚未读到的范围。缺少推进所必需的事实时提交具体问题。遵守已确认的方案和原有确认顺序。';
 async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     let correction = '';
@@ -47,25 +51,36 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
         const images = imageCoverage(state);
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
         const guidance = [inspection.guidance(), reviewGuidance(state), supplementGuidance(state), imageHint, correction,
+            state.templateSpec && '最终清单 plan.templateUse 必填 {rule,page,visibleText}。从 selectedTemplateSpec.text 逐字选取一条相关设计规范（12 至 350 字符），注明落实它的页码及该页实际标题或关键数据。宿主会把原模板安装到此项目并在交付时复核。',
+            state.citationRepair && '尚未批准的草案数字与原文不符时，可在原项目中提交同一页项的完整更正，或用 repairCitations.correctedText 和图表的 correctedNumber 修正。指标、单位、来源和限定条件须可唯一核实。',
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
-            state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
-            state.citationRepair && CITATION_REPAIR_GUIDANCE, state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
+            state.pageRepair?.automatic ? `自动修页。按 approvedPageRepairs 读取源文件，对照已批准的标题及数据修正。只需用 write 写回剩余文件：${state.pageRepair.remaining.join('、')}。宿主会依次复检、重新导出和回读。仅在已有材料无法决定内容时提出具体问题。`
+                : state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
+            state.citationRepair && CITATION_REPAIR_GUIDANCE, state.citationRepair && state.citationDraft && CITATION_PATCH_GUIDANCE,
+            state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
         const { output, usageRef } = await runModelTurn(user, id, state, model, hooks, deps, guidance, state.citationRepair);
         await hooks.ensureCurrent();
         if (state.request.tokenBudget !== 0 && state.usedTokens > state.request.tokenBudget) throw runtime.error('本次制作的实际模型用量已超过预算，本轮未继续执行制作动作。检查点已保留。', 'PPT_MASTER_BUDGET_EXHAUSTED', 429);
         try {
             if (usageRef.truncated) throw runtime.error('模型输出被截断，请拆为单页或减少同轮动作。', 'PPT_MASTER_MODEL_TRUNCATED', 422);
-            return await validateTurn(output, state, verifySource);
+            const turn = await validateTurn(output, state, verifySource);
+            if (turn.requestInput?.plan?.templateUse) {
+                await hooks.ensureCurrent();
+                await installTemplate(state, turn.requestInput.plan.project, op => (deps.execute || runtime.execute)(user, id, op, hooks));
+            }
+            return turn;
         } catch (failure) {
             if (failure.citationIssues) {
                 const attempts = Number(state.citationRepairAttempts || 0);
                 state.citationRepair = failure.citationIssues;
+                state.citationDraft = failure.citationDraft;
                 const facts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
                 for (const fact of failure.citationFacts) facts.set(fact.key, { ...fact, allowOmit: facts.get(fact.key)?.allowOmit === true });
                 if (attempts >= MAX_CITATION_REPAIRS || facts.size > 120) {
                     state.citationFacts = [...facts.values()].slice(0, 120);
                     state.citationPause = true;
-                    throw runtime.error('最终页面清单的部分引文仍无法核对。已保留检查点，可补充原文或明确修改要求后继续。', CITATION_REVIEW_REQUIRED, 422);
+                    const first = failure.citationIssues[0];
+                    throw runtime.error(`最终页面清单有 ${failure.citationIssues.length} 项引文待核对。${first.location}：${first.reason} 请在检查点补充原文或提交修改意见后继续。`, CITATION_REVIEW_REQUIRED, 422);
                 }
                 state.citationFacts = [...facts.values()];
                 state.citationRepairAttempts = attempts + 1;
@@ -89,6 +104,7 @@ async function drive(user, id, state, hooks, deps = {}) {
         const health = await execute(user, id, { action: 'health' }, hooks);
         if (health.status !== 'ready' || (health.serviceProtocol !== 1 && health.contentDigest !== runtime.lock.contentDigest)) throw runtime.error('完整制作引擎没有通过运行包及服务协议预检。');
         if (state.review && health.deliveryChecklist !== 1) throw runtime.error('当前执行服务缺少交付清单核验能力，请更新镜像后继续。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
+        if (state.review && request.operation !== 'create_template' && health.currentExport !== 1) throw runtime.error('当前执行服务缺少修订稿版本核验能力，请更新镜像后继续。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
         state.engine = health; state.messages = [{ role: 'system', content: HOST }, { role: 'user', content: JSON.stringify({
             operation: request.operation, profile: request.profile, title: request.title, instruction: request.instruction, pageCount: request.pageCount,
             productionProfile: request.productionProfile,
@@ -110,6 +126,12 @@ async function drive(user, id, state, hooks, deps = {}) {
         state.bootstrapped = true;
         await hooks.checkpoint(state, { phase: 'authoring', message: '已载入完整制作流程，开始规划页面。' });
     }
+    if (state.request.template?.type === 'runtime' && !state.templateSpec) {
+        await hooks.ensureCurrent();
+        await loadTemplateSpec(state, op => execute(user, id, op, hooks));
+        if (state.review?.approvals.design && !state.review.approvals.design.plan.templateUse) reopenReview(state);
+        await hooks.checkpoint(state, { phase: 'authoring', message: '已读取所选模板的原始规范，正在核对最终项目。' });
+    }
     if (state.response) {
         const response = typeof state.response === 'string' ? { decision: 'revise', answer: state.response } : state.response;
         const pending = pendingInput(id, state);
@@ -118,6 +140,7 @@ async function drive(user, id, state, hooks, deps = {}) {
         let source = response.source;
         if (!approved && response.answer && !source) source = registerSupplement(state, response.answer, response.decision, response.promptId);
         if (source) {
+            if (state.pageRepair?.automatic) delete state.pageRepair.missingSource;
             resetCitationRepair(state, { allowRevision: response.decision === 'revise' });
             if (state.pendingKind === 'clarification' && !state.pageRepair) reopenReview(state);
         }
@@ -149,17 +172,16 @@ async function drive(user, id, state, hooks, deps = {}) {
     const inspection = createInspectionProgress(state.messages);
     while (state.steps < request.maxSteps) {
         await hooks.ensureCurrent();
-        const model = await (deps.resolveModel || resolveModel)(user, request);
-        const turn = await nextTurn(user, id, state, model, hooks, deps, inspection);
+        const turn = automaticTurn(state) || await nextTurn(user, id, state, await (deps.resolveModel || resolveModel)(user, request), hooks, deps, inspection);
         if (turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design' || turn.complete) {
             delete state.citationRepair;
+            delete state.citationDraft;
             delete state.citationFacts;
             resetCitationRepair(state);
         }
         if (turn.requestInput || turn.complete) delete state.inspectionRepairPending;
         state.steps++;
         state.messages.push({ role: 'assistant', content: JSON.stringify(turn) });
-        await hooks.checkpoint(state, { phase: 'authoring', message: String(turn.message || '已生成制作操作，准备逐项执行。').slice(0, 500) });
         if (turn.requestInput) {
             const question = String(turn.requestInput.question || '').trim(), context = String(turn.requestInput.context || '').trim();
             if (!question || question.length > 2000 || context.length > 12000) throw runtime.error('制作确认问题无效。');
@@ -169,6 +191,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             await hooks.checkpoint(state, { phase: 'input_required', message: question });
             return { pending: { question, context } };
         }
+        await hooks.checkpoint(state, { phase: 'authoring', message: String(turn.message || '已生成制作操作，准备逐项执行。').slice(0, 500) });
         if (turn.complete) {
             const requiredConfirmations = request.operation === 'generate' && ['default', 'beautify'].includes(request.profile) ? 2 : request.operation === 'create_template' || request.template?.type === 'organization' ? 1 : 0;
             if (!state.review && (state.confirmationRevisionPending || Number(state.confirmedGates || 0) < requiredConfirmations)) throw runtime.error('当前流程尚未取得全部设计方案的实际确认，不能登记完成。', 'PPT_MASTER_CONFIRMATION_REQUIRED', 409);
@@ -176,9 +199,17 @@ async function drive(user, id, state, hooks, deps = {}) {
             const templateOnly = request.operation === 'create_template' && turn.complete.templatePath;
             const project = templateOnly ? turn.complete.templatePath : String(turn.complete.path).split('/exports/')[0];
             const expected = state.review ? exportReview(state, project, Boolean(templateOnly)) : null;
-            const receipt = await execute(user, id, templateOnly ? { action: 'deliver_template', path: turn.complete.templatePath, kind: turn.complete.kind }
+            const delivery = templateOnly ? { action: 'deliver_template', path: turn.complete.templatePath, kind: turn.complete.kind }
                 : { action: 'deliver', path: turn.complete.path, ...(expected ? { checklist: expected.checklist, retainReviewDraft: true } : {}),
-                    ...(state.pageRepair ? { repair: state.pageRepair } : {}) }, hooks);
+                    ...(expected?.templateUse ? { templateSource: state.templateSpec.path } : {}),
+                    ...(state.pageRepair ? { repair: { sha256: state.pageRepair.sha256, pages: state.pageRepair.pages, automatic: state.pageRepair.automatic === true } } : {}) };
+            let receipt;
+            try {
+                receipt = await execute(user, id, delivery, hooks);
+            } catch (failure) {
+                if (failure.code === 'PPT_MASTER_OPERATION_FAILED') stopAutomaticRepair(state);
+                throw failure;
+            }
             if (expected?.checklist && typeof receipt?.reviewFailure === 'string' && receipt.reviewFailure) {
                 const { sha256, byteSize } = receipt.reviewDraft || {};
                 if (typeof sha256 === 'string' && /^[a-f0-9]{64}$/.test(sha256) && Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= 60 * 1024 * 1024) {
@@ -186,7 +217,12 @@ async function drive(user, id, state, hooks, deps = {}) {
                     state.pageReview = pageReviewFor(state, receipt.pageReview, expected.checklist);
                     state.pageSources = pageRepairSources(receipt.pageReview, project, expected.checklist.length);
                     if (state.pageRepair) state.pageRepair.sha256 = sha256;
+                    if (beginPageRepair(state, project, turn.complete.path)) {
+                        await hooks.checkpoint(state, { phase: 'authoring', message: '正在按已批准清单自动修复第 ' + state.pageRepair.pages.join('、') + ' 页，随后重新导出并核验。' });
+                        continue;
+                    }
                 }
+                stopAutomaticRepair(state);
                 await hooks.checkpoint(state, { phase: 'delivery_review', message: '交付内容待复核，已保留当前制作检查点。' });
                 throw runtime.error(receipt.reviewFailure.slice(0, 500), 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', 422);
             }
@@ -210,6 +246,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             await hooks.ensureCurrent();
             let result;
             try {
+                if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0]);
                 if (action.action === 'read_images') {
                     const page = selectImagePage(state, action.offset, action.length);
                     state.imagePage = page;
@@ -220,12 +257,20 @@ async function drive(user, id, state, hooks, deps = {}) {
                         : action.action === 'read_history' ? await readHistory(state, action) : await execute(user, id, action, hooks);
                 }
                 observations.push({ action: action.action, result: boundedObservation(action, result) });
+                recordCheck(state, action, result);
+                if (Number.isInteger(result?.exitCode) && result.exitCode !== 0) {
+                    observations.at(-1).error = '该工具未通过，已停止本批后续动作。请根据诊断修正后重新检查。';
+                }
             }
             catch (error) {
                 hooks.signal?.throwIfAborted();
+                recordCheck(state, action, { exitCode: 1 });
                 observations.push({ action: action.action, error: String(error.message).slice(0, 2000) });
-                state.messages[state.messages.length - 1].content = JSON.stringify(observations);
-                await hooks.checkpoint(state, { phase: 'authoring', message: '制作操作未完成，已保存可继续的检查点。' });
+            }
+            state.messages[state.messages.length - 1].content = JSON.stringify(observations);
+            recordRepairResult(state, action, observations.at(-1), result);
+            if (observations.at(-1).error) {
+                await hooks.checkpoint(state, { phase: 'authoring', message: '制作操作未完成，已保存诊断与检查点。' });
                 break;
             }
             if (confirmedWrite(action, observations.at(-1))) {

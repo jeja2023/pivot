@@ -4,6 +4,8 @@ const { error } = require('./runtime');
 const { exportReview, normalizeStage, repairActionAllowed } = require('./review-plan');
 const { imageCoverage, selectImagePage } = require('./model-input');
 const { getSupplement } = require('./user-supplements');
+const { patchCitationDraft } = require('./citation-repair');
+const { requireChecks } = require('./tool-checks');
 
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
@@ -62,18 +64,32 @@ function validateAction(action, state) {
 }
 
 async function validateTurn(output, state, verifySource) {
-    const turn = parsedOutput(output);
+    let turn = parsedOutput(output);
+    if (Object.hasOwn(turn, 'repairCitations')) {
+        if (turn.actions || turn.complete || turn.requestInput) throw invalid('引用修正不能与操作、询问或交付一并提交。');
+        turn = { requestInput: patchCitationDraft(state, turn.repairCitations) };
+    }
+    if (state.citationFacts?.length && (turn.complete || Array.isArray(turn.actions) && turn.actions.some(action => action?.action === 'run' && action.tool === 'export'))) {
+        throw invalid('尚有待核对的引文，请先修正并提交最终清单确认，再执行导出及交付。');
+    }
     const choices = [Array.isArray(turn.actions) && turn.actions.length > 0, Boolean(turn.requestInput), Boolean(turn.complete)].filter(Boolean).length;
     if (choices !== 1) throw invalid('模型须明确选择操作、询问或最终交付，不能混合执行。');
     if (turn.actions) {
         if (!Array.isArray(turn.actions) || turn.actions.length > 6) throw invalid('单轮制作操作超过上限。');
         if (turn.actions.filter(action => action?.action === 'read_images').length > 1) throw invalid('每轮只请求一批图片。');
-        for (const action of turn.actions) validateAction(action, state);
+        for (const [index, action] of turn.actions.entries()) {
+            validateAction(action, state);
+            if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0], turn.actions.slice(0, index));
+        }
     }
     if (turn.requestInput) {
         const { question, context, kind } = turn.requestInput;
         if (typeof question !== 'string' || !question.trim() || question.length > 2000 || (context !== undefined && (typeof context !== 'string' || context.length > 12000))
             || !['confirmation', 'clarification'].includes(kind)) throw invalid('制作确认问题格式无效。');
+        if (state.pageRepair?.automatic && kind === 'clarification') {
+            if (!state.pageRepair.missingSource) throw invalid('此次修页所需的标题和数据已获批准。请读取列出的源页并写回修正，所需材料读取失败时才提出具体问题。');
+            turn.requestInput = { kind, question, context: ('无法读取本次修页需要的材料「' + state.pageRepair.missingSource + '」。' + (context || '')).slice(0, 12000) };
+        }
         if (kind === 'confirmation' && state.review) {
             if (state.pageRepair) throw invalid('按页修复须使用原已确认清单。如需改动清单，请重新生成整份。');
             const coverage = imageCoverage(state);
@@ -85,13 +101,19 @@ async function validateTurn(output, state, verifySource) {
         }
     }
     if (turn.complete && state.review) {
+        if (state.pageRepair?.automatic) throw invalid('正在按已批准的清单自动修页，请先写回待修源文件，宿主将复检并交付修订稿。');
         const template = state.request.operation === 'create_template';
         const target = template ? turn.complete.templatePath : turn.complete.path;
         const match = !template && typeof target === 'string' ? /^(.*)\/exports\/[^/]+\.pptx$/i.exec(target) : null;
         if (!presentationPath(target) || (!template && !match) || (template && !['brand', 'style', 'layout', 'deck'].includes(turn.complete.kind))) {
             throw invalid('交付须指向已批准项目的 exports 中实际的 PPTX，或已批准的模板工作区。');
         }
-        exportReview(state, template ? target : match[1], template);
+        const project = template ? target : match[1];
+        requireChecks(state, project);
+        exportReview(state, project, template);
+        if (!template && state.lastExport && state.lastExport.path !== target) {
+            throw invalid('请使用本次最新成功导出的文件提交交付：' + state.lastExport.path);
+        }
     }
     return turn;
 }

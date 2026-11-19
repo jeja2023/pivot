@@ -6,6 +6,10 @@ const { checkModel } = require('../../services/presentations/master/model-prefli
 
 function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler, writeLog }) {
     router.get('/apps/presentations/template-catalog', authMiddleware, asyncHandler(async (req, res) => res.json(await require('../../services/presentations/presentation-template-catalog').list(req.user))));
+    router.get('/apps/presentations/template-catalog/:id/preview', authMiddleware, asyncHandler(async (req, res) => {
+        const preview = await require('../../services/presentations/presentation-catalog-preview').preview(req.user, req.params.id, req.query);
+        res.set('Cache-Control', 'private, no-store').type(preview.mimeType).send(preview.buffer);
+    }));
     router.get('/apps/presentations/master/info', authMiddleware, asyncHandler(async (_req, res) => {
         const available = await runtime.availability();
         res.json({ engine: { ...available, revision: available.revision || runtime.lock.revision, version: available.version || runtime.lock.skillVersion,

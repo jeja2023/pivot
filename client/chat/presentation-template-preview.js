@@ -60,5 +60,91 @@
         }
         return thumbnail;
     }
-    window.Pivot.exposeModule('apps.presentations.templatePreview', { render: renderTemplateThumbnail });
+    function openCatalogPreview({ template, request, node, actions, back }) {
+        const section = node('section', 'presentation-catalog-preview workspace-modal-body');
+        const controls = node('div', 'presentation-catalog-preview-toolbar');
+        const title = node('h4', '', template.name);
+        title.tabIndex = -1;
+        const backButton = node('button', 'btn-secondary', '返回列表');
+        backButton.type = 'button';
+        backButton.addEventListener('click', back);
+        controls.append(backButton, title);
+
+        const isStyle = template.ownerType === 'engine';
+        const description = node('p', '', isStyle
+            ? '风格示例 · 实际配色与排版由制作内容决定。'
+            : '版式预览 · 依据此版本的母版和可用素材渲染，文字为示例。');
+        const stage = node('div', 'presentation-catalog-preview-stage');
+        const status = node('p', 'presentation-catalog-preview-status');
+        status.setAttribute('role', 'status');
+        const retry = node('button', 'btn-secondary hidden', '重试预览');
+        retry.type = 'button';
+        const image = node('img', 'hidden');
+        const layouts = template.definition?.layouts || [];
+        let select;
+        if (!isStyle && layouts.length) {
+            select = node('select', 'form-input presentation-catalog-preview-layout');
+            select.setAttribute('aria-label', '预览版式');
+            for (const layout of layouts) select.appendChild(new Option(layout.name || layout.id, layout.id));
+            select.value = (layouts.find(item => item.legacyLayoutId === 'cover' || /封面|cover/i.test(item.name)) || layouts[0]).id;
+            select.addEventListener('change', load);
+            controls.appendChild(select);
+        }
+
+        let pending, src;
+        function releaseImage() {
+            image.removeAttribute('src');
+            image.classList.add('hidden');
+            if (src) URL.revokeObjectURL(src);
+            src = '';
+        }
+        async function load() {
+            pending?.abort();
+            const current = pending = new AbortController();
+            releaseImage();
+            if (document.activeElement === retry) title.focus();
+            retry.classList.add('hidden');
+            status.textContent = '正在加载模板预览…';
+            status.classList.remove('hidden');
+            const params = new URLSearchParams({ version: String(template.version) });
+            if (select?.value) params.set('layout', select.value);
+            try {
+                const result = await request('/api/apps/presentations/template-catalog/' + encodeURIComponent(template.id) + '/preview?' + params, { signal: current.signal });
+                if (current.signal.aborted) return;
+                if (result.status === 404) {
+                    const response = await result.json().catch(() => ({}));
+                    if (current.signal.aborted) return;
+                    const code = response.code || response.error?.code;
+                    if (code === 'PRESENTATION_TEMPLATE_NOT_FOUND' || code === 'PRESENTATION_LAYOUT_NOT_FOUND') {
+                        status.textContent = '此版式或模板版本已不可用。请选择其他版式，或重新打开模板库。';
+                    } else {
+                        status.textContent = '当前服务未提供模板预览接口，请更新或重启服务后重试。';
+                        retry.classList.remove('hidden');
+                    }
+                    return;
+                }
+                if (!result.ok) throw new Error('模板预览请求失败');
+                const blob = await result.blob();
+                if (current.signal.aborted) return;
+                if (blob.type !== 'image/png') throw new Error('预览图片格式无效');
+                image.alt = template.name + ' · ' + (select?.selectedOptions[0]?.textContent || (isStyle ? '风格示例' : '版式'));
+                image.src = src = URL.createObjectURL(blob);
+                await image.decode();
+                if (current.signal.aborted) return;
+                image.classList.remove('hidden');
+                status.classList.add('hidden');
+            } catch (_) {
+                if (current.signal.aborted) return;
+                releaseImage();
+                status.textContent = '模板预览加载失败，可重试或返回列表。';
+                retry.classList.remove('hidden');
+            }
+        }
+        retry.addEventListener('click', load);
+        stage.append(image, status, retry);
+        section.append(controls, description, stage, actions);
+        return { section, start() { title.focus(); void load(); }, close() { pending?.abort(); releaseImage(); section.remove(); } };
+    }
+
+    window.Pivot.exposeModule('apps.presentations.templatePreview', { render: renderTemplateThumbnail, openCatalogPreview });
 })();

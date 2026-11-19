@@ -38,6 +38,38 @@ def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"
 
 
 class DeliveryChecklistTests(unittest.TestCase):
+    def test_revised_export_is_current_and_failed_repair_is_replayable(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, "WORKSPACE", Path(directory)):
+            root = Path(directory)
+            draft = root / runner.REVIEW_DRAFT
+            draft.parent.mkdir()
+            old, new = "project/exports/initial.pptx", "project/exports/revised.pptx"
+            (root / old).parent.mkdir(parents=True)
+            initial, revised = deck(back_value="成本100").getvalue(), deck(back_value="成本150").getvalue()
+            (root / old).write_bytes(initial)
+            (root / new).write_bytes(revised)
+            draft.write_bytes(initial)
+            hashes = {old: hashlib.sha256(initial).hexdigest(), new: hashlib.sha256(revised).hexdigest()}
+            (draft.parent / "export.json").write_text(json.dumps({"sourceFingerprint": runner.source_fingerprint(),
+                "exports": hashes, "currentExports": {new: hashes[new]}}), encoding="utf-8")
+            request = {"path": new, "checklist": [["首页", []], ["后页", ["成本160"]]], "retainReviewDraft": True,
+                       "repair": {"automatic": True, "pages": [2], "sha256": hashes[old]}}
+            first = runner.deliver_presentation(request)
+            self.assertEqual(first["reviewDraft"]["sha256"], hashes[new])
+            self.assertEqual(runner.deliver_presentation(request), first)
+            self.assertEqual(runner.registered_export(old)[2], hashes[old])
+            with self.assertRaisesRegex(ValueError, "与最近成功的上游导出"):
+                runner.deliver_presentation({**request, "path": old})
+            with self.assertRaisesRegex(ValueError, "草稿已变化"):
+                runner.deliver_presentation({**request, "repair": {**request["repair"], "automatic": False}})
+
+    def test_signed_text_value_must_match_the_approved_amount(self):
+        for actual in ["净利润-100万元", "净利润−100万元", "净利润－１００万元", "净利润1100万元"]:
+            with self.subTest(actual=actual), self.assertRaises(runner.ChecklistMismatch):
+                runner.package_report(deck(back_value=actual).getvalue(), [["首页", []], ["后页", ["100万元"]]])
+        report = runner.package_report(deck(back_value="净利润−100万元").getvalue(), [["首页", []], ["后页", ["-100万元"]]])
+        self.assertEqual(report["checkedValues"], 1)
+
     def test_partial_snapshot_keeps_native_chart_and_excludes_failed_slide(self):
         from native_subset import select_pages
         source = io.BytesIO()
@@ -140,6 +172,12 @@ class DeliveryChecklistTests(unittest.TestCase):
             receipt = draft.parent / "export.json"
             request = {"path": "project/exports/report.pptx", "checklist": [["误写首页", []], ["后页", []]]}
             receipt.write_text(json.dumps({"sourceFingerprint": runner.source_fingerprint(), "exports": {request["path"]: digest}}), encoding="utf-8")
+            self.assertEqual(runner.registered_export(request["path"])[2], digest)
+            with self.assertRaisesRegex(ValueError, "与最近成功的上游导出"):
+                runner.deliver_presentation(request)
+            record = json.loads(receipt.read_text(encoding="utf-8"))
+            record["currentExports"] = {request["path"]: digest}
+            receipt.write_text(json.dumps(record), encoding="utf-8")
 
             with self.assertRaisesRegex(ValueError, "缺少已确认的可见标题"):
                 runner.deliver_presentation(request)

@@ -29,6 +29,98 @@ function approve(state) {
     state.response = parseDecision({ decision: 'approve', promptId: pending.promptId }, pending);
 }
 
+test('同一来源唯一可核对的未批准错数允许更正并展示差异，歧义和符号冲突仍拒绝', async () => {
+    const state = makeState('quick'), wrong = globalThis.structuredClone(design);
+    const actual = '收入120万元。';
+    wrong.requestInput.plan.pages[0].values[0] = { text: '收入100万元', source: { path: 'instruction', quote: '收入100万元' } };
+    await assert.rejects(validateTurn(wrong, state, async () => actual), failure => {
+        state.citationFacts = failure.citationFacts;
+        return Boolean(state.citationFacts.length);
+    });
+    const fixed = globalThis.structuredClone(design);
+    fixed.requestInput.plan.pages[0].values[0].source.quote = actual;
+    await assert.rejects(validateTurn(fixed, state, async () => actual + '收入125万元。'), /仍需保留/);
+    const corrected = await validateTurn(fixed, state, async () => actual);
+    assert.equal(corrected.requestInput.plan.pages[0].values[0].previousText, '收入100万元');
+    state.review.approvals.design = { plan: wrong.requestInput.plan };
+    await assert.rejects(validateTurn(fixed, state, async () => actual), /仍需保留/);
+    const unsigned = globalThis.structuredClone(design);
+    const value = unsigned.requestInput.plan.pages[0].values[0];
+    value.text = '100万元';
+    for (const quote of ['100万元', '利润−100万元']) {
+        value.source.quote = quote;
+        await assert.rejects(validateTurn(unsigned, makeState('quick'), async () => '利润−100万元'), /引文/);
+    }
+});
+
+test('检查退出码非零会停止同批导出，只有复检成功才放行', async () => {
+    const state = makeState('quick'), calls = [];
+    const check = { action: 'run', tool: 'check_svg', args: ['report'] };
+    const exp = { action: 'run', tool: 'export', args: ['report'] };
+    const batch = { actions: [check, exp] };
+    let checks = 0;
+    const outputs = [design, batch, { actions: [exp] }, batch, { requestInput: { kind: 'clarification', question: '是否添加附件？' } }];
+    const deps = { resolveModel: async () => ({ context_window_tokens: 256000 }), callModel: async () => outputs.shift(),
+        execute: async (_user, _id, action) => {
+            calls.push(action.tool);
+            return { exitCode: action.tool === 'check_svg' && ++checks === 1 ? 1 : 0 };
+        } };
+    const run = () => drive({ id: 1 }, 'task', state, { ensureCurrent: async () => {}, checkpoint: async () => {} }, deps);
+    await run(); approve(state); await run();
+    assert.deepEqual(calls, ['check_svg', 'check_svg', 'export']);
+    assert.equal(state.failedChecks, undefined);
+});
+
+test('修复轮可定位已有材料的唯一完整引文，多个来源有歧义时继续查证', async () => {
+    const state = makeState('quick'), first = 'inputs/material-1.md', second = 'inputs/material-2.md';
+    state.request.inputFiles = [{ path: first, kind: 'text' }];
+    const read = async path => path === 'instruction' ? '制作经营汇报。' : '原始收入120万元。';
+    await assert.rejects(validateTurn(design, state, read), failure => {
+        state.citationFacts = failure.citationFacts;
+        return Boolean(state.citationFacts.length);
+    });
+    const proposal = () => globalThis.structuredClone(design);
+    assert.equal((await validateTurn(proposal(), state, read)).requestInput.plan.pages[0].values[0].source.path, first);
+    state.request.inputFiles.push({ path: second, kind: 'text' });
+    await assert.rejects(validateTurn(proposal(), state, read), /与材料原文不一致/);
+});
+
+test('重复校验只在结果或源稿改变后推进，检查点恢复保留相同检查的识别', () => {
+    const { createInspectionProgress } = require('../server/services/presentations/master/inspection-progress');
+    const action = { action: 'run', tool: 'check_svg', args: ['report'] };
+    const observation = { action: 'run', result: { exitCode: 0, stdout: '全部通过' } };
+    const progress = createInspectionProgress([{ role: 'assistant', content: JSON.stringify({ actions: [action] }) },
+        { role: 'user', content: JSON.stringify([observation]) }]);
+    for (let index = 0; index < 3; index++) assert.equal(progress.observe([action], [observation]), false);
+    assert.equal(progress.stalled(), true);
+    const write = { action: 'write', path: 'report/svg_output/page.svg' };
+    const receipt = { action: 'write', result: { path: write.path, sha256: 'a'.repeat(64) } };
+    assert.equal(progress.observe([write], [receipt]), true);
+    assert.equal(progress.observe([action], [observation]), true);
+    assert.equal(progress.observe([write], [receipt]), false);
+    assert.equal(progress.observe([action], [observation]), false);
+});
+
+test('引文核对与图片同轮发送时，下一轮不会重复附图', async () => {
+    const { messagesForModel, selectImagePage } = require('../server/services/presentations/master/model-input');
+    const { runModelTurn } = require('../server/services/presentations/master/model-turn');
+    const state = makeState('quick'), path = 'inputs/asset-1.png', model = { context_window_tokens: 256000, supports_vision: 1 };
+    state.request.inputFiles = [{ path, kind: 'image' }];
+    state.seenImages = [path];
+    state.imagePage = selectImagePage(state);
+    const imageCalls = [];
+    const deps = { messagesForModel: (...args) => messagesForModel(...args, { sourceImage: async () => 'data:image/jpeg;base64,test' }),
+        callModel: async (_model, messages) => {
+            imageCalls.push(messages.some(message => Array.isArray(message.content) && message.content.some(part => part.type === 'image_url')));
+            assert.match(messages.at(-1).content, /citationRepairEvidence/);
+            return {};
+        } };
+    for (let round = 0; round < 2; round++) await runModelTurn({ id: 1 }, 'task', state, model,
+        { ensureCurrent: async () => {}, checkpoint: async () => {} }, deps, '', [{ page: 1 }]);
+    assert.deepEqual(imageCalls, [true, false]);
+    assert.equal(state.imagePage, undefined);
+});
+
 test('默认制作按阶段批准，非法动作批次整体拒绝，交付绑定页序、事实和当前项目', async () => {
     const state = makeState(), executed = [];
     const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
@@ -180,11 +272,76 @@ test('找不到原文时自动查证次数有上限并保留检查点', async ()
         resolveModel: async () => ({ context_window_tokens: 256000 }),
         callModel: async () => { calls++; return bogus; },
         execute: async () => assert.fail('无法核验的引文不能触发工具动作')
-    }), { code: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' });
+    }), { code: 'PPT_MASTER_CITATION_REVIEW_REQUIRED', message: /第 1 页第 1 项/ });
     assert.equal(calls, 4);
     assert.equal(state.citationRepairAttempts, 3);
     assert.equal(state.citationRepair[0].excerpt, undefined);
     assert.equal(state.citationPause, true);
+});
+
+test('同一材料中的唯一完整数据行可还原引文，歧义、限定条件和金额冲突仍需查证', async () => {
+    const state = makeState('quick'), proposal = globalThis.structuredClone(design);
+    const entry = proposal.requestInput.plan.pages[0].values[0];
+    entry.source.quote = '报告显示收入120万元。';
+    const raw = '费用80万元。\n收入 １２０ 万元。';
+    const verified = await validateTurn(proposal, state, async () => raw);
+    assert.equal(verified.requestInput.plan.pages[0].values[0].source.quote, '收入 １２０ 万元。');
+    const match = source => validateTurn({ requestInput: { ...design.requestInput, plan: { ...design.requestInput.plan,
+        pages: [{ title: '经营回顾', values: [entry] }] } } }, state, async () => source);
+    for (const source of [raw + '\n收入120万元。', '预计收入120万元。', '预计\n收入120万元。', '收入120万元\n以上。', '收入1200万元。']) {
+        await assert.rejects(match(source), /关键数据引文与材料原文不一致/);
+    }
+    entry.source.quote = '报告显示收入150万元。';
+    await assert.rejects(match(raw), /关键数据引文与材料原文不一致/);
+    entry.source.quote = '本期收入\r\n120\t万元';
+    assert.equal((await match('本期收入\n120 万元')).requestInput.plan.pages[0].values[0].source.quote, entry.source.quote);
+    entry.source.quote = '收入\u0000120万元';
+    await assert.rejects(match(raw), /无效字符/);
+});
+
+test('多页同名数据逐项修复，检查点恢复后校验整份清单并重新请求确认', async () => {
+    const state = makeState('quick'), proposal = globalThis.structuredClone(design);
+    const material = 'inputs/material-1.md', quote = '年度收入120万元。';
+    state.request.inputFiles = [{ path: material, kind: 'text' }];
+    state.request.pageCount = 6;
+    proposal.requestInput.plan.pages = Array.from({ length: 6 }, (_, index) => ({
+        title: '经营回顾' + (index + 1),
+        values: index === 5 ? [{ text: '费用80万元' }] : [{ text: '收入120万元', source: { path: 'instruction', quote } }]
+    }));
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const deps = { resolveModel: async () => ({ context_window_tokens: 256000 }),
+        inputBuffer: async (_user, _id, name) => { assert.equal(name, 'material-1.md'); return Buffer.from(quote); } };
+    let calls = 0;
+    await assert.rejects(drive({ id: 1 }, 'task', state, hooks, { ...deps, callModel: async () => {
+        if (++calls > 1) throw new Error('模拟检查点中断');
+        return proposal;
+    } }), /模拟检查点中断/);
+    const resumed = JSON.parse(JSON.stringify(state)), draft = globalThis.structuredClone(resumed.citationDraft);
+    const changes = resumed.citationRepair.map(({ page, item, text }) => ({ page, item, text, path: material, quote }));
+    assert.deepEqual(changes.map(change => change.page), [1, 2, 3, 4, 5]);
+    const patch = changes => validateTurn({ repairCitations: changes }, resumed, async () => quote);
+    for (const invalid of [[changes[0], changes[0]], [{ ...changes[0], page: 6 }], [{ ...changes[0], text: '其他项' }]]) {
+        await assert.rejects(patch(invalid), /最新待核对清单/);
+    }
+    await assert.rejects(patch([{ ...changes[0], path: 'inputs/other.md' }]), /当前任务的文本材料/);
+    await assert.rejects(validateTurn({ repairCitations: changes, complete: {} }, resumed), /一并提交/);
+    await assert.rejects(validateTurn({ complete: { path: 'report/exports/final.pptx' } }, resumed), /待核对的引文/);
+    assert.deepEqual(resumed.citationDraft, draft);
+    await drive({ id: 1 }, 'task', resumed, hooks, { ...deps, callModel: async (_model, messages) => {
+        assert.match(messages[0].content, /repairCitations/);
+        assert.equal(JSON.parse(messages.at(-1).content).citationRepairEvidence.length, 5);
+        return { repairCitations: changes };
+    } });
+    const pending = pendingInput('task', resumed);
+    assert.deepEqual(pending.plan.pages.map(page => page.title), draft.plan.pages.map(page => page.title));
+    assert.deepEqual(pending.plan.pages.at(-1), draft.plan.pages.at(-1));
+    assert.ok(pending.plan.pages.slice(0, 5).every(page => page.values[0].source.path === material));
+    assert.equal(resumed.citationDraft, undefined);
+    assert.throws(() => exportReview(resumed, 'report'), /明确批准/);
+    approve(resumed);
+    const done = await drive({ id: 1 }, 'task', resumed, hooks, { ...deps, callModel: async () => ({ complete: { path: 'report/exports/final.pptx' } }),
+        execute: async () => ({ packageCheck: { slideCount: 6, checkedPages: 6, checkedValues: 6, checklistDigest: exportReview(resumed, 'report').checklistDigest } }) });
+    assert.equal(done.receipt.packageCheck.checkedPages, 6);
 });
 
 test('用户补充单独持久登记，原任务引用可随事实重新排序', async () => {

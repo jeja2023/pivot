@@ -52,8 +52,9 @@ async function messagesForModel(user, id, state, model, deps = {}) {
 function markImagePageRead(state, messages) {
     if (!state.review || !imagePaths(state).length) return;
     const coverage = imageCoverage(state), batch = state.imagePage || (!coverage.read ? selectImagePage(state) : null);
-    const imageMessage = messages.at(-1)?.content;
-    if (!batch || !Array.isArray(imageMessage) || imageMessage.filter(part => part?.type === 'image_url').length !== batch.paths.length) return;
+    if (!batch || !messages.some(({ role, content }) => role === 'user' && Array.isArray(content)
+        && content.length === 1 + batch.paths.length * 2 && batch.paths.every((path, index) =>
+            content[index * 2 + 1]?.text === '任务图片：' + path && content[index * 2 + 2]?.type === 'image_url'))) return;
     state.seenImages = [...new Set([...(state.seenImages || []), ...batch.paths])];
     delete state.imagePage;
 }

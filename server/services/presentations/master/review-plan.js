@@ -3,12 +3,13 @@
 const { createHash } = require('node:crypto');
 const { error } = require('./runtime');
 const { getSupplement } = require('./user-supplements');
+const { compact, containsValue, locateCitation, verifiedCorrection, originalLine } = require('./citation-repair');
+const { normalizeTemplateUse } = require('./template-application');
 
 const digest = value => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const checklistError = message => error(message, 'PPT_MASTER_CHECKLIST_REQUIRED', 409);
 const labels = { direction: '沟通方向', design: '最终页面与关键数据清单', template: '模板制作方案' };
-const compact = value => value.normalize('NFKC').replace(/\s+/gu, '');
 const citationKey = ({ text, chart }) => digest([compact(text), ...(chart ? [compact(chart.series), compact(chart.category), chart.number] : [])]);
 const sourceLabel = path => path === 'instruction' ? '制作要求' : path.startsWith('user-supplement:') ? '用户补充 ' + path.split(':')[1] : path;
 const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
@@ -36,9 +37,10 @@ function initializeReview(state) {
     return true;
 }
 
-function valueText(value, max, label) {
+function valueText(value, max, label, multiline = false) {
     const text = typeof value === 'string' ? value.trim().normalize('NFC') : '';
-    if (!text || text.length > max || /[\u0000-\u001f\u007f\ud800-\udfff]/u.test(text)) throw invalid(label + '为空、过长或含无效字符。');
+    const forbidden = multiline ? /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\ud800-\udfff]/u : /[\u0000-\u001f\u007f\ud800-\udfff]/u;
+    if (!text || text.length > max || forbidden.test(text)) throw invalid(label + '为空、过长或含无效字符。');
     return text;
 }
 
@@ -76,8 +78,17 @@ async function normalizeStage(input, state, verifySource) {
     if (state.request.operation === 'generate' && ['default', 'quick', 'image_to_pptx'].includes(state.request.profile) && pages.length !== expected) {
         throw invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`);
     }
-    const normalized = [], sources = new Map(), failures = new Map(), seen = new Set();
+    const normalized = [], sources = new Map(), failures = [], seen = new Set(), verified = new Set();
     const requiredFacts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
+    const availablePaths = new Set(['instruction', ...(state.request.inputFiles || []).filter(file => file.kind === 'text' && sourcePath.test(file.path)).map(file => file.path),
+        ...(state.userSupplements || []).map(entry => entry.path)]);
+    const readSource = async path => {
+        if (!sources.has(path)) {
+            const raw = getSupplement(state, path)?.text ?? await verifySource(path);
+            sources.set(path, { raw, normalized: compact(raw) });
+        }
+        return sources.get(path);
+    };
     let totalValues = 0;
     for (const [pageIndex, page] of pages.entries()) {
         const title = valueText(page?.title, 180, '页面标题');
@@ -93,7 +104,7 @@ async function normalizeStage(input, state, verifySource) {
                 const category = valueText(entry.chart?.category, 120, '图表分类');
                 const number = valueText(entry.chart?.number, 48, '图表数字');
                 const numericLiteral = /^[+-]?[0-9]+(?:\.[0-9]+)?$/.test(number)
-                    && new RegExp('(?<![\\d.])' + number.replace(/[+.]/g, '\\$&') + '(?![\\d.])').test(compact(text));
+                    && containsValue(text, number);
                 if (!numericLiteral) {
                     throw invalid('图表数据须提供原文中出现的十进制数字、系列和分类。');
                 }
@@ -102,49 +113,76 @@ async function normalizeStage(input, state, verifySource) {
             const key = citationKey(value);
             seen.add(key);
             const previous = requiredFacts.get(key);
-            const fact = { key, text, title, page: pageIndex + 1, item: valueIndex + 1 };
+            const fact = { key, ...value, title, page: pageIndex + 1, item: valueIndex + 1 };
+            values.push(value);
             if (entry.source === undefined) {
-                if (previous) failures.set(key, { ...previous, ...fact, reason: '仍需为该数据项提供可核对的引用。' });
-                else values.push(value);
+                if (previous) failures.push({ ...fact, path: previous.path, excerpt: previous.excerpt, reason: '仍需为该数据项提供可核对的引用。' });
                 continue;
             }
             const path = valueText(entry.source?.path, 140, '关键数据来源');
-            const quote = valueText(entry.source?.quote, 350, '关键数据引文');
-            const supplement = getSupplement(state, path);
-            if (path !== 'instruction' && !supplement && (!sourcePath.test(path) || !state.request.inputFiles?.some(file => file.path === path && file.kind === 'text'))) {
+            const quote = valueText(entry.source?.quote, 350, '关键数据引文', true);
+            value.source = { path, quote };
+            if (!availablePaths.has(path)) {
                 throw invalid('关键数据引文须引用当前任务的文本材料、制作要求或已登记的用户补充。');
             }
-            if (!sources.has(path)) {
-                const raw = supplement?.text ?? await verifySource(path);
-                sources.set(path, { raw, normalized: compact(raw) });
-            }
-            const source = sources.get(path);
+            const source = await readSource(path);
             const normalizedQuote = compact(quote);
-            const quoteFound = source.normalized.includes(normalizedQuote);
-            if (!quoteFound || !normalizedQuote.includes(compact(text))) {
+            const quoteFound = containsValue(source.normalized, normalizedQuote);
+            const containsText = containsValue(normalizedQuote, text);
+            if (!quoteFound && containsText) {
+                const original = originalLine(source, text);
+                if (original) {
+                    value.source.quote = original;
+                    verified.add(value);
+                    continue;
+                }
+            }
+            if (!quoteFound || !containsText) {
+                if (!quoteFound && previous) {
+                    const located = await locateCitation(availablePaths, path, quote, text, readSource);
+                    if (located) {
+                        value.source = located;
+                        verified.add(value);
+                        continue;
+                    }
+                }
                 const reason = quoteFound ? '关键数据未完整出现在引文中，请核对数字、单位及原文范围。'
                     : '关键数据引文与材料原文不一致，请重新查阅该来源并引用连续原文。';
                 const excerpt = citationExcerpt(source.raw, quoteFound ? quote : text);
-                failures.set(key, { ...fact, path, reason, ...(excerpt ? { excerpt } : {}) });
-                continue;
-            }
-            values.push({ ...value, source: { path, quote } });
+                failures.push({ ...fact, path, reason, ...(excerpt ? { excerpt } : {}) });
+            } else verified.add(value);
         }
         normalized.push({ title, values });
     }
+    const approved = new Set(state.review.approvals.design?.plan?.pages?.flatMap(page => page.values.map(citationKey)));
     for (const [key, fact] of requiredFacts) {
-        if (!fact.allowOmit && !seen.has(key)) failures.set(key, { ...fact, reason: '之前待核对的数据项仍需保留，或由用户说明如何调整。' });
+        if (fact.allowOmit || seen.has(key)) continue;
+        const matchingPages = normalized.filter(page => page.title === fact.title);
+        if (!approved.has(key) && matchingPages.length === 1) {
+            const candidates = matchingPages[0].values.filter(value => verified.has(value) && !value.previousText
+                && verifiedCorrection(fact, value, sources.get(fact.path)?.raw));
+            if (candidates.length === 1) {
+                candidates[0].previousText = fact.text;
+                continue;
+            }
+        }
+        failures.push({ ...fact, missing: true, reason: '之前待核对的数据项仍需保留，或由用户说明如何调整。' });
     }
-    if (failures.size) {
-        const citationFacts = [...failures.values()];
-        const citationIssues = citationFacts.slice(0, 4).map(({ page, item, path, title, text, reason, excerpt }) => ({
-            location: `第 ${page} 页第 ${item} 项（${sourceLabel(path)}）`, title, text, path, reason, ...(excerpt ? { excerpt } : {})
+    const plan = { summary, project, pages: normalized };
+    const templateUse = normalizeTemplateUse(state, input.plan, normalized);
+    if (templateUse) plan.templateUse = templateUse;
+    if (failures.length) {
+        const citationIssues = failures.map(({ page, item, path, title, text, reason, excerpt, missing }) => ({
+            location: `第 ${page} 页第 ${item} 项（${sourceLabel(path)}）`, page, item, title, text, path, reason,
+            ...(excerpt ? { excerpt } : {}), ...(missing ? { missing: true } : {})
         }));
-        const detail = citationIssues.map(({ location, reason }) => `${location}的${reason}`).join('');
-        const remaining = failures.size - citationIssues.length;
-        throw Object.assign(invalid(detail + (remaining ? `另有 ${remaining} 项引用待核对。` : '')), { citationIssues, citationFacts });
+        const detail = citationIssues.slice(0, 4).map(({ location, reason }) => `${location}的${reason}`).join('');
+        const remaining = citationIssues.length - 4;
+        throw Object.assign(invalid(detail + (remaining > 0 ? `另有 ${remaining} 项引用待核对。` : '')), {
+            citationIssues, citationFacts: failures, citationDraft: { kind: 'confirmation', stage, question: input.question, plan }
+        });
     }
-    return { stage, plan: { summary, project, pages: normalized } };
+    return { stage, plan };
 }
 
 function reopenReview(state, stage = requiredStages(state.request).at(-1)) {
@@ -153,6 +191,7 @@ function reopenReview(state, stage = requiredStages(state.request).at(-1)) {
     const required = requiredStages(state.request);
     const stageIndex = required.indexOf(stage);
     if (stageIndex < 0) return;
+    if (stage === 'direction') delete state.citationDraft;
     for (const stage of required.slice(stageIndex)) delete approvals[stage];
     delete state.deliveryReceipt;
     delete state.deliveryReview;
@@ -181,12 +220,19 @@ function exportReview(state, project, templateOnly = false) {
     if (!approval || approval.digest !== digest(approval.plan) || approval.plan.project !== project) {
         throw checklistError('导出项目与用户批准的方案不一致，请核对任务目录和确认记录。');
     }
+    if (state.request.template?.type === 'runtime' && (!state.templateSpec || approval.plan.templateUse?.id !== state.templateSpec.id
+        || approval.plan.templateUse.digest !== state.templateSpec.digest)) {
+        throw checklistError('请重新提交采用所选模板的最终清单并取得确认，再执行导出。');
+    }
     const checklist = templateOnly ? null : checklistFor(approval.plan);
-    return { checklist, checklistDigest: checklist && digest(checklist) };
+    return { checklist, checklistDigest: checklist && digest(checklist), ...(approval.plan.templateUse ? { templateUse: approval.plan.templateUse } : {}) };
 }
 
 function verifyReceipt(receipt, expected) {
     if (!expected.checklist) return;
+    if (expected.templateUse && receipt?.packageCheck?.templateSpecDigest !== expected.templateUse.digest) {
+        throw error('交付文件的模板安装记录与已确认清单不一致，请重新应用模板并导出。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
+    }
     if (receipt?.packageCheck?.checklistDigest !== expected.checklistDigest
         || receipt.packageCheck.slideCount !== expected.checklist.length
         || receipt.packageCheck.checkedPages !== expected.checklist.length
@@ -222,6 +268,7 @@ function repairActionAllowed(state, action) {
     }
     if (action.action !== 'run') return false;
     if (action.tool === 'project') return ['info', 'page-context', 'page-context-report', 'validate'].includes(action.args?.[0]) && action.args[1] === project;
+    if (state.pageRepair.automatic) return false;
     if (!['check_svg', 'export'].includes(action.tool) || action.args?.[0] !== project) return false;
     if (action.tool === 'export') return !action.args.some(arg => arg === '--roundtrip' || arg === '-s' || arg.startsWith('--source'));
     return true;
@@ -238,7 +285,7 @@ function reviewGuidance(state) {
     if (!state.review) return '';
     const stage = nextStage(state);
     return stage
-        ? `当前宿主确认协议优先：下一阶段为 ${stage}（${labels[stage]}）。用 requestInput.kind=confirmation、stage=${stage}、question、plan 提交；等 Pivot 返回用户批准，无需另起确认服务。plan 填写 summary；design 或 template 还须填写实际 project，design 另填顺序 pages:[{title,values:[{text,source?:{path,quote}}]}]。引用材料时先读取指定来源，quote 复制含 text 的连续原文，保留数字和单位。确认前不得 export 或最终交付。`
+        ? `当前宿主确认协议优先：下一阶段为 ${stage}（${labels[stage]}）。用 requestInput.kind=confirmation、stage=${stage}、question、plan 提交；等 Pivot 返回用户批准，无需另起确认服务。plan 填写 summary；design 或 template 还须填写实际 project，design 另填顺序 pages:[{title,values:[{text,source?:{path,quote}}]}]。引用材料时先读取实际来源，复制含指标、数字、单位和限定条件的连续原文作 quote，从该引文截取页面实际显示的 text。制作要求仅能佐证其中明确写出的事实。确认前不得 export 或最终交付。`
         : '宿主确认阶段：必需阶段均已批准。按已批准的项目与清单继续制作；修改清单须重新提交用户批准。';
 }
 
@@ -270,6 +317,11 @@ function resetCitationRepair(state, { allowRevision = false } = {}) {
     delete state.citationPause;
     if (allowRevision) {
         state.citationFacts = state.citationFacts?.map(fact => ({ ...fact, allowOmit: true }));
+        if (state.citationDraft) {
+            state.messages ||= [];
+            state.messages.push({ role: 'user', content: JSON.stringify({ unapprovedCitationPlan: state.citationDraft.plan }) });
+            delete state.citationDraft;
+        }
         delete state.citationRepair;
     }
 }

@@ -51,6 +51,7 @@ const server = http.createServer((req, res) => {
                 content = JSON.stringify(recoveryModel.master(payload.messages || [], payload.model.endsWith('-finish-e2e')));
             }
             if (payload.model === 'ppt-master-citations-e2e') content = JSON.stringify(recoveryModel.master(payload.messages || [], false, true));
+            if (payload.model?.startsWith('ppt-master-automatic-e2e-')) content = JSON.stringify(recoveryModel.master(payload.messages || [], false, false, true));
             if (payload.model === 'ppt-standard-recovery-fail-e2e' || payload.model === 'ppt-standard-recovery-finish-e2e') {
                 content = JSON.stringify(recoveryModel.standard(payload.messages || [], payload.model.endsWith('-fail-e2e')));
             }

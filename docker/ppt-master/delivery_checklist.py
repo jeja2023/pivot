@@ -27,12 +27,16 @@ def compact(text: str) -> str:
 
 
 def contains(text: str, expected: str, numeric: bool = False) -> bool:
-    needle = compact(expected)
+    def numeric_text(value):
+        return re.sub(r"−|负(?=\d)", "-", compact(value))
+    needle = numeric_text(expected) if numeric else compact(expected)
     if not needle:
         return False
-    prefix = r"(?<![\d.])" if numeric and needle[0].isdigit() else ""
-    suffix = r"(?![\d.])" if numeric and needle[-1].isdigit() else ""
-    return bool(re.search(prefix + re.escape(needle) + suffix, compact(text)))
+    prefix = r"(?<![\d.+±-])(?<!\d,)" if numeric and re.match(r"[+-]?\d", needle) else ""
+    if prefix and needle[0].isdigit():
+        prefix += r"\+?"
+    suffix = r"(?!\d|\.\d|,\d{3})" if numeric and needle[-1].isdigit() else ""
+    return bool(re.search(prefix + re.escape(needle) + suffix, numeric_text(text) if numeric else compact(text)))
 
 
 def read_slide_order(archive, slide_names: list[str]) -> list[str]:

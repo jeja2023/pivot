@@ -1,6 +1,6 @@
 (function () {
     'use strict';
-    let state, helpers, bound = false, catalog = null;
+    let state, helpers, bound = false, catalog = null, preview = null, previewButton = null;
     const byId = id => document.getElementById(id);
     function node(tag, className = '', text = '') { const item = document.createElement(tag); if (className) item.className = className; if (text) item.textContent = text; return item; }
     function svgIcon(paths, size = 18) {
@@ -68,16 +68,23 @@
         );
         const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭');
         closeBtn.type = 'button'; closeBtn.setAttribute('aria-label', '关闭');
-        closeBtn.addEventListener('click', () => overlay.classList.add('hidden'));
+        closeBtn.addEventListener('click', closeCatalog);
+        modal.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && preview) {
+                event.preventDefault();
+                event.stopPropagation();
+                closePreview(true);
+            }
+        });
         titleRow.append(titleGroup, closeBtn);
         head.appendChild(titleRow);
 
-        const body = node('div', 'workspace-modal-body presentation-catalog-body-wrap');
+        const body = node('div', 'workspace-modal-body presentation-catalog-body-wrap'); body.id = 'presentation-catalog-list';
 
         const tip = node('div', 'presentation-catalog-tip');
         tip.append(
             svgIcon([['circle', { cx: '12', cy: '12', r: '10' }], ['line', { x1: '12', y1: '16', x2: '12', y2: '12' }], ['line', { x1: '12', y1: '8', x2: '12.01', y2: '8' }]], 15),
-            node('span', '', '自由设计无需先挑模板。单位模板用于固定品牌和版式，通用模板只保留汇报、正式材料、培训三类；历史主题按需显示，已有文稿仍引用原版本。')
+            node('span', '', '选用前可点击「预览」查看版式或风格示例。单位模板用来统一品牌与版式，历史主题可在对应分类中查看。')
         );
         body.appendChild(tip);
 
@@ -155,7 +162,7 @@
             { title: '来源', className: 'presentation-catalog-source-th' },
             { title: '版本', className: 'presentation-catalog-version-th' },
             { title: '可用方式', className: 'presentation-catalog-supported-th' },
-            { title: '操作', className: 'presentation-catalog-controls-th' }
+            { title: '操作', className: 'presentation-catalog-controls-th text-center' }
         ];
         for (const h of headers) headRow.appendChild(node('th', h.className, h.title));
         thead.appendChild(headRow); table.append(thead, tbody); scroll.appendChild(table);
@@ -168,10 +175,43 @@
         overlay.appendChild(modal);
         document.body.appendChild(overlay);
     }
+    function closePreview(restoreFocus = false) {
+        if (!preview) return;
+        preview.close(); preview = null;
+        byId('presentation-catalog-list').classList.remove('hidden');
+        if (restoreFocus) previewButton?.focus();
+        previewButton = null;
+    }
+    function closeCatalog() {
+        closePreview();
+        byId('presentation-catalog-modal').classList.add('hidden');
+    }
+    function templateActions(template) {
+        const buttons = node('div', 'presentation-catalog-actions');
+        if (template.supportedEngines.includes('structured')) {
+            buttons.appendChild(action(state.active ? '应用到当前文稿' : '按此模板创建', () => use(template), true));
+            if (!state.active) buttons.appendChild(action('空白创建', () => use(template, 'structured', true)));
+        }
+        if (template.supportedEngines.includes('master')) {
+            const button = action(template.ownerType === 'engine' ? '使用此制作模板' : '保留单位模板设计', () => use(template, 'master'), template.ownerType === 'engine');
+            button.disabled = !catalog.engine.enabled; if (button.disabled) button.title = catalog.engine.message; buttons.appendChild(button);
+        }
+        return buttons;
+    }
+    function showPreview(template, trigger) {
+        closePreview();
+        preview = window.Pivot.moduleApi('apps.presentations.templatePreview').openCatalogPreview({
+            template, request: apiFetch, node, actions: templateActions(template), back: () => closePreview(true)
+        });
+        previewButton = trigger;
+        byId('presentation-catalog-list').classList.add('hidden');
+        byId('presentation-catalog-dialog').appendChild(preview.section);
+        preview.start();
+    }
     async function use(template, engine = 'structured', blank = false) {
         if (engine === 'master' && !catalog.engine.enabled) throw new Error(catalog.engine.message);
         if (state.dirty && !await helpers.flush()) return;
-        byId('presentation-catalog-modal').classList.add('hidden');
+        closeCatalog();
         if (engine === 'master') {
             return window.Pivot.moduleApi('apps.presentations.master').open({ operation: template.ownerType === 'engine' ? 'generate' : 'edit_native', profile: 'default',
                 template: template.ownerType === 'engine' ? { type: 'runtime', id: template.id, name: template.name, description: template.description || '', version: template.version || '', kind: template.kind || 'style' } : { type: 'organization', id: template.id, version: template.version, name: template.name, description: template.description || '' } });
@@ -236,17 +276,12 @@
                     supported.textContent += (supported.textContent ? '、' : '') + '完整制作';
                 }
 
-                const controls = node('td', 'presentation-catalog-controls-cell');
-                const buttons = node('div', 'presentation-catalog-actions');
+                const controls = node('td', 'presentation-catalog-controls-cell text-center');
+                const buttons = templateActions(template);
+                const previewAction = action('预览', () => showPreview(template, previewAction));
+                previewAction.setAttribute('aria-label', '预览 ' + template.name);
+                buttons.prepend(previewAction);
                 controls.appendChild(buttons);
-                if (template.supportedEngines.includes('structured')) {
-                    buttons.appendChild(action(state.active ? '应用到当前文稿' : '按此模板创建', () => use(template), true));
-                    if (!state.active) buttons.appendChild(action('空白创建', () => use(template, 'structured', true)));
-                }
-                if (template.supportedEngines.includes('master')) {
-                    const button = action(template.ownerType === 'engine' ? '使用此制作模板' : '保留单位模板设计', () => use(template, 'master'), template.ownerType === 'engine');
-                    button.disabled = !catalog.engine.enabled; if (button.disabled) button.title = catalog.engine.message; buttons.appendChild(button);
-                }
                 tr.append(seq, name, desc, source, version, supported, controls);
                 host.appendChild(tr);
             }
@@ -268,7 +303,7 @@
         }
     }
     async function open(group = 'all') {
-        ensureModal(); byId('presentation-catalog-modal').classList.remove('hidden');
+        ensureModal(); closePreview(); byId('presentation-catalog-modal').classList.remove('hidden');
         const status = byId('presentation-catalog-status');
         if (status) status.textContent = '正在加载当前账号可用模板。';
         const filter = byId('presentation-catalog-filter');

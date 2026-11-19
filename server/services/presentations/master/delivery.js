@@ -13,6 +13,9 @@ async function prepareDelivery(user, taskId, request, receipt, context = {}) {
     const tenant = await assertTenantContext(user);
     const primary = await runtime.readOutput(user, taskId, receipt.templateOnly ? 'project.zip' : 'presentation.pptx');
     const actualDigest = crypto.createHash('sha256').update(primary).digest('hex');
+    if (!receipt.templateOnly && actualDigest !== receipt.packageCheck?.currentExportSha256) {
+        throw runtime.error('交付文件缺少本次导出的版本回执，请使用更新的执行镜像重新导出。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
+    }
     if (actualDigest !== receipt.sha256 || receipt.packageCheck?.status !== 'passed') throw runtime.error('最终文件摘要或内容核验无效。', 'PPT_MASTER_DELIVERY_INVALID', 422);
     const metadata = { engine: 'ppt-master', revision: context.engine?.revision || runtime.lock.revision, runtimeId: context.engine?.runtimeId || '', taskId, title: request.title, operation: request.operation,
         sourceDigest: request.sourceDigest, inputDigests: request.inputDigests, outputDigest: actualDigest, checks: receipt.packageCheck, productionProfile: request.productionProfile,

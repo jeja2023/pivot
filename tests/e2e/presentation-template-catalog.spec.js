@@ -6,6 +6,57 @@ const path = require('node:path');
 const Zip = require('jszip');
 const sharp = require('sharp');
 
+test('模板库可预览实际版式和制作风格，返回保留搜索，窄屏也能查看', async ({ page }, testInfo) => {
+    const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } });
+    expect(login.ok()).toBeTruthy();
+    await page.goto('/chat', { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
+    await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await page.getByRole('button', { name: '模板库', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: '演示模板库' });
+    const evidence = process.env.E2E_PPT_TEMPLATE_EVIDENCE_DIR || testInfo.outputPath('evidence');
+    await fs.mkdir(evidence, { recursive: true });
+    const search = dialog.getByRole('searchbox', { name: '搜索模板' });
+    await search.fill('培训讲解');
+    const preview = dialog.getByRole('button', { name: '预览 培训讲解' });
+    const operationHead = dialog.getByRole('columnheader', { name: '操作' });
+    await expect(operationHead).toHaveCSS('text-align', 'center');
+    const operationCell = preview.locator('xpath=ancestor::td');
+    expect(await operationCell.evaluate(cell => {
+        const outer = cell.getBoundingClientRect(), inner = cell.firstElementChild.getBoundingClientRect();
+        return Math.abs((outer.left + outer.right) / 2 - (inner.left + inner.right) / 2);
+    })).toBeLessThan(2);
+    await page.route('**/template-catalog/learning-studio/preview?*', route => route.fulfill({ status: 404, json: { error: '接口不存在' } }), { times: 1 });
+    await preview.click();
+    await expect(dialog.getByRole('status')).toContainText('当前服务未提供模板预览接口');
+    await dialog.getByRole('button', { name: '重试预览' }).click();
+    const slide = dialog.locator('.presentation-catalog-preview img');
+    await expect(slide).toBeVisible();
+    const cover = await slide.getAttribute('src');
+    const layout = dialog.getByRole('combobox', { name: '预览版式' });
+    await expect(layout).toHaveCSS('height', '34px');
+    await expect(layout).toHaveCSS('width', '156px');
+    await layout.selectOption({ index: 2 });
+    await expect(slide).toBeVisible();
+    await expect(slide).not.toHaveAttribute('src', cover);
+    await expect(dialog.getByRole('button', { name: '按此模板创建' })).toBeVisible();
+    await page.screenshot({ path: path.join(evidence, 'template-preview-desktop.png') });
+    await page.keyboard.press('Escape');
+    await expect(preview).toBeFocused();
+    await expect(search).toHaveValue('培训讲解');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await search.fill('事件复盘');
+    await dialog.getByRole('button', { name: '预览 事件复盘' }).click();
+    await expect(dialog.getByText('风格示例 · 实际配色与排版由制作内容决定。')).toBeVisible();
+    await expect(slide).toBeVisible();
+    expect(await slide.evaluate(el => el.getBoundingClientRect().right)).toBeLessThanOrEqual(390);
+    await expect(dialog.getByRole('button', { name: '使用此制作模板' })).toBeVisible();
+    await page.screenshot({ path: path.join(evidence, 'template-preview-mobile.png') });
+    await dialog.getByRole('button', { name: '返回列表' }).click();
+    await expect(search).toHaveValue('事件复盘');
+});
+
 test('统一模板入口保留历史版本，深色封面在画布、缩略图与导出中清晰且主题切换恢复背景', async ({ page }, testInfo) => {
     test.setTimeout(180000);
     const login = await page.request.post('/api/auth/login', { data: { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD || 'E2eAdmin123' } }); expect(login.ok()).toBeTruthy();

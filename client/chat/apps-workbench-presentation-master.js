@@ -637,6 +637,10 @@
             }
             reviewBox.appendChild(node('p', 'presentation-master-task-question', request.question || '请提供继续制作所需的答复。'));
             if (request.context) reviewBox.appendChild(node('div', 'presentation-master-task-context', request.context));
+            if (request.plan?.templateUse) {
+                const { page, visibleText, rule } = request.plan.templateUse;
+                reviewBox.appendChild(node('p', 'presentation-master-task-context', `第 ${page} 页「${visibleText}」采用的模板规范：${rule}`));
+            }
             if (request.plan?.pages?.length) {
                 const details = node('details', 'presentation-master-plan-checklist'), pages = node('ol', 'presentation-master-plan-pages');
                 details.open = true;
@@ -653,6 +657,7 @@
                         const chart = fact.chart ? `（图表 ${fact.chart.series} / ${fact.chart.category} 为 ${fact.chart.number}）` : '';
                         const factLi = node('li', 'presentation-master-plan-fact');
                         factLi.append(node('span', 'presentation-master-plan-fact-text', fact.text + chart));
+                        if (fact.previousText) factLi.append(node('span', 'presentation-master-plan-source', '已按原文更正，原拟为「' + fact.previousText + '」。'));
                         if (fact.source) {
                             const source = window.Pivot.moduleApi('apps.presentations.masterPageReview').citationSourceName(fact.source.path);
                             factLi.append(node('span', 'presentation-master-plan-source', `（${source}，引文 ${fact.source.quote}）`));

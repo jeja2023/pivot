@@ -3,18 +3,26 @@
 const { createHash } = require('node:crypto');
 
 const READ_ACTIONS = new Set(['read', 'read_runtime', 'read_history', 'read_images', 'list']);
-const PROJECT_INSPECTIONS = new Set(['info', 'page-context', 'page-context-report']);
-const isInspection = action => READ_ACTIONS.has(action?.action) || action?.action === 'run' && action.tool === 'project' && PROJECT_INSPECTIONS.has(action.args?.[0]);
+const PROJECT_INSPECTIONS = new Set(['info', 'validate', 'page-context', 'page-context-report']);
+const isInspection = action => READ_ACTIONS.has(action?.action) || action?.action === 'validate_template'
+    || action?.action === 'run' && (action.tool === 'check_svg' || action.tool === 'project' && PROJECT_INSPECTIONS.has(action.args?.[0]));
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
 function createInspectionProgress(messages) {
     let seen = new Map(), inspectionRounds = 0, repeatedRounds = 0;
+    const written = new Map();
 
     function observe(actions, observations, historical = false) {
-        const productive = observations.some((observation, index) => {
+        let productive = false;
+        observations.forEach((observation, index) => {
             const action = actions[index];
-            return action && !isInspection(action) && action.action === observation?.action && observation?.result
-                && !observation.error && (observation.result.exitCode === undefined || observation.result.exitCode === 0);
+            if (!action || isInspection(action) || action.action !== observation?.action || !observation.result
+                || observation.error || observation.result.exitCode) return;
+            if (action.action === 'write' && observation.result.sha256) {
+                if (written.get(action.path) === observation.result.sha256) return;
+                written.set(action.path, observation.result.sha256);
+            } else written.clear();
+            productive = true;
         });
         if (productive) {
             seen = new Map();

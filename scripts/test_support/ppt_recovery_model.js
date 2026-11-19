@@ -18,7 +18,7 @@ function standard(messages, fail) {
     })) };
 }
 
-function master(messages, finish, citations = false) {
+function master(messages, finish, citations = false, automatic = false) {
     if (messages.some(item => JSON.stringify(item.content).includes('PPT_MASTER_PREFLIGHT_V1'))) {
         return require('./ppt_master_model').pptMasterModelTurn(messages);
     }
@@ -29,12 +29,22 @@ function master(messages, finish, citations = false) {
     const designTurns = assistant.filter(turn => turn.requestInput?.stage === 'design');
     const system = messages.find(message => message.role === 'system')?.content || '';
     const budget = '项目预算80万元';
+    const finalCost = '全年决算成本80.25万元';
+    if (automatic && exports.length === 1) {
+        if (!system.includes('自动修页')) return { complete: { path: exports[0].args.at(-1) } };
+        const issues = messages.flatMap(message => {
+            try { return JSON.parse(message.content)?.approvedPageRepairs || []; } catch (_) { return []; }
+        });
+        if (issues.length !== 1 || issues[0].page !== 2 || issues[0].items[0].text !== fixture.pages[1].fact) throw new Error('自动修页没有收到已批准的错页及数据');
+        return { actions: [{ action: 'write', path: issues[0].sourceFile, text: fixture.slide(fixture.pages[1]) }] };
+    }
     if (citations && exports.length === 1 && designTurns.length === 1) {
+        if (system.includes('user-supplement:2')) {
+            const text = finalCost;
+            return { repairCitations: [{ page: 2, item: 1, text, path: 'user-supplement:2', quote: text }] };
+        }
         const next = globalThis.structuredClone(designTurns[0]);
-        const source = system.includes('user-supplement:2')
-            ? { path: 'user-supplement:2', quote: fixture.pages[1].fact }
-            : { path: 'instruction', quote: fixture.pages[1].fact };
-        next.requestInput.plan.pages[1].values[0].source = source;
+        next.requestInput.plan.pages[1].values[0] = { text: finalCost, source: { path: 'instruction', quote: finalCost } };
         return next;
     }
     if (citations && exports.length === 1 && designTurns.length === 2) finish = true;
@@ -42,7 +52,7 @@ function master(messages, finish, citations = false) {
     if (action) {
         const project = action.args[0];
         return { actions: [
-            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(fixture.pages[1]) },
+            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(citations ? { ...fixture.pages[1], fact: finalCost } : fixture.pages[1]) },
             { action: 'run', tool: 'check_svg', args: [project, '--canonical-authoring', '--stage', 'final', '--json'] },
             { action: 'run', tool: 'finalize', args: [project] },
             { action: 'run', tool: 'export', args: [project, '--no-notes', '-o', project + '/exports/repaired.pptx'] }

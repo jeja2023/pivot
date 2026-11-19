@@ -22,7 +22,7 @@ async function availability() {
             const health = await remote.info({ force: true });
             if (!health) return { enabled: false, transport: 'service', message: '完整制作服务已停用，标准PPT功能继续可用。' };
             return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId,
-                checklistReady: health.deliveryChecklist === 1, pageRepairReady: health.pageRepair === 1,
+                checklistReady: health.deliveryChecklist === 1, currentExportReady: health.currentExport === 1, pageRepairReady: health.pageRepair === 1,
                 progressSnapshotsReady: health.progressSnapshots === 1, message: '独立PPT制作服务可用。' };
         }
     } catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }

@@ -158,7 +158,7 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
     const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
     const lease = crypto.randomUUID(), pptx = Buffer.from('用于事务验收的合成主输出'), zip = Buffer.from('用于事务验收的合成源包');
     const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
-    const receipt = { sha256: digest(pptx), projectSha256: digest(zip), packageCheck: { status: 'passed', slideCount: 1 } };
+    const receipt = { sha256: digest(pptx), projectSha256: digest(zip), packageCheck: { status: 'passed', slideCount: 1, currentExportSha256: digest(pptx) } };
     const deliveryContext = { engine: { runtimeId: 'sha256:' + 'a'.repeat(64), revision: 'synthetic-runtime' } };
     const artifacts = () => query('SELECT id FROM agent_artifacts WHERE user_id=? AND title=?', [user.id, request.title]);
     let broken = true;

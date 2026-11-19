@@ -56,8 +56,8 @@ function lock() {
 `;
 }
 
-function spec() {
-    const outline = pages.map((page, index) => `#### Slide 0${index + 1} - ${page.title}\n- **Audience move**: 核对当前指标\n- **Relationships**: none\n- **Title**: ${page.title}\n- **Core message**: ${page.fact}\n- **Content**: ${page.fact}\n`).join('\n');
+function spec(roster = pages, templateUse) {
+    const outline = roster.map((page, index) => `#### Slide 0${index + 1} - ${page.title}\n- **Audience move**: 核对当前指标\n- **Relationships**: none\n- **Title**: ${page.title}\n- **Core message**: ${page.fact}\n- **Content**: ${page.fact}\n`).join('\n');
     return `<!-- ppt-master-schema: design-spec/v1 -->
 # 长材料验收 - Design Spec
 ## I. Project Information
@@ -76,6 +76,7 @@ function spec() {
 | viewBox | 0 0 1280 720 |
 ## III. Visual Theme
 白底深色文字，逐页单数据。
+${templateUse ? '首页按所选规范组织。' + templateUse.rule : ''}
 ## IV. Typography System
 Noto Sans CJK SC，标题44px，正文32px。
 ## V. Layout Principles
@@ -114,6 +115,18 @@ function turn(request, messages, assistant) {
     if (!didRun('project')) return { actions: [{ action: 'run', tool: 'project', args: ['init', 'master_default_e2e', '--dir', '.'] }, { action: 'list' }] };
     const project = observations.flatMap(item => item.result?.files || []).find(item => item.path.includes('/validation/workflow.log'))?.path.split('/')[0];
     if (!project) return { actions: [{ action: 'list' }] };
+    const selected = messages.flatMap(message => {
+        if (message.role !== 'user') return [];
+        try { return [JSON.parse(message.content)?.selectedTemplateSpec]; } catch (_) { return []; }
+    }).find(Boolean);
+    const roster = pages.map(page => ({ ...page }));
+    let templateUse;
+    if (selected) {
+        const consulting = selected.text.includes('**Preferred Mode**: pyramid');
+        roster[0].title = consulting ? '收入已核定，成本仍待复核' : '研究问题与经营复核方法';
+        const rule = selected.text.match(/- \*\*Page Message Discipline\*\*: ([^\n.]+\.)/)?.[1];
+        templateUse = { rule, page: 1, visibleText: roster[0].title };
+    }
     const pendingImage = /下一未读 offset=(\d+)/.exec(system);
     if (pendingImage) return { actions: [{ action: 'read_images', offset: Number(pendingImage[1]) }] };
     const latest = observations.filter(item => item.action === 'read' && item.result?.path === materialPath).at(-1)?.result;
@@ -125,16 +138,16 @@ function turn(request, messages, assistant) {
     ] };
     const authored = assistant.some(item => item.actions?.some(action => action.path === project + '/spec_lock.md'));
     if (!authored) return { actions: [
-        { action: 'write', path: project + '/design_spec.md', text: spec() },
+        { action: 'write', path: project + '/design_spec.md', text: spec(roster, templateUse) },
         { action: 'write', path: project + '/spec_lock.md', text: lock() },
         { action: 'run', tool: 'project', args: ['validate', project] }
     ] };
     if (!approved('design')) return plan('design', '是否批准三页的标题、页序及关键数字？', {
         summary: '使用白底深色文字，标题和正文左对齐。每页单独核对一项事实。',
-        project, pages: pages.map(page => ({ title: page.title, values: [{ text: page.fact, source: { path: materialPath, quote: page.fact } }] }))
+        project, ...(templateUse ? { templateUse } : {}), pages: roster.map(page => ({ title: page.title, values: [{ text: page.fact, source: { path: materialPath, quote: page.fact } }] }))
     });
     if (!didRun('export')) return { actions: [
-        ...pages.map((page, index) => ({ action: 'write', path: project + `/svg_output/slide_0${index + 1}.svg`, text: slide(page) })),
+        ...roster.map((page, index) => ({ action: 'write', path: project + `/svg_output/slide_0${index + 1}.svg`, text: slide(page) })),
         { action: 'run', tool: 'check_svg', args: [project, '--canonical-authoring', '--stage', 'final', '--json'] },
         { action: 'run', tool: 'finalize', args: [project] },
         { action: 'run', tool: 'export', args: [project, '--no-notes', '-o', project + '/exports/final.pptx'] }

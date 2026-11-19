@@ -27,6 +27,7 @@ TEXT_EXTENSIONS = {".md", ".json", ".yaml", ".yml", ".txt", ".svg", ".csv", ".xm
 MAX_TEXT = 180_000
 MAX_WORKSPACE = 250 * 1024 * 1024
 REVIEW_DRAFT = ".pivot/review-draft.pptx"
+PREVIOUS_REVIEW_DRAFT = ".pivot/previous-review-draft.pptx"
 REVIEW_PREVIEW = ".pivot/review-preview"
 PROGRESS_DIRECTORY = (".pivot", "progress")
 
@@ -135,14 +136,33 @@ def page_sources(file, receipt, checklist):
     return export
 
 
-def registered_export(path):
+def installed_template_digest(project, template_source):
+    source = relative_path(template_source, SKILL, must_exist=True)
+    if source.relative_to(SKILL).parts[0] != "templates":
+        raise ValueError("交付模板须来自固定运行包。")
+    if str(SKILL / "scripts") not in sys.path:
+        sys.path.insert(0, str(SKILL / "scripts"))
+    from apply_template import apply_templates, snapshot_template_roots, read_template_install
+    # 上游预检逐文件比对已安装的规范、版式与资源，回执还须对应所选发行包的原始内容。
+    selected = WORKSPACE / "selected-template"
+    plan = apply_templates(project, [str(selected)], dry_run=True, validate=False)
+    canonical = snapshot_template_roots(project, [str(source)])[0]
+    if plan.root_snapshots[0]["files"] != canonical["files"] or plan.root_snapshots[0]["specs"] != canonical["specs"]:
+        raise ValueError("任务模板副本与所选发行包模板不一致，请重新载入。")
+    read_template_install(project, plan.root_snapshots, plan.selection_sha256)
+    spec = source / "templates" / "design_spec.md"
+    return hashlib.sha256(spec.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+
+def registered_export(path, *, current=False):
     file = relative_path(path, WORKSPACE, must_exist=True)
     if not file.is_file() or file.suffix != ".pptx" or "exports" not in file.parts or file.stat().st_size > 60 * 1024 * 1024:
         raise ValueError("只能交付 exports 目录中的最终 PPTX。")
     data = file.read_bytes()
     content_hash = hashlib.sha256(data).hexdigest()
     receipt = json.loads((WORKSPACE / ".pivot/export.json").read_text(encoding="utf-8"))
-    if receipt.get("exports", {}).get(file.relative_to(WORKSPACE).as_posix()) != content_hash:
+    key = "currentExports" if current else "exports"
+    if receipt.get(key, {}).get(file.relative_to(WORKSPACE).as_posix()) != content_hash:
         raise ValueError("文件与上游导出回执的摘要不一致。")
     return file, data, content_hash, receipt
 
@@ -222,7 +242,7 @@ def capture_progress(request):
                 archive.write(file, file.relative_to(WORKSPACE).as_posix())
         return {"source": {**describe("progress-sources.zip", data.getvalue()), "files": sorted(pages)}}
 
-    file, data, original_digest, receipt = registered_export(path)
+    file, data, original_digest, receipt = registered_export(path, current=True)
     if not file.is_relative_to(project / "exports") or receipt.get("sourceFingerprint") != source_fingerprint():
         raise ValueError("快照与本次导出或项目源稿不一致。")
     checklist = request.get("checklist")
@@ -250,7 +270,7 @@ def capture_progress(request):
 
 def deliver_presentation(request: dict) -> dict:
     try:
-        file, data, content_hash, receipt = registered_export(request.get("path"))
+        file, data, content_hash, receipt = registered_export(request.get("path"), current=True)
     except ValueError as error:
         raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。") from error
     if receipt.get("sourceFingerprint") != source_fingerprint():
@@ -258,6 +278,7 @@ def deliver_presentation(request: dict) -> dict:
     preservation = None
     repair = request.get("repair")
     draft = WORKSPACE / REVIEW_DRAFT
+    prior = WORKSPACE / PREVIOUS_REVIEW_DRAFT
     if repair is not None:
         if not isinstance(repair, dict):
             raise ValueError("按页修复参数无效。")
@@ -268,8 +289,14 @@ def deliver_presentation(request: dict) -> dict:
         if draft.is_symlink() or not draft.is_file() or draft.stat().st_size > 60 * 1024 * 1024:
             raise ValueError("原待核验草稿已不可用。")
         baseline = draft.read_bytes()
-        if hashlib.sha256(baseline).hexdigest() != baseline_digest:
-            raise ValueError("待核验草稿已变化，请刷新任务后重试。")
+        current_digest = hashlib.sha256(baseline).hexdigest()
+        if current_digest != baseline_digest:
+            # 引擎已保留修复稿、宿主尚未写入检查点时，可重放同一导出与原基准的核验。
+            if repair.get("automatic") is not True or current_digest != content_hash or not prior.is_file() or prior.is_symlink():
+                raise ValueError("待核验草稿已变化，请刷新任务后重试。")
+            baseline = prior.read_bytes()
+            if hashlib.sha256(baseline).hexdigest() != baseline_digest:
+                raise ValueError("待核验草稿已变化，请刷新任务后重试。")
         preservation = (baseline, set(pages))
     try:
         report = package_report(data, request.get("checklist"), preservation)
@@ -281,13 +308,20 @@ def deliver_presentation(request: dict) -> dict:
         if error.report is not None:
             result["pageReview"] = {**error.report, "pageSources": page_sources(file, receipt, request.get("checklist"))}
         files = inventory()
-        if sum(entry.stat().st_size for entry in files if entry != draft) + len(data) > MAX_WORKSPACE or (draft not in files and len(files) >= 16_000):
+        keep_prior = bool(repair and repair.get("automatic") is True and current_digest == baseline_digest and current_digest != content_hash)
+        replaced = {draft, prior} if keep_prior else {draft}
+        if (sum(entry.stat().st_size for entry in files if entry not in replaced) + len(data)
+                + (len(baseline) if keep_prior else 0) > MAX_WORKSPACE
+                or len(files) + int(draft not in files) + int(keep_prior and prior not in files) > 16_000):
             return result
         temporary = None
         try:
             with tempfile.NamedTemporaryFile(dir=draft.parent, delete=False) as stream:
                 temporary = Path(stream.name)
                 stream.write(data)
+            if keep_prior:
+                prior.unlink(missing_ok=True)
+                os.link(draft, prior)
             temporary.replace(draft)
             result["reviewDraft"] = {"sha256": content_hash, "byteSize": len(data)}
         except OSError:
@@ -296,13 +330,16 @@ def deliver_presentation(request: dict) -> dict:
             if temporary:
                 temporary.unlink(missing_ok=True)
         return result
+    if request.get("templateSource"):
+        report["templateSpecDigest"] = installed_template_digest(file.parent.parent, request["templateSource"])
+    report["currentExportSha256"] = content_hash
     delivery = WORKSPACE / "delivery"
     delivery.mkdir(exist_ok=True)
     (delivery / "presentation.pptx").write_bytes(data)
     with zipfile.ZipFile(delivery / "project.zip", "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
         for entry in inventory():
             relative = entry.relative_to(WORKSPACE)
-            if relative.parts[0] != "delivery" and relative.as_posix() != REVIEW_DRAFT:
+            if relative.parts[0] != "delivery" and relative.as_posix() not in {REVIEW_DRAFT, PREVIOUS_REVIEW_DRAFT}:
                 archive.write(entry, relative.as_posix())
     with (delivery / "project.zip").open("rb") as project_file:
         project_digest = hashlib.file_digest(project_file, "sha256").hexdigest()
@@ -329,7 +366,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action == "inspect_export":
         return inspect_export(request)
@@ -400,23 +437,30 @@ def main(request: dict) -> dict:
             previous_exports = {file: file.stat().st_mtime_ns for file in inventory() if file.suffix == ".pptx" and "exports" in file.parts}
         result = run(args)
         files = inventory()
+        if request.get("tool") == "apply_template" and result["exitCode"] == 0 and request.get("templateSource"):
+            project = relative_path(request["args"][0], WORKSPACE, must_exist=True)
+            result["templateSpecDigest"] = installed_template_digest(project, request["templateSource"])
         if request.get("tool") == "export" and result["exitCode"] == 0:
             metadata = WORKSPACE / ".pivot"
             metadata.mkdir(exist_ok=True)
             args = request["args"]
             project = relative_path(args[0], WORKSPACE, must_exist=True)
-            outputs = [file for file in files if file.suffix == ".pptx" and "exports" in file.parts]
-            exports = {file.relative_to(WORKSPACE).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest() for file in outputs}
+            current_exports = [file for file in files if file.suffix == ".pptx" and file.is_relative_to(project / "exports")
+                               and file.stat().st_mtime_ns != previous_exports.get(file)]
+            current_hashes = {file.relative_to(WORKSPACE).as_posix(): hashlib.sha256(file.read_bytes()).hexdigest() for file in current_exports}
+            receipt_file = metadata / "export.json"
+            exports = json.loads(receipt_file.read_text(encoding="utf-8")).get("exports", {}) if receipt_file.exists() else {}
+            exports.update(current_hashes)
             page_sources_by_export = {}
             if project.is_dir() and "--roundtrip" not in args and not any(arg in {"-s", "--source"} or arg.startswith("--source=") for arg in args):
                 sys.path.insert(0, str(SKILL / "scripts"))
                 from slide_roster import discover_slide_svgs
                 sources = [page.relative_to(WORKSPACE).as_posix() for page in discover_slide_svgs(project / "svg_output")]
-                page_sources_by_export = {file.relative_to(WORKSPACE).as_posix(): sources for file in outputs
-                                          if file.is_relative_to(project / "exports") and file.stat().st_mtime_ns != previous_exports.get(file)}
-            (metadata / "export.json").write_text(json.dumps({"sourceFingerprint": source_fingerprint(), "exports": exports, "pageSources": page_sources_by_export}), encoding="utf-8")
-            current_exports = [file for file in outputs if file.is_relative_to(project / "exports")
-                               and file.stat().st_mtime_ns != previous_exports.get(file)]
+                page_sources_by_export = dict.fromkeys(current_hashes, sources)
+            with tempfile.NamedTemporaryFile(dir=metadata, mode="w", encoding="utf-8", delete=False) as stream:
+                json.dump({"sourceFingerprint": source_fingerprint(), "exports": exports, "currentExports": current_hashes,
+                           "pageSources": page_sources_by_export}, stream)
+            Path(stream.name).replace(receipt_file)
             if len(current_exports) == 1:
                 result["progressExport"] = current_exports[0].relative_to(WORKSPACE).as_posix()
         return result

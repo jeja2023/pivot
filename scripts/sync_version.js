@@ -60,12 +60,6 @@ function syncReadme(version) {
     );
     readme = replaceOrFail(
         readme,
-        /(##\s*[^\r\n]*?)(\d+\.\d+\.\d+)/,
-        `$1${version}`,
-        'README latest version heading'
-    );
-    readme = replaceOrFail(
-        readme,
         /(\*\*当前版本\*\*：v)(\d+\.\d+\.\d+)/,
         `$1${version}`,
         'README current version footer'

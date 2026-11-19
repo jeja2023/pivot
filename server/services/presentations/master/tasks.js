@@ -235,6 +235,9 @@ async function start(user, input, context = {}) {
     }
     const request = { ...contract.normalize(input), runId: String(context.run?.id || context.runId || ''),
         ...(context.regeneratedFrom ? { regeneratedFrom: context.regeneratedFrom } : {}) };
+    if (available.transport === 'service' && request.operation !== 'create_template' && !available.currentExportReady) {
+        throw runtime.error('独立 PPT 服务需要更新到支持修订稿导出回执的镜像，再开始制作。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
+    }
     const visionRequired = await ensureAccess(user, request);
     await checkModel(user, request, { visionRequired });
     const task = await repository.admit(user, client => { deployment.assertAccepting(); return taskStore.createToolTaskStore({ queryOne: client.queryOne, execute: client.execute }).create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 60 * 60 * 1000 }); });
