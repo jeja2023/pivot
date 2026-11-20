@@ -11,7 +11,7 @@ const FIRST_PAGE_INSPECTION_LIMIT = 6;
 const phases = {
     design: { limit: 18, goal: '提交最终页面与关键数据清单' },
     template: { limit: 12, goal: '提交模板方案确认' },
-    first_page: { limit: 16, goal: '完成规范并写入第一张页面 SVG' },
+    first_page: { limit: 16, goal: '完成规范、写入并检查第一张页面 SVG' },
     template_files: { limit: 16, goal: '完成模板工作区并提交校验和交付' }
 };
 
@@ -43,7 +43,8 @@ function currentPhase(state) {
     if (!approvals) return '';
     if (state.request.operation === 'create_template') return approvals.template ? 'template_files' : 'template';
     if (!approvals.design) return 'design';
-    return !state.milestones?.firstPageWrite && !state.lastExport && !state.pageRepair ? 'first_page' : '';
+    const awaitingFirst = state.authoringPages ? state.authoringPages.first !== 'passed' : !state.milestones?.firstPageWrite;
+    return awaitingFirst && !state.lastExport && !state.pageRepair ? 'first_page' : '';
 }
 
 function progressFor(state) {

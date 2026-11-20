@@ -210,6 +210,47 @@ test('初稿匹配同一批无法核对的数据时停止盲目重试并用占�
     assert.deepEqual(exportReview(state, 'report').checklist, checklist);
 });
 
+test('初稿按稳定条目标识核对，保留成功项，错误和过期修正耗尽后只占位未核对项', async () => {
+    const state = makeState(), material = 'inputs/material-1.md';
+    const proposal = globalThis.structuredClone(design);
+    state.request.draftFirst = true;
+    state.request.inputFiles = [{ path: material, kind: 'text' }];
+    state.messages.push({ role: 'user', content: JSON.stringify({ runtimeDocument: 'workflows/generate-pptx.md', text: '长制作指引' }) },
+        { role: 'user', content: '宿主中断后从已保存检查点继续。旧版 repairCitations 修复提示' });
+    proposal.requestInput.plan.pages[0].values = [
+        { text: '收入120万元' }, { text: '成本70万元' }, { text: '预算30万元', source: { path: material, quote: '已核定预算30万元。' } }
+    ];
+    let calls = 0, previousIds;
+    const result = await drive({ id: 1 }, 'task', state, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        inputBuffer: async () => Buffer.from('已核定收入120万元。\n已核定预算30万元。'),
+        callModel: async (_model, messages) => {
+            if (++calls === 1) return proposal;
+            if (calls === 5) return { complete: { path: 'report/exports/final.pptx' } };
+            const { citationRepairEvidence: evidence, savedCitationPlan } = JSON.parse(messages.at(-1).content);
+            assert.equal(savedCitationPlan.pages.length, 1);
+            assert.ok(!messages.some(message => /长制作指引|旧版 repairCitations 修复提示/u.test(message.content)));
+            if (calls === 2) {
+                previousIds = evidence.map(({ id }) => id);
+                return { repairCitations: [
+                    { id: previousIds[0], path: material, quote: '已核定收入120万元。' },
+                    { id: previousIds[1], path: material, quote: '不存在成本999万元。', correctedText: '成本999万元' },
+                    { id: '过期标识', path: material, quote: '旧引文' }
+                ] };
+            }
+            assert.deepEqual(evidence.map(({ id }) => id), [previousIds[1]]);
+            return { repairCitations: [{ id: previousIds[0], path: material, quote: '已核定收入120万元。' }] };
+        },
+        execute: async () => ({ packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 3, checklistDigest: exportReview(state, 'report').checklistDigest } })
+    });
+    assert.equal(calls, 5);
+    assert.equal(result.receipt.packageCheck.checkedValues, 3);
+    assert.deepEqual(exportReview(state, 'report').checklist[0][1], ['收入120万元', '数据待核对（第 2 项）', '预算30万元']);
+    assert.equal(state.usageDiagnostics[1].turnSummary.citationPatchIgnored, 1);
+    assert.equal(state.usageDiagnostics[2].turnSummary.correctionKind, 'citation_patch');
+    assert.equal(state.usageDiagnostics[3].turnSummary.outcome, 'citation_placeholder');
+});
+
 test('图片可分页，清单确认要求读完所有图片，切换纯文本模型明确拒绝', async () => {
     const state = makeState('quick'), cap = getMaxImagesPerMessage(), attached = [];
     state.request.inputFiles = Array.from({ length: cap + 1 }, (_, index) => ({ path: `inputs/asset-${index + 1}.png`, kind: 'image' }));

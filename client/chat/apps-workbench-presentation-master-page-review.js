@@ -460,9 +460,7 @@
                 : item.nextOffset === null ? (item.offset > 0 ? `偏移 ${item.offset}（已读完）` : '已读完') : `偏移 ${item.offset}`;
         } else if (Number.isSafeInteger(item.offset)) range = `偏移 ${item.offset}`;
         const count = Number.isSafeInteger(item.fileCount) ? `${item.fileCount} ${item.action === 'read_images' ? '张' : '项'}` : '';
-        const failReason = ERROR_REASONS[item.errorCode] || '';
-        const status = item.confirmed ? '已确认写入'
-            : item.failed ? (Number.isInteger(item.exitCode) ? `未通过（退出码 ${item.exitCode}）` : `未通过${failReason ? '（' + failReason + '）' : ''}`) : '';
+        const status = window.Pivot.moduleApi('apps.presentations.masterUsage').observationStatus(item, ERROR_REASONS[item.errorCode]);
         return [label, tool, path, coordinates, range, count, status].filter(Boolean).join(' · ');
     }
 
@@ -489,7 +487,7 @@
     function formatTurnError(item) {
         if (!item || typeof item !== 'object') return '';
         const usage = window.Pivot.moduleApi('apps.presentations.masterUsage');
-        if (item.outcome === 'model_failed') return usage.formatModelError(item.errorCode);
+        if (item.outcome === 'model_failed') return usage.formatModelError(item.errorCode, item.modelFailureKind);
         const preparation = usage.preparationDiagnostic(item);
         if (preparation) return preparation;
         if (item.outcome === 'retry') {

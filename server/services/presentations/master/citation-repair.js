@@ -1,9 +1,10 @@
 'use strict';
 
 const { error } = require('./runtime');
+const { createHash } = require('node:crypto');
 const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const compact = value => value.normalize('NFKC').replace(/\s+/gu, '');
-const citationFields = new Set(['page', 'item', 'text', 'path', 'quote', 'correctedText', 'correctedNumber']);
+const citationFields = new Set(['id', 'page', 'item', 'text', 'path', 'quote', 'correctedText', 'correctedNumber']);
 const numericText = value => compact(value).replace(/−|负(?=\d)/gu, '-');
 const escapePattern = text => text.replace(/[.*+?^\${}()|[\]\\]/g, '\\$&');
 const numberPattern = /[+-]?\d+(?:,\d{3})*(?:\.\d+)?/g;
@@ -22,8 +23,13 @@ function pauseCitationReview(state) {
     return error(`最终页面清单有 ${state.citationRepair.length} 项引文待核对。${first.location}：${first.reason} 请在检查点补充原文、提交修改意见或切换模型后继续。`, CITATION_REVIEW_REQUIRED, 422);
 }
 
+function canUseCitationDraft(citationDraft, citationIssues) {
+    return Boolean(citationDraft?.plan && citationIssues?.length && citationIssues.every(({ page, item, text, missing }) =>
+        !missing && citationDraft.plan.pages[page - 1]?.values[item - 1]?.text === text));
+}
+
 function draftWithCitationPlaceholders({ citationDraft, citationIssues }) {
-    if (!citationDraft?.plan || !citationIssues?.length || citationIssues.some(issue => issue.missing)) return null;
+    if (!canUseCitationDraft(citationDraft, citationIssues)) return null;
     const plan = globalThis.structuredClone(citationDraft.plan);
     for (const { page, item, text } of citationIssues) {
         const target = plan.pages[page - 1];
@@ -102,32 +108,48 @@ function extendCitation(source, quote, text) {
     return start >= 0 && source.normalized.indexOf(anchor, start + 1) < 0 ? line : '';
 }
 
+function citationId({ page, item, title, text }) {
+    return createHash('sha256').update(JSON.stringify([page, item, title, text])).digest('hex').slice(0, 20);
+}
+
 function patchCitationDraft(state, changes) {
-    const invalid = () => error('请按最新待核对清单的页码、项号和数据原文提交引用；清单结构变化时请重提完整方案。', 'PPT_MASTER_ACTION_INVALID', 422);
+    const invalid = () => Object.assign(error('没有命中最新待核对清单的有效修正。请使用当前条目 id、来源路径及连续原文。', 'PPT_MASTER_ACTION_INVALID', 422),
+        { correctionKind: 'citation_patch' });
     if (!state.citationDraft || !Array.isArray(changes) || !changes.length || changes.length > 120) throw invalid();
-    const pending = new Map((state.citationRepair || []).filter(issue => !issue.missing).map(issue => [issue.page + '/' + issue.item, issue.text]));
+    const pending = (state.citationRepair || []).filter(issue => !issue.missing);
+    const byId = new Map(pending.map(issue => [citationId(issue), issue]));
+    const byPosition = new Map(pending.map(issue => [issue.page + '/' + issue.item, issue]));
     const draft = globalThis.structuredClone(state.citationDraft);
+    const candidates = new Map();
     for (const change of changes) {
-        const { page, item, text, path, quote } = change || {};
-        if (!Number.isInteger(page) || !Number.isInteger(item) || typeof text !== 'string'
-            || typeof path !== 'string' || typeof quote !== 'string' || Object.keys(change).some(field => !citationFields.has(field))) throw invalid();
-        const key = page + '/' + item;
-        const value = draft.plan.pages[page - 1]?.values[item - 1];
-        if (pending.get(key) !== text || value?.text !== text) throw invalid();
-        pending.delete(key);
-        value.source = { path, quote };
-        if (change.correctedText !== undefined) {
-            value.text = change.correctedText;
-            const use = draft.plan.templateUse;
-            if (use?.page === page && use.visibleText === text) use.visibleText = value.text;
-        }
-        if (change.correctedNumber !== undefined) {
-            if (!value.chart) throw invalid();
-            value.chart.number = change.correctedNumber;
-        }
+        if (!change || typeof change !== 'object' || Object.keys(change).some(field => !citationFields.has(field))) continue;
+        const { id, page, item, text, path, quote, correctedText, correctedNumber } = change;
+        const issue = id === undefined
+            ? (Number.isInteger(page) && Number.isInteger(item) && byPosition.get(page + '/' + item))
+            : byId.get(id);
+        if (!issue || (id === undefined || text !== undefined) && issue.text !== text
+            || page !== undefined && page !== issue.page || item !== undefined && item !== issue.item) continue;
+        const value = draft.plan.pages[issue.page - 1]?.values[issue.item - 1];
+        if (value?.text !== issue.text || typeof path !== 'string' || path.length > 140 || typeof quote !== 'string' || quote.length > 350
+            || correctedText !== undefined && (typeof correctedText !== 'string' || !correctedText.trim() || correctedText.length > 120 || /[\u0000-\u001f\u007f\ud800-\udfff]/u.test(correctedText))
+            || correctedNumber !== undefined && (!value.chart || typeof correctedNumber !== 'string' || correctedNumber.length > 48 || !/^[+-]?\d+(?:\.\d+)?$/.test(correctedNumber))) continue;
+        if (value.chart && !containsValue(correctedText ?? value.text, correctedNumber ?? value.chart.number)) continue;
+        const key = citationId(issue);
+        candidates.set(key, candidates.has(key) ? null : { issue, value, change });
     }
-    return draft;
+    const edits = [...candidates.values()].filter(Boolean);
+    if (!edits.length) throw invalid();
+    for (const { issue, value, change: { path, quote, correctedText, correctedNumber } } of edits) {
+        value.source = { path, quote };
+        if (correctedText !== undefined) {
+            value.text = correctedText;
+            const use = draft.plan.templateUse;
+            if (use?.page === issue.page && use.visibleText === issue.text) use.visibleText = value.text;
+        }
+        if (correctedNumber !== undefined) value.chart.number = correctedNumber;
+    }
+    return { draft, edits: edits.map(({ issue }) => issue), ignored: changes.length - edits.length };
 }
 
 module.exports = { compact, containsValue, locateCitation, verifiedCorrection, originalLine, extendCitation, patchCitationDraft,
-    pauseCitationReview, draftWithCitationPlaceholders, CITATION_REVIEW_REQUIRED };
+    pauseCitationReview, canUseCitationDraft, draftWithCitationPlaceholders, citationId, CITATION_REVIEW_REQUIRED };

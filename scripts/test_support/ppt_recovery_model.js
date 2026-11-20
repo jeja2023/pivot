@@ -83,7 +83,9 @@ function master(messages, finish, citations = false, automatic = false) {
     if (citations && firstPage) firstPage.text = firstPage.text.replace('</g></svg>',
         '<text x="128" y="375" font-family="Noto Sans CJK SC" font-size="32" fill="#17324D">' + budget + '</text></g></svg>');
     const secondPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_02.svg'));
-    if (secondPage) secondPage.text = fixture.slide({ ...fixture.pages[1], fact: '全年核定成本90.25万元' });
+    // SVG 的同一个 text 对象内有完整数据，实际导出会拆开独立坐标的 tspan。
+    if (secondPage) secondPage.text = fixture.slide(fixture.pages[1]).replace(fixture.pages[1].fact,
+        '<tspan>全年核定成本</tspan><tspan x="280" y="362">80.25万元</tspan>');
     return next;
 }
 

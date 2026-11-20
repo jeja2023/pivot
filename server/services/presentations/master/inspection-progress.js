@@ -49,7 +49,7 @@ function createInspectionProgress(messages, phaseFrom = 0) {
         let foundNew = false;
         for (const [index, observation] of observations.entries()) {
             const action = actions[index], result = observation?.result;
-            if (!isInspection(action) || action.action !== observation?.action || failedObservation(observation) || !result || result.archived
+            if (!isInspection(action) || action.action !== observation?.action || failedObservation(observation) || !result || result.archived || result.unavailable
                 || result.exitCode !== undefined && result.exitCode !== 0) continue;
             let key, end = 1;
             if (action.action === 'read_runtime') {

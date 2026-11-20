@@ -389,20 +389,21 @@ async function resume(user, id, input = {}) {
     delete state.inspectionRepairPending;
     delete state.inspectionDiagnostic;
     // 旧检查点可能只保存了转发超时或带超时原因的熔断错误。
-    if (['PPT_MASTER_MODEL_TIMEOUT', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
+    if (['PPT_MASTER_MODEL_TIMEOUT', 'PPT_MASTER_MODEL_CONNECTION', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
         || row.error_code === 'AI_ENDPOINT_CIRCUIT_OPEN' && /timeout of \d+ms exceeded/i.test(row.error_message || '')) {
         state.focusModelHistory = true;
     }
     if (state.messages) {
         const recoveryCode = paused && row.error_code === 'PPT_MASTER_PHASE_LIMIT' ? CITATION_REVIEW_REQUIRED : row.error_code;
-        const repair = input.pages === undefined ? reviewRecoveryGuidance(state, recoveryCode, row.error_message) : '';
+        const repair = input.pages === undefined && !(hadCitationDraft && state.citationDraft)
+            ? reviewRecoveryGuidance(state, recoveryCode, row.error_message) : '';
         let workspaceCheck = '上一轮动作可能已经部分执行，请先用 list/read 核对相关任务文件，再决定下一步。';
         if (stalled) workspaceCheck = '从已保存的动作回执推进当前阶段。如某项文件状态仍不明确，先定向核对。';
         if (input.pages !== undefined) {
             workspaceCheck = '按本次选页范围修复源页。整稿复检、定稿和导出由宿主执行。';
         } else if (hadCitationDraft) {
             workspaceCheck = state.citationDraft
-                ? '沿用宿主保存的完整清单，优先根据待核对项、已读原文和用户补充提交 repairCitations。只在缺少具体证据时定向回读。'
+                ? '沿用已保存的完整清单。按当前待核对条目的 id 和原文提交 repairCitations。只在缺少具体证据时定向回读。'
                 : '以此前保存的清单为基础，按用户明确的修改要求重提完整清单。只在缺少具体证据时定向回读。';
         }
         state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。' + workspaceCheck

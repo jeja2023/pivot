@@ -103,6 +103,14 @@ test('256K 默认完整制作直接生成初稿，分页读取图片并核验真
     expect(task.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, checklistDigest: expect.any(String) });
     expect(task.milestones.firstApproval).toBeUndefined();
     expect(task.milestones.firstPlan.steps).toBeLessThan(task.milestones.firstPageWrite.steps);
+    const orderedActions = task.usageDiagnostics.flatMap(turn => turn.actions || []);
+    const firstPageCheck = orderedActions.findIndex(action => action.tool === 'check_svg' && action.path === 'svg_output/slide_01.svg');
+    const projectValidation = orderedActions.findIndex(action => action.tool === 'project' && action.subcommand === 'validate' && !action.failed);
+    expect(projectValidation).toBeGreaterThan(-1);
+    expect(projectValidation).toBeLessThan(orderedActions.findIndex(action => action.action === 'write' && action.path === 'svg_output/slide_01.svg'));
+    expect(firstPageCheck).toBeGreaterThan(-1);
+    expect(orderedActions[firstPageCheck].failed).toBeUndefined();
+    expect(firstPageCheck).toBeLessThan(orderedActions.findIndex(action => action.action === 'write' && action.path === 'svg_output/slide_02.svg'));
     expect(task.usageDiagnostics.flatMap(turn => turn.actions || [])).toContainEqual(expect.objectContaining({
         action: 'read_runtime', path: 'references/executor-base.md', nextOffset: 1200
     }));

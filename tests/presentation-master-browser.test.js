@@ -492,8 +492,12 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
                 { ...prior, call: 2, step: 2, outcome: 'model_failed', errorCode: 'PPT_MASTER_MODEL_TIMEOUT',
                     startedAt, durationMs: 119900, inputTokens: null, outputTokens: null },
                 { ...prior, call: 3, step: 2, startedAt, durationMs: 59950, outcome: 'citation_placeholder', errorCode: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' },
-                { ...prior, call: 4, step: 3, startedAt, durationMs: null },
-                { ...prior, call: 5, step: 4, durationMs: 0, outputTokens: 0 }
+                { ...prior, call: 4, step: 3, startedAt, durationMs: null, outcome: 'tool_failed', actions: [
+                    { action: 'read', path: 'validation/text_calibration.json', unavailable: true },
+                    { action: 'run', tool: 'project', subcommand: 'validate', failed: true, exitCode: 1, projectIssues: ['lock'] }
+                ] },
+                { ...prior, call: 5, step: 4, durationMs: 0, outputTokens: 0, outcome: 'model_failed',
+                    errorCode: 'PPT_MASTER_MODEL_CONNECTION', modelFailureKind: 'connection_reset' }
             ]
         };
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
@@ -514,7 +518,12 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
             const placeholder = dialog.getByRole('listitem').filter({ hasText: '第 3 次模型调用' });
             await expect(placeholder).toContainText('用待核对占位文字继续制作');
             await expect(placeholder).toContainText('压缩 0 条历史写入');
-            await expect(dialog.getByRole('listitem').filter({ hasText: '第 5 次模型调用' })).toContainText('输入 10，输出 0');
+            const project = dialog.getByRole('listitem').filter({ hasText: '第 4 次模型调用' });
+            await expect(project).toContainText('记录尚未生成');
+            await expect(project).toContainText('项目校验未通过。请核对执行锁。');
+            const reset = dialog.getByRole('listitem').filter({ hasText: '第 5 次模型调用' });
+            await expect(reset).toContainText('输入 10，输出 0');
+            await expect(reset).toContainText('模型连接提前关闭，未收到完整回复');
             const box = await dialog.boundingBox();
             assert(box && box.x >= 0 && box.x + box.width <= viewport.width && box.y >= 0 && box.y + box.height <= viewport.height);
             assert(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1), '明细弹窗不应横向溢出');

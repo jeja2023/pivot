@@ -1,7 +1,7 @@
 'use strict';
 
 const { error } = require('./runtime');
-const { exportReview, normalizeStage, repairActionAllowed } = require('./review-plan');
+const { exportReview, normalizeStage, normalizeCitationPatch, repairActionAllowed } = require('./review-plan');
 const { imageCoverage, selectImagePage } = require('./model-input');
 const { getSupplement } = require('./user-supplements');
 const { patchCitationDraft } = require('./citation-repair');
@@ -12,6 +12,30 @@ const { normalizeRuntimeReads } = require('./runtime-references');
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
+const actionFields = {
+    read: ['path', 'offset', 'length'], read_runtime: ['path', 'offset', 'length'],
+    read_history: ['archive', 'index', 'offset', 'length'], read_images: ['offset', 'length'],
+    write: ['path', 'text'], run: ['tool', 'args'], list: [],
+    copy: ['path', 'source'], copy_template: ['path', 'source'], validate_template: ['path', 'kind']
+};
+const benignMetadata = new Set(['message', 'description', 'reason']);
+
+function normalizeAction(action) {
+    if (!action || typeof action !== 'object' || !ACTIONS.has(action.action)) return action;
+    if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
+    const normalized = { ...action };
+    for (const field of benignMetadata) {
+        if (typeof normalized[field] === 'string' && normalized[field].length <= 500) delete normalized[field];
+    }
+    if (normalized.action === 'write') {
+        if (typeof normalized.content === 'string' && (normalized.text === undefined || normalized.text === normalized.content)) {
+            normalized.text = normalized.content;
+            delete normalized.content;
+        }
+        if (normalized.offset === 0) delete normalized.offset;
+    }
+    return normalized;
+}
 const presentationPath = value => typeof value === 'string' && value.length <= 300 && !/[:\\\u0000-\u001f]/.test(value)
     && value.split('/').every(part => part && !part.startsWith('.'));
 
@@ -25,9 +49,13 @@ function parsedOutput(output) {
     throw error('模型未返回完整的制作操作，请重试或切换模型。', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 422);
 }
 
-function validateAction(action, state) {
+function validateAction(action, state, index) {
     if (!action || typeof action !== 'object' || !ACTIONS.has(action.action)) throw invalid('模型请求了未登记的制作动作。');
-    if (Object.keys(action).some(key => !allowed.has(key))) throw invalid('制作动作含不支持的参数。');
+    if (Object.keys(action).some(key => !allowed.has(key)) || action.action === 'write' && action.offset !== undefined) {
+        const fields = ['action', ...actionFields[action.action]];
+        throw Object.assign(invalid('同批第 ' + (index + 1) + ' 项 ' + action.action + ' 含不支持的参数。请仅提交 ' + fields.join('、') + '。'),
+            { correctionKind: 'action_fields', actionIndex: index + 1, actionType: action.action });
+    }
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
     if (!state.review) return;
     if (state.pageRepair && !repairActionAllowed(state, action)) {
@@ -78,9 +106,11 @@ function validateAction(action, state) {
 
 async function validateTurn(output, state, verifySource) {
     let turn = parsedOutput(output);
+    let citationPatch;
     if (Object.hasOwn(turn, 'repairCitations')) {
         if (turn.actions || turn.complete || turn.requestInput) throw invalid('引用修正不能与操作、询问或交付一并提交。');
-        turn = { requestInput: patchCitationDraft(state, turn.repairCitations) };
+        citationPatch = patchCitationDraft(state, turn.repairCitations);
+        turn = { requestInput: citationPatch.draft, ...(citationPatch.ignored ? { citationPatchIgnored: citationPatch.ignored } : {}) };
     }
     if (state.citationFacts?.length && (turn.complete || Array.isArray(turn.actions) && turn.actions.some(action => action?.action === 'run' && action.tool === 'export'))) {
         throw invalid('尚有待核对的引文，请先修正并提交最终清单确认，再执行导出及交付。');
@@ -89,10 +119,10 @@ async function validateTurn(output, state, verifySource) {
     if (choices !== 1) throw invalid('模型须明确选择操作、询问或最终交付，不能混合执行。');
     if (turn.actions) {
         if (!Array.isArray(turn.actions) || turn.actions.length > 6) throw invalid('单轮制作操作超过上限。');
-        if (state.review) turn = { ...turn, actions: normalizeRuntimeReads(turn.actions, state) };
+        if (state.review) turn = { ...turn, actions: normalizeRuntimeReads(turn.actions.map(normalizeAction), state) };
         if (turn.actions.filter(action => action?.action === 'read_images').length > 1) throw invalid('每轮只请求一批图片。');
         for (const [index, action] of turn.actions.entries()) {
-            validateAction(action, state);
+            validateAction(action, state, index);
             if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0], turn.actions.slice(0, index));
         }
     }
@@ -111,7 +141,8 @@ async function validateTurn(output, state, verifySource) {
             if (['design', 'template'].includes(turn.requestInput.stage) && coverage.read < coverage.total) {
                 throw invalid(`尚有 ${coverage.total - coverage.read} 张图片未读取。请先用 read_images 从 offset=${coverage.nextOffset} 继续。`);
             }
-            const compiled = await normalizeStage(turn.requestInput, state, verifySource);
+            const compiled = citationPatch ? await normalizeCitationPatch(citationPatch, state, verifySource)
+                : await normalizeStage(turn.requestInput, state, verifySource);
             turn.requestInput = { kind, question: question.trim(), context: compiled.plan.summary, ...compiled };
         }
     }

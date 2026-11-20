@@ -13,6 +13,7 @@ const { phaseMessages } = require('./phase-context');
 const { ensureModelQuota } = require('../../model-daily-quota');
 const { getBeijingTimestamp } = require('../../../time');
 const { READ_PAGE_CHARS, HISTORY_PAGE_CHARS, recordTurnDiagnostic } = require('./observations');
+const { citationId } = require('./citation-repair');
 
 function hostGuidance(state) {
     const calibratedRoles = state.engine?.textCalibrationRoles === 1;
@@ -39,13 +40,20 @@ function modelFailure(error, timeoutMs) {
     if (!error.response && error.code === 'INSUFFICIENT_QUOTA') return runtime.error(error.message, 'PPT_MASTER_QUOTA_EXCEEDED', 429);
     if (status === 402 || diagnosis.code === 'INSUFFICIENT_QUOTA') return runtime.error('模型服务额度不足，请核对供应商用量和余额后从检查点继续。', 'PPT_MASTER_MODEL_PROVIDER_QUOTA', 429);
     if (status === 429) return runtime.error('模型服务暂时限流，请稍后从检查点继续。', 'PPT_MASTER_MODEL_RATE_LIMIT', 429);
-    if (status === 504) return runtime.error('上游模型网关返回 HTTP 504。检查点已保留，请检查模型服务或切换端点后继续。', 'PPT_MASTER_MODEL_TIMEOUT', 504);
+    if (status === 504) return Object.assign(runtime.error('上游模型网关返回 HTTP 504。检查点已保留。', 'PPT_MASTER_MODEL_TIMEOUT', 504),
+        { modelFailureKind: 'upstream_timeout' });
     if (['ETIMEDOUT', 'ECONNABORTED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT'].includes(error.code)) {
-        return runtime.error(`模型请求超时，本轮请求时限为 ${Math.ceil(timeoutMs / 1000)} 秒。检查点已保留，继续时会优先整理旧工具结果。`, 'PPT_MASTER_MODEL_TIMEOUT', 504);
+        return Object.assign(runtime.error(`模型请求超时，Pivot 本轮请求时限为 ${Math.ceil(timeoutMs / 1000)} 秒。检查点已保留。`,
+            'PPT_MASTER_MODEL_TIMEOUT', 504), { modelFailureKind: 'local_timeout' });
     }
     if (status === 401 || status === 403) return runtime.error('模型服务拒绝授权，请在模型管理中核对密钥与权限后继续。', 'PPT_MASTER_MODEL_AUTH', status);
-    if (status >= 500 || diagnosis.code === 'UPSTREAM_UNAVAILABLE' || ['ECONNRESET', 'EPIPE', 'EAI_AGAIN'].includes(error.code)) {
-        return runtime.error('模型服务连接中断或暂不可用，请检查模型服务后从检查点继续。', 'PPT_MASTER_MODEL_CONNECTION', 502);
+    if (['ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(error.code)) {
+        return Object.assign(runtime.error('模型服务连接提前关闭，Pivot 未收到完整回复。检查点已保留。', 'PPT_MASTER_MODEL_CONNECTION', 502),
+            { modelFailureKind: 'connection_reset' });
+    }
+    if (status >= 500 || diagnosis.code === 'UPSTREAM_UNAVAILABLE' || ['EAI_AGAIN', 'ECONNREFUSED', 'ENOTFOUND'].includes(error.code)) {
+        return Object.assign(runtime.error('模型服务或上游网关暂不可用，检查点已保留。', 'PPT_MASTER_MODEL_CONNECTION', 502),
+            status >= 500 ? { modelFailureKind: 'gateway_error' } : {});
     }
     if (status >= 400) return runtime.error(`模型服务拒绝请求（HTTP ${status}），请核对模型配置后从检查点继续。`, 'PPT_MASTER_MODEL_REQUEST_REJECTED', 422);
     return error;
@@ -56,12 +64,22 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
     const makeView = async () => {
         const original = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
         const compacted = compactMessages(original);
-        const { messages } = phaseMessages(compacted.messages, state);
+        const { messages: prepared } = phaseMessages(compacted.messages, state);
+        // 清单阶段使用宿主协议、所选模板和材料。绘制指引在制稿阶段恢复。
+        const planning = state.request.draftFirst && state.managedProject && state.review?.approvals && !state.review.approvals.design;
+        const messages = (planning || citationIssues?.length) ? prepared.filter(message => !(message.role === 'user'
+            && typeof message.content === 'string' && (
+                /^\{"runtimeDocument":"(?:SKILL\.md|workflows\/[^"]+)",/u.test(message.content)
+                || message.content.startsWith('宿主中断后从已保存检查点继续。') && message.content.includes('repairCitations')
+            ))) : prepared;
         if (messages[0]?.role === 'system' && typeof messages[0].content === 'string') {
             messages[0] = { ...messages[0], content: [messages[0].content, hostGuidance(state), progressGuidance].filter(Boolean).join('\n') };
         }
         if (citationIssues?.length) {
-            messages.push({ role: 'user', content: JSON.stringify({ citationRepairEvidence: citationIssues }) });
+            messages.push({ role: 'user', content: JSON.stringify({
+                citationRepairEvidence: citationIssues.map(issue => ({ ...issue, ...(!issue.missing ? { id: citationId(issue) } : {}) })),
+                ...(state.citationDraft?.plan ? { savedCitationPlan: state.citationDraft.plan } : {})
+            }) });
         }
         return { original, messages, compactedWrites: compacted.compactedWrites, inputEstimate: estimateMessagesTokens(messages) };
     };
@@ -109,9 +127,9 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
             const failure = modelFailure(error, AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS);
             if (timing) {
                 usageRecord(state, plan, usageRef, undefined, view.compactedWrites, estimateTokens, { ...timing, failed: true });
-                recordTurnDiagnostic(state, { outcome: 'model_failed', errorCode: failure.code });
+                recordTurnDiagnostic(state, { outcome: 'model_failed', errorCode: failure.code, modelFailureKind: failure.modelFailureKind });
             }
-            if (failure.code === 'PPT_MASTER_MODEL_TIMEOUT') state.focusModelHistory = true;
+            if (failure.code === 'PPT_MASTER_MODEL_TIMEOUT' || failure.code === 'PPT_MASTER_MODEL_CONNECTION') state.focusModelHistory = true;
             throw failure;
         }
         try {

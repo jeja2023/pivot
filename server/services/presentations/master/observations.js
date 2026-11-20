@@ -7,6 +7,8 @@ const BASE_TOOL_IDS = ['project', 'check_svg', 'finalize', 'export', 'import_nat
     'apply_template', 'split_notes', 'preset_shape', 'chart_recall', 'visualization_recall', 'chart_calculator', 'workspace',
     'text_measure', 'analyze_images'];
 const DIAGNOSTIC_TOOL_IDS = new Set([...BASE_TOOL_IDS, 'icon_sync']);
+// 单轮六个模型动作，宿主可插入项目校验和首张页面校验。
+const MAX_RECORDED_ACTIONS = 8;
 
 function observationLocation(action, observation) {
     const location = { action: action?.action || observation?.action };
@@ -46,7 +48,7 @@ function actionSummary(messages) {
         let turn, observations;
         try { turn = JSON.parse(messages[index].content); observations = JSON.parse(messages[index + 1].content); } catch (_) { continue; }
         if (!Array.isArray(turn?.actions) || !Array.isArray(observations)) continue;
-        lastActions = observations.slice(0, 6).map((observation, position) => {
+        lastActions = observations.slice(0, MAX_RECORDED_ACTIONS).map((observation, position) => {
             const action = turn.actions[position], receipt = confirmedWrite(action, observation);
             // 较早版本的归档已校验摘要后才移除写入正文，但未保存单独的摘要字段。
             const legacyWrite = action?.action === 'write' && action.savedContent?.startsWith?.('已成功写入；') && observation?.action === 'write'
@@ -70,6 +72,22 @@ function actionSummary(messages) {
 const SAFE_TOOL_SUBCOMMANDS = new Set(['init', 'import-sources', 'validate', 'info', 'page-context', 'page-context-report',
     'scaffold-spec', 'scaffold-lock', 'calibrate', 'inspect', 'pack', 'unpack']);
 const SAFE_ERROR_CODE = /^PPT_(?:MASTER|SERVICE)_[A-Z0-9_]{1,48}$/;
+const PAGE_CHECK_KINDS = new Set(['source_path', 'first_page_pending', 'source_xml', 'source_content', 'first_page_layout']);
+const SAFE_PAGE_REASONS = new Set(['页面对象区域重叠', '页面模块缺少边界声明', '重复使用了规范未声明的字号',
+    '渐变路径的可见宽度或高度为零', '文字超出页面模块边界', 'SVG 格式无效', '页面未通过 SVG 校验']);
+const PROJECT_ISSUES = new Set(['design', 'lock', 'communication', 'layout', 'other']);
+const ACTION_TYPES = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
+
+function pageDiagnostics(observation) {
+    if (!observation) return {};
+    const { pageCheck, svgCheckPages } = observation;
+    const safe = Array.isArray(svgCheckPages) ? svgCheckPages.filter(issue => Number.isSafeInteger(issue?.page) && issue.page > 0)
+        .slice(0, 40).map(({ page, reasons }) => ({ page, reasons: Array.isArray(reasons) ? reasons.filter(reason => SAFE_PAGE_REASONS.has(reason)) : [] })) : [];
+    return {
+        ...(PAGE_CHECK_KINDS.has(pageCheck?.kind) ? { pageCheck: { kind: pageCheck.kind, page: Number.isSafeInteger(pageCheck.page) ? pageCheck.page : null } } : {}),
+        ...(safe.length ? { svgCheckPages: safe } : {})
+    };
+}
 
 function safeActionTarget(action, observation) {
     const raw = [observation?.result?.path, action?.path, action?.source].find(value => typeof value === 'string' && value.length <= 240);
@@ -112,6 +130,9 @@ function summarizeTurnAction(action, observation) {
         : Number.isSafeInteger(observation?.result?.count) ? observation.result.count : undefined;
     return {
         action: type,
+        ...pageDiagnostics(observation),
+        ...(Array.isArray(observation?.projectIssues) ? { projectIssues: observation.projectIssues.filter(kind => PROJECT_ISSUES.has(kind)) } : {}),
+        ...(type === 'read' && observation?.result?.unavailable === true ? { unavailable: true } : {}),
         ...(tool ? { tool } : {}),
         ...(subcommand ? { subcommand } : {}),
         ...(path ? { path } : {}),
@@ -139,9 +160,9 @@ function summarizeExecutedTurn(turn, observations, extra = {}) {
         return { outcome: extra.outcome || 'completed', deliveryKind, ...(path ? { path } : {}), ...extra };
     }
     if (Array.isArray(turn?.actions)) {
-        const executed = Array.isArray(observations) ? observations.filter(item => item?.action !== 'pending').slice(0, 6) : [];
+        const executed = Array.isArray(observations) ? observations.filter(item => item?.action !== 'pending').slice(0, MAX_RECORDED_ACTIONS) : [];
         const actions = executed.map((observation, index) => summarizeTurnAction(turn.actions[index], observation));
-        const skippedActions = Math.max(0, Math.min(6, turn.actions.length) - actions.length);
+        const skippedActions = Math.max(0, Math.min(MAX_RECORDED_ACTIONS, turn.actions.length) - actions.length);
         const hasFailed = actions.some(item => item.failed);
         const hasConfirmed = actions.some(item => item.confirmed);
         const failedItem = actions.find(item => item.failed);
@@ -166,11 +187,22 @@ function sanitizeTurnSummary(summary) {
     if (Number.isSafeInteger(summary.planPages) && summary.planPages > 0) out.planPages = summary.planPages;
     if (['pptx', 'template'].includes(summary.deliveryKind)) out.deliveryKind = summary.deliveryKind;
     if (typeof summary.path === 'string' && summary.path.length <= 240) out.path = summary.path;
-    if (Array.isArray(summary.actions) && summary.actions.length) out.actions = summary.actions.slice(0, 6);
+    if (Array.isArray(summary.actions) && summary.actions.length) out.actions = summary.actions.slice(0, MAX_RECORDED_ACTIONS);
+    const hostChecks = pageDiagnostics({ svgCheckPages: summary.hostSvgCheckPages });
+    if (hostChecks.svgCheckPages) out.hostSvgCheckPages = hostChecks.svgCheckPages;
     if (Number.isSafeInteger(summary.skippedActions) && summary.skippedActions > 0) out.skippedActions = summary.skippedActions;
     if (SAFE_ERROR_CODE.test(summary.errorCode || '')) out.errorCode = summary.errorCode;
     if (Number.isInteger(summary.exitCode) && summary.exitCode !== 0) out.exitCode = summary.exitCode;
     if (Number.isSafeInteger(summary.citationCount) && summary.citationCount > 0) out.citationCount = summary.citationCount;
+    if (Number.isSafeInteger(summary.citationPatchIgnored) && summary.citationPatchIgnored > 0) out.citationPatchIgnored = Math.min(120, summary.citationPatchIgnored);
+    if (['citation_patch', 'plan_page_count', 'action_fields'].includes(summary.correctionKind)) out.correctionKind = summary.correctionKind;
+    if (ACTION_TYPES.has(summary.actionType) && Number.isInteger(summary.actionIndex) && summary.actionIndex >= 1 && summary.actionIndex <= 6) {
+        out.actionIndex = summary.actionIndex;
+        out.actionType = summary.actionType;
+    }
+    if (['connection_reset', 'gateway_error', 'local_timeout', 'upstream_timeout'].includes(summary.modelFailureKind)) {
+        out.modelFailureKind = summary.modelFailureKind;
+    }
     if (typeof summary.citationLocation === 'string' && /^第\s*\d+\s*页/.test(summary.citationLocation)) out.citationLocation = summary.citationLocation.slice(0, 80);
     if (Array.isArray(summary.failedPages) && summary.failedPages.length) out.failedPages = summary.failedPages.filter(Number.isSafeInteger).slice(0, 40);
     if (Array.isArray(summary.repairPages) && summary.repairPages.length) out.repairPages = summary.repairPages.filter(Number.isSafeInteger).slice(0, 40);

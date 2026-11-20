@@ -79,10 +79,23 @@ async function normalizeStage(input, state, verifySource) {
     if (!Array.isArray(pages) || !pages.length || pages.length > 100) throw invalid('请逐页提交有顺序的清单，每页都要填写页面标题和关键数据数组。');
     const expected = state.request.pageCount;
     if (fixedPageCount(state.request) && pages.length !== expected) {
-        throw invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`);
+        throw Object.assign(invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`),
+            { correctionKind: 'plan_page_count' });
     }
     const normalized = [], sources = new Map(), failures = [], seen = new Set(), verified = new Set();
     const requiredFacts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
+    const approved = new Set(state.review.approvals.design?.plan?.pages?.flatMap(page => page.values.map(citationKey)));
+    if (state.request.draftFirst && state.citationDraft?.plan) {
+        const pending = new Set((state.citationRepair || []).map(({ page, item }) => page + '/' + item));
+        for (const [index, page] of state.citationDraft.plan.pages.entries()) {
+            for (const [position, value] of page.values.entries()) {
+                if (!value.source || pending.has((index + 1) + '/' + (position + 1))) continue;
+                const key = citationKey(value);
+                requiredFacts.set(key, { ...value, key, page: index + 1, item: position + 1, title: page.title, path: value.source.path });
+                approved.add(key);
+            }
+        }
+    }
     const availablePaths = new Set(['instruction', ...(state.request.inputFiles || []).filter(file => file.kind === 'text' && sourcePath.test(file.path)).map(file => file.path),
         ...(state.userSupplements || []).map(entry => entry.path)]);
     const readSource = async path => {
@@ -172,7 +185,6 @@ async function normalizeStage(input, state, verifySource) {
         }
         normalized.push({ title, values });
     }
-    const approved = new Set(state.review.approvals.design?.plan?.pages?.flatMap(page => page.values.map(citationKey)));
     for (const [key, fact] of requiredFacts) {
         if (fact.allowOmit || seen.has(key)) continue;
         const matchingPages = normalized.filter(page => page.title === fact.title);
@@ -201,6 +213,40 @@ async function normalizeStage(input, state, verifySource) {
         });
     }
     return { stage, plan };
+}
+
+async function normalizeCitationPatch(patch, state, verifySource) {
+    const cached = new Map();
+    const read = path => {
+        if (!cached.has(path)) cached.set(path, verifySource(path));
+        return cached.get(path);
+    };
+    try {
+        return await normalizeStage(patch.draft, state, read);
+    } catch (failure) {
+        if (failure.citationIssues) {
+            const unresolved = new Set(failure.citationIssues.map(issue => issue.page + '/' + issue.item));
+            const before = state.citationDraft.plan, after = failure.citationDraft.plan;
+            let reverted = false;
+            for (const { page, item, text } of patch.edits) {
+                if (!unresolved.has(page + '/' + item)) continue;
+                const prior = before.pages[page - 1]?.values[item - 1];
+                const replacement = after.pages[page - 1]?.values[item - 1];
+                if (!prior || !replacement || prior.text === replacement.text && prior.chart?.number === replacement.chart?.number) continue;
+                const use = after.templateUse;
+                if (use?.page === page && use.visibleText === replacement.text) use.visibleText = text;
+                after.pages[page - 1].values[item - 1] = prior;
+                reverted = true;
+            }
+            // 重新核对撤回的事实修正，同时保留同批已通过的引文。
+            if (reverted) {
+                try { return await normalizeStage(failure.citationDraft, state, read); }
+                catch (rechecked) { failure = rechecked; }
+            }
+        }
+        if (patch.ignored) failure.citationPatchIgnored = patch.ignored;
+        throw failure;
+    }
 }
 
 function reopenReview(state, stage = confirmationStage(state.request)) {
@@ -360,4 +406,4 @@ function resetCitationRepair(state, { allowRevision = false } = {}) {
     }
 }
 
-module.exports = { initializeReview, normalizeStage, applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };
+module.exports = { initializeReview, normalizeStage, normalizeCitationPatch, applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };

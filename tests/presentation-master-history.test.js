@@ -150,8 +150,11 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
         assert.match(item.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
         assert.ok(Number.isSafeInteger(item.durationMs) && item.durationMs >= 0);
     }
-    for (const [error, code] of [[upstream(), 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT'],
-        [Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED' }), 'PPT_MASTER_MODEL_TIMEOUT'],
+    for (const [error, code, kind] of [[upstream(), 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT'],
+        [Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED' }), 'PPT_MASTER_MODEL_TIMEOUT', 'local_timeout'],
+        [Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }), 'PPT_MASTER_MODEL_CONNECTION', 'connection_reset'],
+        [Object.assign(new Error('Request failed'), { response: { status: 504 } }), 'PPT_MASTER_MODEL_TIMEOUT', 'upstream_timeout'],
+        [Object.assign(new Error('Request failed'), { response: { status: 502 } }), 'PPT_MASTER_MODEL_CONNECTION', 'gateway_error'],
         [Object.assign(new Error('Request failed'), { response: { status: 429 } }), 'PPT_MASTER_MODEL_RATE_LIMIT']]) {
         const checkpoint = referenceCheckpoint(1, 1000);
         let calls = 0;
@@ -168,6 +171,8 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
         const [attempt] = attempts;
         assert.equal(attempt.outcome, 'model_failed');
         assert.equal(attempt.errorCode, code);
+        assert.equal(attempt.modelFailureKind, kind);
+        if (kind) assert.equal(checkpoint.focusModelHistory, true);
         assert.match(attempt.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
         assert.ok(Number.isSafeInteger(attempt.durationMs) && attempt.durationMs >= 0);
         assert.equal(attempt.inputTokens, null);

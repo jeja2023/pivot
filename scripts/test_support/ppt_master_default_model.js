@@ -148,7 +148,7 @@ function turn(request, messages, assistant) {
         { action: 'read', path: 'references/executor-base.md', length: 1200 },
         { action: 'write', path: project + '/design_spec.md', text: spec(roster, templateUse) },
         { action: 'write', path: project + '/spec_lock.md', text: lock() },
-        { action: 'run', tool: 'project', args: ['validate', project] }
+        ...(!managed ? [{ action: 'run', tool: 'project', args: ['validate', project] }] : [])
     ] };
     if (!didRun('export')) return { actions: [
         ...roster.map((page, index) => ({ action: 'write', path: project + `/svg_output/slide_0${index + 1}.svg`, text: slide(page) })),

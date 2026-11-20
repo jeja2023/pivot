@@ -6,6 +6,7 @@ const { confirmedWrite } = require('./observations');
 // 工具原始输出只留在检查点。进度和修复提示使用固定中文原因及受控源页坐标。
 const categories = [
     [/data-pptx-bounds overlaps/i, '页面对象区域重叠'],
+    [/without explicit data-pptx-bounds/i, '页面模块缺少边界声明'],
     [/typography-size recurrence|undeclared font-size/i, '重复使用了规范未声明的字号'],
     [/zero intrinsic|non-degenerate path/i, '渐变路径的可见宽度或高度为零'],
     [/exceeds .*data-pptx-bounds/i, '文字超出页面模块边界'],
@@ -14,7 +15,7 @@ const categories = [
 
 function checkIssues(result, pageSources) {
     if (!pageSources?.length || !Number.isInteger(result?.exitCode) || result.exitCode === 0) return [];
-    const byFile = new Map(pageSources.map((path, index) => [posix.basename(path), index + 1]));
+    const byFile = new Map(pageSources.flatMap((path, index) => typeof path === 'string' ? [[posix.basename(path), index + 1]] : []));
     const issues = new Map();
     let page = 0;
     for (const line of String(result.stdout || '').split(/\r?\n/)) {

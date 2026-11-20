@@ -255,7 +255,7 @@ test('旧阶段上限与新引文暂停均可在补充原文后续作并保留�
             assert.equal(resumed.workflowProgress, undefined);
             assert.equal(resumed.usedTokens, state.usedTokens);
             assert.deepEqual(resumed.citationDraft, draft);
-            assert.match(resumed.messages.at(-1).content, /沿用宿主保存的完整清单.*repairCitations/);
+            assert.match(resumed.messages.at(-1).content, /沿用已保存的完整清单.*id.*repairCitations/);
         } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
     }
 });
