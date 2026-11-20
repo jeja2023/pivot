@@ -126,6 +126,17 @@ test('Docker image carries required LGPL notice material with runtime dependenci
     assert.match(dockerignore, /^!docs\/licenses\/\*\*$/m);
 });
 
+test('主镜像在非特权用户下能匹配 PPT 预览使用的随包中文字体', () => {
+    const runtime = dockerfile.split('FROM python-base AS runtime-base')[1];
+    assert.match(runtime, /apt-get install -y --no-install-recommends[^\r\n]+\bfontconfig\b/);
+    const copy = runtime.indexOf('COPY --chown=node:node assets ./assets');
+    const register = runtime.indexOf('ln -s /app/assets/fonts/cjk/NotoSansSC-VF.ttf /usr/local/share/fonts/pivot/NotoSansSC-VF.ttf');
+    const cache = runtime.indexOf('fc-cache -f');
+    const user = runtime.indexOf('\nUSER node');
+    assert.ok(copy >= 0 && register > copy && cache > register && user > cache);
+    assert.match(runtime.slice(user), /fc-match -f '%\{file\}' 'Noto Sans SC:lang=zh-cn'\)" = \/usr\/local\/share\/fonts\/pivot\/NotoSansSC-VF\.ttf/);
+});
+
 test('Docker image ships a Chromium runtime for agent.browser instead of silently hiding it', () => {
     assert.match(dockerfile, /chromium/);
     assert.match(dockerfile, /PIVOT_CHROMIUM_PATH=\/usr\/bin\/chromium/);

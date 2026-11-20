@@ -3,10 +3,11 @@
 ## Source of truth
 
 - Status: Active
-- Last refreshed: 2026-11-19
-- Release baseline: v0.7.181（源码；制品以各自构建版本为准）
+- Last refreshed: 2026-11-20
+- Release baseline: v0.7.182（源码；制品以各自构建版本为准）
 - Primary product surfaces: 会话、应用、任务、自动化、知识库、工具库、设置、项目空间、桌面客户端
 - Evidence reviewed:
+  - PPT 模板预览在 Linux 主应用容器中使用已注册的随包中文字体。构建时预建 Fontconfig 缓存，并在实际运行账号下校验字体匹配。[v0.7.182 发布说明](../releases/v0.7.182-PPT模板预览中文字体修复.md)
   - PPT Master 固定上游 v6.10.0。主应用仍以已批准清单约束模板安装、自动修页和正式文件交付。运行包及测试范围见 [v0.7.181 发布说明](../releases/v0.7.181-PPTMaster-v6.10.0升级.md)。
   - 模板库可预览当前版式及 PPT Master 风格示例，操作列居中，版式选择与同栏按钮等高。服务接口缺失与模板不可用分别提示。验收范围见 [v0.7.180 发布说明](../releases/v0.7.180-PPT模板库预览与布局优化.md)。
   - PPT Master 按已确认清单自动修复可定位的失败页，复检并重新导出；引文修复、模板安装、最新导出摘要及未选页保留分别核对。本地测试模型与实际引擎验收范围见 [v0.7.179 发布说明](../releases/v0.7.179-PPT自动修页与交付核验.md)。

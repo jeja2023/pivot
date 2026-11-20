@@ -53,6 +53,10 @@ docker compose up -d --no-build --pull never --force-recreate pivot
 
 ## 更新服务镜像与主应用
 
+### v0.7.182 模板预览中文字体修复
+
+本次修复随 Pivot 主应用镜像部署。模板预览的 PNG 由主应用渲染，字体由主镜像注册。已部署 `ppt-master:6.10.0-pivot0.7.181` 的环境继续使用这份独立镜像。若同时从更早版本升级完整制作引擎，按下节核对主应用和独立服务版本。[v0.7.182 发布说明](../releases/v0.7.182-PPT模板预览中文字体修复.md)
+
 ### v0.7.181 上游 v6.10.0
 
 将 Pivot 主应用与 `ppt-master:6.10.0-pivot0.7.181` 配套更新。先在旧环境处理待续跑任务，保留原服务的 Compose 项目、访问密钥和 `/data` 命名卷。更新后登录查看 `GET /api/apps/presentations/master/info`，确认 `engine.version` 为 `6.10.0`，且 `engine.currentExportReady`、`engine.pageRepairReady` 和 `engine.progressSnapshotsReady` 均为 `true`。[v0.7.181 发布说明](../releases/v0.7.181-PPTMaster-v6.10.0升级.md)

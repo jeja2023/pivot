@@ -99,7 +99,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   && apt-get update && apt-get install -y --no-install-recommends postgresql-client-16 \
   && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep \
+RUN apt-get update && apt-get install -y --no-install-recommends git ripgrep fontconfig \
   && rm -rf /var/lib/apt/lists/*
 
 ARG PIVOT_BUILD_REVISION=
@@ -134,6 +134,10 @@ COPY --chown=node:node docker/capability-workers/terminal-runner/runner.js /runn
 COPY scripts/deploy_ppt_master.py /app/ppt-master-deploy/deploy_ppt_master.py
 COPY scripts/lib/ppt_release_bundle.py scripts/lib/ppt_release_deploy.py /app/ppt-master-deploy/lib/
 COPY --chown=node:node assets ./assets
+# Sharp 渲染 SVG 文字时由 Fontconfig 查找字体。注册已有的开源中文字体并预建缓存，供只读容器使用。
+RUN install -d /usr/local/share/fonts/pivot && \
+  ln -s /app/assets/fonts/cjk/NotoSansSC-VF.ttf /usr/local/share/fonts/pivot/NotoSansSC-VF.ttf && \
+  fc-cache -f
 COPY --chown=node:node docs/licenses ./licenses
 COPY --chown=node:node scripts/download_model.js ./scripts/download_model.js
 COPY --chown=node:node scripts/repair_chat_schema.js ./scripts/repair_chat_schema.js
@@ -164,6 +168,7 @@ RUN npm install --global "npm@${RUNTIME_NPM_VERSION}" --ignore-scripts --no-audi
 
 USER node
 RUN node --version && python3 --version && git --version && rg --version && node --check /runner/runner.js
+RUN test "$(fc-match -f '%{file}' 'Noto Sans SC:lang=zh-cn')" = /usr/local/share/fonts/pivot/NotoSansSC-VF.ttf
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
