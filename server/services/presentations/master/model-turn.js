@@ -1,5 +1,6 @@
 'use strict';
 
+const { performance } = require('node:perf_hooks');
 const runtime = require('./runtime');
 const { callModelJson, recordAgentModelUsage, AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS } = require('../../agent-model');
 const { normalizeChatError } = require('../../chat-errors');
@@ -11,7 +12,7 @@ const { archiveOlderObservations } = require('./history');
 const { phaseMessages } = require('./phase-context');
 const { ensureModelQuota } = require('../../model-daily-quota');
 const { getBeijingTimestamp } = require('../../../time');
-const { READ_PAGE_CHARS, HISTORY_PAGE_CHARS } = require('./observations');
+const { READ_PAGE_CHARS, HISTORY_PAGE_CHARS, recordTurnDiagnostic } = require('./observations');
 
 function hostGuidance(state) {
     const calibratedRoles = state.engine?.textCalibrationRoles === 1;
@@ -80,35 +81,41 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
     } else if (await archive({ force: view.inputEstimate > limits.archiveAt, preserveActive: true })) view = await makeView();
     if (view.inputEstimate > limits.fullOutputInputBudget && await archive({ force: true, recentTurns: 1 })) view = await makeView();
 
-    const remainingTokens = state.request.tokenBudget === 0 ? Infinity : state.request.tokenBudget - state.usedTokens;
     const send = async () => {
         state.modelRequest = { contextWindow: limits.contextWindow, configuredInputLimit: limits.configuredInputLimit,
             inputEstimate: view.inputEstimate, timeoutSeconds: Math.ceil(AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS / 1000) };
+        const remainingTokens = state.request.tokenBudget === 0 ? Infinity : state.request.tokenBudget - state.usedTokens;
         const plan = planRequest(view.messages, original, model, remainingTokens, limits);
         state.modelRequest.outputLimit = plan.maxTokens;
         // 为后续模型请求的指引、确认答复和工具元数据留出容量。
         const readResultBudget = Math.max(1000, Math.floor((limits.fullOutputInputBudget - plan.breakdown.initial) / 2));
         await hooks.ensureCurrent();
-        const turnStartedAt = getBeijingTimestamp();
-        const turnStartMs = Date.now();
         const usageRef = {};
         let output, releaseQuota = () => {};
+        let startedAt, turnStartMs;
+        const finishTiming = () => ({ startedAt, durationMs: Math.round(performance.now() - turnStartMs) });
         try {
             if (!deps.callModel) releaseQuota = await ensureModelQuota(user, model, view.messages, plan.maxTokens, { signal: hooks.signal, inputEstimate: plan.inputEstimate });
+            startedAt = getBeijingTimestamp();
+            turnStartMs = performance.now();
             output = await (deps.callModel || callModelJson)(model, view.messages, { user, signal: hooks.signal, maxTokens: plan.maxTokens,
                 temperature: 0.2, usageRef, quotaManaged: true, enableThinking: false, budget: deps.budget, responseFormat: { type: 'json_object' } });
         } catch (error) {
+            const timing = turnStartMs === undefined ? null : finishTiming();
             releaseQuota();
             hooks.signal?.throwIfAborted();
             const failure = modelFailure(error, AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS);
+            if (timing) {
+                usageRecord(state, plan, usageRef, undefined, view.compactedWrites, estimateTokens, { ...timing, failed: true });
+                recordTurnDiagnostic(state, { outcome: 'model_failed', errorCode: failure.code });
+            }
             if (failure.code === 'PPT_MASTER_MODEL_TIMEOUT') state.focusModelHistory = true;
             throw failure;
         }
-        delete state.focusModelHistory;
-        markImagePageRead(state, view.messages);
-        const durationMs = Math.max(0, Date.now() - turnStartMs);
-        usageRecord(state, plan, usageRef, output, view.compactedWrites, estimateTokens, { startedAt: turnStartedAt, durationMs });
         try {
+            usageRecord(state, plan, usageRef, output, view.compactedWrites, estimateTokens, finishTiming());
+            delete state.focusModelHistory;
+            markImagePageRead(state, view.messages);
             if (!deps.callModel) await recordAgentModelUsage(user, model, view.messages, output, 'ppt_master_engine', state.request.runId || '', {
                 usageRef, budget: deps.budget, estimatedUsage: { inputTokens: plan.inputEstimate, outputTokens: estimateTokens(typeof output === 'string' ? output : JSON.stringify(output)) }
             });

@@ -111,8 +111,22 @@ test('诊断按供应方实际用量累计，缺失用量明确标记估算，�
     assert.equal(state.usedTokens, 930);
     assert.equal(state.usageDiagnostics[1].inputEstimated, true);
     assert.equal(state.usageDiagnostics[1].outputEstimated, true);
-    assert.match(state.usageDiagnostics[1].startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.equal(state.usageDiagnostics[1].startedAt, undefined);
+    assert.equal(state.usageDiagnostics[1].durationMs, undefined);
     assert.doesNotMatch(JSON.stringify(state.usageDiagnostics), /正文/);
+});
+
+test('失败调用只累计供应方已返回的用量，未知值与实际零值分开记录', () => {
+    const state = { steps: 0, usedTokens: 100 }, plan = { inputEstimate: 500 };
+    const timing = { failed: true, startedAt: '2026-05-04 12:00:00', durationMs: 0 };
+    const noEstimate = () => assert.fail('失败调用不应估算输出用量');
+    usageRecord(state, plan, { usage: { input_tokens: 0 } }, undefined, 0, noEstimate, timing);
+    usageRecord(state, plan, { usage: { prompt_tokens: 35, completion_tokens: '' } }, undefined, 0, noEstimate, timing);
+    assert.deepEqual(state.usageDiagnostics.map(({ inputTokens, outputTokens, inputEstimated, outputEstimated, durationMs, cumulativeTokens }) =>
+        [inputTokens, outputTokens, inputEstimated, outputEstimated, durationMs, cumulativeTokens]), [
+        [0, null, false, false, 0, 100], [35, null, false, false, 0, 135]
+    ]);
+    assert.equal(state.usedTokens, 135);
 });
 
 test('重复的固定运行包页面只在模型视图保留一份，原始检查点和不同内容完整保留', () => {

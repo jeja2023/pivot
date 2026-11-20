@@ -240,6 +240,10 @@ test('统一日额度在上游成功后只结算一次并释放预留', async t 
     const { callModelJson, recordAgentModelUsage } = require('../server/services/agent-model');
     const { getRunnableModelForUserAsync } = require('../server/services/models');
     const { getInflightQuota } = require('../server/services/model-daily-quota');
+    const { aiSemaphore } = require('../server/services/concurrency');
+    const originalConcurrency = aiSemaphore.getStatus().max;
+    aiSemaphore.updateMaxConcurrent(4);
+    t.after(() => aiSemaphore.updateMaxConcurrent(originalConcurrency));
     const entered = Promise.withResolvers(), pendingResponse = Promise.withResolvers();
     let calls = 0;
     const url = await mockModel(t, (_, res) => { calls++; entered.resolve(); void pendingResponse.promise.then(() => reply(res, '合成答复')); });
@@ -247,10 +251,10 @@ test('统一日额度在上游成功后只结算一次并释放预留', async t 
     const model = await getRunnableModelForUserAsync(f.modelId, f.user);
     const messages = [{ role: 'user', content: '合成答复' }];
     const usageRef = {};
-    const call = callModelJson(model, messages, { user: f.user, maxTokens: 80, usageRef, timeoutMs: 5000 });
+    const call = callModelJson(model, messages, { user: f.user, maxTokens: 80, usageRef, timeoutMs: 30000 });
     try {
         await Promise.race([entered.promise, call]);
-        await assert.rejects(callModelJson(model, messages, { user: f.user, maxTokens: 80, timeoutMs: 5000 }), { code: 'INSUFFICIENT_QUOTA' });
+        await assert.rejects(callModelJson(model, messages, { user: f.user, maxTokens: 80, timeoutMs: 30000 }), { code: 'INSUFFICIENT_QUOTA' });
         assert.ok(getInflightQuota(f.userId, f.modelId) > 0);
         pendingResponse.resolve();
         await recordAgentModelUsage(f.user, model, messages, await call, 'agent', '', { usageRef });

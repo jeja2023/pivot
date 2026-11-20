@@ -388,6 +388,7 @@
     const OUTCOME_BADGES = { productive: { text: '已写入推进', tone: 'completed' }, progressed: { text: '读取与检查', tone: 'working' },
         input_required: { text: '提交确认', tone: 'input_required' }, completed: { text: '导出交付', tone: 'completed' },
         page_repair: { text: '自动修页', tone: 'input_required' }, retry: { text: '动作修正重试', tone: 'failed' },
+        model_failed: { text: '模型调用失败', tone: 'failed' },
         tool_failed: { text: '工具未通过', tone: 'failed' }, stalled: { text: '重复无进展', tone: 'failed' }, failed: { text: '执行异常', tone: 'failed' } };
 
     const DOC_ICON_PATHS = [['path', { d: 'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z' }], ['polyline', { points: '14 2 14 8 20 8' }], ['line', { x1: '16', y1: '13', x2: '8', y2: '13' }], ['line', { x1: '16', y1: '17', x2: '8', y2: '17' }]];
@@ -475,6 +476,7 @@
 
     function formatTurnError(item) {
         if (!item || typeof item !== 'object') return '';
+        if (item.outcome === 'model_failed') return window.Pivot.moduleApi('apps.presentations.masterUsage').formatModelError(item.errorCode);
         if (item.outcome === 'retry') {
             if (item.errorCode === 'PPT_MASTER_CITATION_REVIEW_REQUIRED') {
                 return `清单引文待核对${item.citationCount ? '（共 ' + item.citationCount + ' 项' + (item.citationLocation ? '，首项：' + item.citationLocation : '') + '）' : ''}，宿主已自动发起查证重试。`;
@@ -693,23 +695,10 @@
         }
         return modal;
     }
-    function formatTurnDuration(ms) {
-        const v = Number(ms);
-        if (!Number.isFinite(v) || v < 0) return '';
-        if (v < 1000) return `${Math.round(v)} 毫秒`;
-        const s = v / 1000;
-        if (s < 60) return `${s.toFixed(1).replace(/\.0$/, '')} 秒`;
-        const m = Math.floor(s / 60), r = Math.round(s % 60);
-        return r ? `${m} 分 ${r} 秒` : `${m} 分钟`;
-    }
-    function formatTurnTime(val) {
-        if (!val) return '';
-        if (typeof val === 'number') { const d = new Date(val); return Number.isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 8); }
-        return String(val).match(/(\d{2}:\d{2}:\d{2})/)?.[1] || String(val).trim();
-    }
     function renderUsageList() {
         const list = byId('presentation-master-usage-list');
         if (!list) return;
+        const { timingLabel, formatMetrics } = window.Pivot.moduleApi('apps.presentations.masterUsage');
         list.replaceChildren();
         for (const item of usageDiagnostics) {
             const row = el('li', 'presentation-master-usage-item');
@@ -718,13 +707,11 @@
             stepGroup.appendChild(el('span', 'presentation-master-usage-step', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）`));
             const badge = OUTCOME_BADGES[item.outcome];
             if (badge) stepGroup.appendChild(el('span', `presentation-master-task-badge ${badge.tone}`, badge.text));
-            const times = [item.startedAt && `${formatTurnTime(item.startedAt)} 开始`, item.durationMs >= 0 && `用时 ${formatTurnDuration(item.durationMs)}`].filter(Boolean);
-            if (times.length) {
-                const timeEl = el('span', 'presentation-master-usage-time', times.join(' · '));
-                timeEl.title = `开始时间：${item.startedAt || '-'}${item.durationMs >= 0 ? `\n用时：${formatTurnDuration(item.durationMs)}` : ''}`;
-                stepGroup.appendChild(timeEl);
-            }
-            top.append(stepGroup, el('span', 'presentation-master-usage-metrics', `输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}`));
+            const timing = timingLabel(item);
+            const timeEl = el('span', 'presentation-master-usage-time', timing.text);
+            timeEl.title = timing.title;
+            stepGroup.appendChild(timeEl);
+            top.append(stepGroup, el('span', 'presentation-master-usage-metrics', formatMetrics(item)));
             row.appendChild(top);
             const work = formatTurnWork(item);
             if (work) {

@@ -340,11 +340,18 @@
         panel.appendChild(row);
     }
 
+    function loadReviewScripts() {
+        return Promise.all([
+            window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-usage.js'),
+            window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-page-review.js')
+        ]);
+    }
+
     async function open(options = {}) {
         const sequence = ++epoch, actor = actorId(), target = presentationId(), focus = document.activeElement;
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-goals.js');
         await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-form.js');
-        await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-page-review.js');
+        await loadReviewScripts();
         if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
         closeProcessModal({ restoreFocus: false, resetEpoch: false });
         const previous = byId('presentation-master-modal');
@@ -405,7 +412,7 @@
         if (byId('presentation-master-modal') && isCurrent(epoch)) closeModal();
         const sequence = ++epoch, actor = actorId(), target = presentationId();
         try {
-            await window.Pivot?.loadScriptOnce?.('/chat/apps-workbench-presentation-master-page-review.js');
+            await loadReviewScripts();
             if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
             closeProcessModal({ restoreFocus: false, resetEpoch: false });
             historySession = { detail: false, tasks: null, selectedId: '', scrollTop: 0 };

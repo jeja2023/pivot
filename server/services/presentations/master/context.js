@@ -1,7 +1,6 @@
 'use strict';
 
 const { estimateMessagesTokens, getModelContextBudget } = require('../../context-budget');
-const { getBeijingTimestamp } = require('../../../time');
 const runtime = require('./runtime');
 const { confirmedWrite } = require('./observations');
 const MIN_OUTPUT_TOKENS = 2000;
@@ -102,23 +101,22 @@ function planRequest(messages, originalMessages, model, remainingTokens, limits 
     return { inputEstimate, originalEstimate, maxTokens, breakdown };
 }
 
-function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTokens, timing = {}) {
+function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTokens, { startedAt, durationMs, failed = false } = {}) {
     const usage = usageRef.usage || {};
-    const rawInput = usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usageRef.inputTokens;
-    const rawOutput = usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usageRef.outputTokens;
-    const valid = value => value !== undefined && value !== null && Number.isFinite(Number(value)) && Number(value) >= 0;
-    const inputTokens = valid(rawInput) ? Number(rawInput) : plan.inputEstimate;
-    const outputTokens = valid(rawOutput) ? Number(rawOutput) : estimateTokens(typeof output === 'string' ? output : JSON.stringify(output));
+    const reportedTokens = value => (typeof value === 'number' || typeof value === 'string' && value.trim())
+        && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+    const reportedInput = reportedTokens(usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usageRef.inputTokens);
+    const reportedOutput = reportedTokens(usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usageRef.outputTokens);
+    const inputEstimated = !failed && reportedInput === null, outputEstimated = !failed && reportedOutput === null;
+    const inputTokens = inputEstimated ? plan.inputEstimate : reportedInput;
+    const outputTokens = outputEstimated ? estimateTokens(typeof output === 'string' ? output : JSON.stringify(output))
+        : reportedOutput;
     const previous = Array.isArray(state.usageDiagnostics) ? state.usageDiagnostics : [];
-    const startedAt = timing.startedAt || usageRef.startedAt || getBeijingTimestamp();
-    const durationMs = typeof timing.durationMs === 'number'
-        ? Math.max(0, timing.durationMs)
-        : (typeof usageRef.providerMs === 'number' ? Math.max(0, (usageRef.queueMs || 0) + usageRef.providerMs) : undefined);
     const item = { call: Number(previous.at(-1)?.call || previous.length) + 1, step: Number(state.steps || 0) + 1, inputTokens, outputTokens,
-        inputEstimated: !valid(rawInput), outputEstimated: !valid(rawOutput),
+        inputEstimated, outputEstimated,
         inputEstimate: plan.inputEstimate, originalEstimate: plan.originalEstimate, compactedWrites, breakdown: plan.breakdown,
-        startedAt, ...(typeof durationMs === 'number' && durationMs >= 0 ? { durationMs } : {}) };
-    state.usedTokens += inputTokens + outputTokens;
+        ...(startedAt ? { startedAt } : {}), ...(Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {}) };
+    state.usedTokens += (inputTokens ?? 0) + (outputTokens ?? 0);
     item.cumulativeTokens = state.usedTokens;
     state.usageDiagnostics = [...previous, item].slice(-160);
 }

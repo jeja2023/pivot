@@ -161,6 +161,33 @@ test('旧的 120 秒超时熔断检查点续跑时登记优先整理历史', { s
     } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
 });
 
+test('模型超时的计时和未知用量随任务失败保存，重读仍可见', { skip: !process.env.DATABASE_URL }, async () => {
+    const { run, get } = require('../server/services/presentations/master/tasks');
+    const { runModelTurn } = require('../server/services/presentations/master/model-turn');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', operation: 'generate', profile: 'default', materials: [], tokenBudget: 0, maxSteps: 80 };
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
+    try {
+        await run(task.id, user, {
+            drive: (owner, id, state, hooks) => runModelTurn(owner, id, state, { context_window_tokens: 32000, max_tokens: 8000 }, hooks, {
+                messagesForModel: async () => [{ role: 'user', content: '测试制作材料' }],
+                callModel: async () => { throw Object.assign(new Error('模型响应超时。'), { code: 'ECONNABORTED' }); }
+            })
+        });
+        const result = await get(user, task.id);
+        assert.equal(result.status, 'failed');
+        assert.equal(result.error.code, 'PPT_MASTER_MODEL_TIMEOUT');
+        assert.equal(result.usageDiagnostics.length, 1);
+        const [attempt] = result.usageDiagnostics;
+        assert.equal(attempt.outcome, 'model_failed');
+        assert.match(attempt.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+        assert.ok(Number.isSafeInteger(attempt.durationMs) && attempt.durationMs >= 0);
+        assert.equal(attempt.inputTokens, null);
+        assert.equal(attempt.outputTokens, null);
+        assert.equal(result.usedTokens, 0);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
 test('活动制作可以跨文稿查询，过期读请求不会撤销刚延长的截止时间', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
     const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: { presentationId: 'previous-document' } });

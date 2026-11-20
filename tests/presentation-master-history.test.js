@@ -8,6 +8,7 @@ const path = require('node:path');
 const { archiveOlderObservations, readHistory } = require('../server/services/presentations/master/history');
 const { phaseMessages } = require('../server/services/presentations/master/phase-context');
 const { estimateMessagesTokens } = require('../server/services/context-budget');
+const { usageDiagnosticsView } = require('../server/services/presentations/master/observations');
 
 function referenceCheckpoint(turns, pageLength) {
     const messages = [{ role: 'system', content: '原始制作指引' }, { role: 'user', content: '保留材料中的金额和来源' }];
@@ -117,7 +118,9 @@ test('256K 模型从连续 28 步指引读取后的检查点继续，保留确�
 test('供应商拒绝上下文时只在归档确实缩小请求后重试，超时与限流各只调用一次', async () => {
     const { drive } = require('../server/services/presentations/master/driver');
     const { AbortSignal } = globalThis;
-    const hooks = { signal: AbortSignal.timeout(10000), ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const savedAttempts = [];
+    const hooks = { signal: AbortSignal.timeout(10000), ensureCurrent: async () => {},
+        checkpoint: async current => { savedAttempts.push(usageDiagnosticsView(current)); } };
     const model = { context_window_tokens: 256000, max_tokens: 12000 };
     const upstream = () => Object.assign(new Error('Request failed'), { response: { status: 400, data: { error: { code: 'context_length_exceeded' } } } });
     const state = referenceCheckpoint(5, 4000), estimates = [];
@@ -134,7 +137,19 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
     assert.equal(estimates.length, 2);
     assert.ok(estimates[1] < estimates[0]);
     assert.equal(executed, 1);
-    assert.equal(state.usageDiagnostics.length, 1);
+    const [failed, retried] = usageDiagnosticsView(state);
+    assert.equal(state.usageDiagnostics.length, 2);
+    assert.deepEqual([failed.call, retried.call, failed.step, retried.step], [1, 2, 6, 6]);
+    assert.equal(failed.outcome, 'model_failed');
+    assert.equal(failed.errorCode, 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT');
+    assert.equal(failed.inputTokens, null);
+    assert.equal(failed.outputTokens, null);
+    assert.equal(failed.cumulativeTokens, 1184708);
+    assert.ok(savedAttempts.some(attempts => attempts.length === 1 && attempts[0].errorCode === failed.errorCode));
+    for (const item of [failed, retried]) {
+        assert.match(item.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+        assert.ok(Number.isSafeInteger(item.durationMs) && item.durationMs >= 0);
+    }
     for (const [error, code] of [[upstream(), 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT'],
         [Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED' }), 'PPT_MASTER_MODEL_TIMEOUT'],
         [Object.assign(new Error('Request failed'), { response: { status: 429 } }), 'PPT_MASTER_MODEL_RATE_LIMIT']]) {
@@ -148,6 +163,15 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
         assert.equal(calls, 1);
         assert.equal(checkpoint.usedTokens, 1184708);
         assert.equal(checkpoint.modelRequest.contextWindow, 256000);
+        const attempts = usageDiagnosticsView(checkpoint, { code });
+        assert.equal(attempts.length, 1);
+        const [attempt] = attempts;
+        assert.equal(attempt.outcome, 'model_failed');
+        assert.equal(attempt.errorCode, code);
+        assert.match(attempt.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+        assert.ok(Number.isSafeInteger(attempt.durationMs) && attempt.durationMs >= 0);
+        assert.equal(attempt.inputTokens, null);
+        assert.equal(attempt.outputTokens, null);
     }
 });
 

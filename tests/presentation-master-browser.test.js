@@ -14,6 +14,7 @@ async function fixture() {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'pivot-master-form-'));
     const app = express(), requests = [];
     app.use(express.json());
+    app.use('/chat', express.static(path.join(root, 'client/chat')));
     app.get('/fixture', (_req, res) => res.send('<!DOCTYPE html><html lang="zh-CN"><body><button id="entry">按模板创建</button><button data-presentation-master-history>完整制作记录</button></body></html>'));
     const authMiddleware = (req, res, next) => {
         if (req.headers['x-fixture-user'] !== '1') return res.status(401).json({ error: '请先登录。' });
@@ -49,12 +50,10 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
     await page.goto(context.url + '/fixture');
     for (const file of ['client/common/styles/theme.css', 'client/chat/chat.shell.css', 'client/chat/chat.workspace.apps.css']) await page.addStyleTag({ path: path.join(root, file) });
     await page.evaluate(() => {
-        const modules = {};
         window.fixtureState = { active: null };
         window.fixtureTaskResponses = [];
         window.Pivot = {
-            legacy: { currentUser: { id: 1 }, loadSelectableModels: async () => ({ models: [{ id: 1, name: '制作模型' }], defaultModelId: 1 }) },
-            exposeModule: (name, value) => modules[name] = value, moduleApi: name => modules[name]
+            legacy: { currentUser: { id: 1 }, loadSelectableModels: async () => ({ models: [{ id: 1, name: '制作模型' }], defaultModelId: 1 }) }
         };
         window.fixtureHelpers = {
             requestJson: async (url, options = {}) => {
@@ -65,7 +64,7 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
             }
         };
     });
-    for (const file of ['apps-model-selector.js', 'apps-workbench-presentation-goals.js', 'apps-workbench-presentation-master-form.js', 'apps-workbench-presentation-master-page-review.js', 'apps-workbench-presentation-master.js']) await page.addScriptTag({ path: path.join(root, 'client/chat', file) });
+    for (const file of ['pivot-core.js', 'apps-model-selector.js', 'apps-workbench-presentation-master.js']) await page.addScriptTag({ url: '/chat/' + file });
     await page.evaluate(template => {
         window.Pivot.moduleApi('apps.presentations.master').bind(window.fixtureState, window.fixtureHelpers);
         document.getElementById('entry').addEventListener('click', () => window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', template }));
@@ -347,6 +346,46 @@ test('工作中轮询保留用量展开与停止操作，短暂失败后自动�
         await expect(usageDialog).toBeHidden();
         await expect(panel.getByRole('button', { name: '停止制作' })).toBeVisible();
         await page.getByRole('dialog', { name: '完整制作过程' }).getByRole('button', { name: '关闭', exact: true }).click();
+    } finally { await context.close(); }
+});
+
+test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄屏均可查看', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context);
+        const prior = { step: 1, inputTokens: 10, outputTokens: 2, cumulativeTokens: 12, inputEstimate: 10, originalEstimate: 10, compactedWrites: 0 };
+        const startedAt = '2026-11-20 15:42:31';
+        const task = {
+            id: 'fixture-task', status: 'failed', request: { presentationId: '', tokenBudget: 0 },
+            usageDiagnostics: [
+                { ...prior, call: 1 },
+                { ...prior, call: 2, step: 2, outcome: 'model_failed', errorCode: 'PPT_MASTER_MODEL_TIMEOUT',
+                    startedAt, durationMs: 119900, inputTokens: null, outputTokens: null },
+                { ...prior, call: 3, step: 2, startedAt, durationMs: 59950 },
+                { ...prior, call: 4, step: 3, startedAt, durationMs: null },
+                { ...prior, call: 5, step: 4, durationMs: 0, outputTokens: 0 }
+            ]
+        };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
+        await page.locator('#presentation-master-start').click();
+        await page.locator('#presentation-master-status').getByRole('button', { name: '查看每轮模型用量（共 5 轮）' }).click();
+        const dialog = page.getByRole('dialog', { name: '每轮模型用量明细' });
+        const failed = dialog.getByRole('listitem').filter({ hasText: '第 2 次模型调用' });
+        for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
+            await page.setViewportSize(viewport);
+            await expect(dialog.locator('.presentation-master-usage-time')).toHaveText([
+                '开始 未记录 · 用时 未记录', '开始 15:42:31 · 用时 2 分钟', '开始 15:42:31 · 用时 1 分钟',
+                '开始 15:42:31 · 用时 未记录', '开始 未记录 · 用时 0 毫秒'
+            ]);
+            await expect(failed).toContainText('模型调用失败');
+            await expect(failed).toContainText('异常诊断：模型请求超时。');
+            await expect(failed).toContainText('输入 未知，输出 未知，累计已记录 12');
+            await expect(failed.locator('.presentation-master-usage-time')).toHaveAttribute('title', '开始时间（北京时间）：' + startedAt + '\n用时：2 分钟');
+            await expect(dialog.getByRole('listitem').filter({ hasText: '第 5 次模型调用' })).toContainText('输入 10，输出 0');
+            const box = await dialog.boundingBox();
+            assert(box && box.x >= 0 && box.x + box.width <= viewport.width && box.y >= 0 && box.y + box.height <= viewport.height);
+            assert(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth + 1), '明细弹窗不应横向溢出');
+        }
     } finally { await context.close(); }
 });
 
