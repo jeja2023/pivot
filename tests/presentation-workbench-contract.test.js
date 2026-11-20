@@ -251,5 +251,5 @@ test('PPT 产品级补齐覆盖完整文稿筛选、高级编辑、导出选项�
     assert.match(editor, /zoomSelect\.value = state\.zoomMode === 'fit' \? 'fit' : String\(state\.zoom\)/);
     assert.match(workspace, /option value="fit" selected>适应画布/);
     assert.match(workspace, /option value="1\.1">110%/);
-    assert.match(source('client/chat/styles/workspaces/apps/presentations.css'), /\.presentation-stage-scroll\{padding:16px 20px\}/);
+    assert.match(source('client/chat/styles/workspaces/apps/presentations.css'), /\.presentation-stage-scroll\s*\{\s*padding:\s*16px\s+20px\s*;?\s*\}/);
 });

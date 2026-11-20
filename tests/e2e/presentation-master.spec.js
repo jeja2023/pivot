@@ -103,11 +103,20 @@ test('256K 默认完整制作直接生成初稿，分页读取图片并核验真
     expect(task.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, checklistDigest: expect.any(String) });
     expect(task.milestones.firstApproval).toBeUndefined();
     expect(task.milestones.firstPlan.steps).toBeLessThan(task.milestones.firstPageWrite.steps);
+    expect(task.usageDiagnostics.flatMap(turn => turn.actions || [])).toContainEqual(expect.objectContaining({
+        action: 'read_runtime', path: 'references/executor-base.md', nextOffset: 1200
+    }));
     expect(task.milestones.delivered.usedTokens).toBeGreaterThan(0);
     expect(JSON.stringify(task)).not.toContain('上游权威指引'); expect(task.state).toBeUndefined();
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => Boolean(window.Pivot?.moduleApi('workspaces.navigation')));
     await page.evaluate(() => window.Pivot.moduleApi('workspaces.navigation').openAppsWorkbench({ app: 'presentations' }));
+    await page.locator('#presentation-library-status').selectOption('draft');
+    const draft = page.getByRole('button', { name: '完整引擎浏览器验收-初稿', exact: true });
+    await draft.click();
+    await expect(panel.getByRole('button', { name: '编辑已生成页面' })).toBeVisible();
+    await page.getByRole('dialog', { name: '完整制作过程' }).getByRole('button', { name: '关闭', exact: true }).click();
+    await expect(draft).toBeFocused();
     await page.locator('#presentation-create-ai-btn').click();
     await page.getByRole('button', { name: '查看最近制作' }).click();
     const processDialog = page.getByRole('dialog', { name: '完整制作过程' });

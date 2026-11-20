@@ -167,8 +167,10 @@
         if (filter) { const selected = state.libraryFilters.templateId; filter.replaceChildren(new Option('全部模板', '')); state.templates.forEach(template => filter.add(new Option(template.name, template.id))); filter.value = selected; }
     }
     async function loadDocuments() {
+        const seq = state.libraryLoadSequence = (state.libraryLoadSequence || 0) + 1;
+        const owner = String(window.Pivot.legacy?.currentUser?.id || '');
         setStatus('正在加载演示文稿…');
-        const params = new URLSearchParams({ limit: '100' });
+        const params = new URLSearchParams({ limit: '100', includeMasterDrafts: 'true' });
         if (state.libraryFilters.search) params.set('search', state.libraryFilters.search);
         if (state.libraryFilters.tag) params.set('tag', state.libraryFilters.tag);
         if (state.libraryFilters.templateId) params.set('templateId', state.libraryFilters.templateId);
@@ -178,6 +180,7 @@
         if (state.libraryFilters.updatedTo) params.set('updatedTo', state.libraryFilters.updatedTo);
         if (state.libraryFilters.favorite) params.set('favorite', 'true');
         const data = await requestJson(API + '?' + params.toString(), { cache: 'no-store' });
+        if (seq !== state.libraryLoadSequence || owner !== String(window.Pivot.legacy?.currentUser?.id || '')) return;
         state.documents = Array.isArray(data.presentations) ? data.presentations : [];
         setStatus(state.documents.length ? '' : '还没有匹配的演示文稿，可调整搜索或新建。');
         renderLibrary();
@@ -208,79 +211,8 @@
         await loadDocuments();
     }
     function renderTemplates(host, options = {}) { return templatePresenter()?.renderTemplates?.(state, host, options); }
-    function renderLibrary() {
-        if (!(state.coverUrls instanceof Map)) state.coverUrls = new Map();
-        state.coverUrls.forEach(url => URL.revokeObjectURL(url)); state.coverUrls.clear();
-        const tableBody = byId('presentation-library-table-body'), legacyList = byId('presentation-library-list');
-        if (legacyList) legacyList.replaceChildren();
-        if (!tableBody) return;
-        tableBody.replaceChildren();
-        const total = state.documents.length, limit = Math.max(Number(state.libraryLimit) || 15, 1);
-        const totalPages = Math.max(Math.ceil(total / limit), 1);
-        state.libraryPage = Math.min(Math.max(Number(state.libraryPage) || 1, 1), totalPages);
-        const startIndex = (state.libraryPage - 1) * limit;
-        const pageDocs = state.documents.slice(startIndex, startIndex + limit);
-        if (!total) {
-            const tr = document.createElement('tr'), td = document.createElement('td');
-            td.colSpan = 9; td.className = 'text-center presentation-table-empty';
-            td.textContent = '暂无演示文稿。可从 AI 创建、空白创建或调整筛选条件开始。';
-            tr.appendChild(td); tableBody.appendChild(tr);
-            renderLibraryPagination(0, limit, 1);
-            return;
-        }
-        pageDocs.forEach((doc, idx) => {
-            const tr = document.createElement('tr'); tr.dataset.presentationDocId = doc.id;
-            if (doc.favorite) tr.classList.add('is-favorite');
-            const tdIdx = document.createElement('td'); tdIdx.className = 'text-center'; tdIdx.textContent = String(startIndex + idx + 1);
-            const tdTitle = document.createElement('td'), wrap = document.createElement('div'); wrap.className = 'presentation-table-title-cell';
-            const dot = document.createElement('span'); dot.className = 'presentation-theme-dot';
-            dot.style.backgroundColor = templateById(doc.template?.id)?.definition?.theme?.colors?.primary || '#1769AA';
-            dot.title = templateById(doc.template?.id)?.name || doc.template?.name || '默认主题';
-            wrap.appendChild(dot);
-            const titleBtn = document.createElement('button'); titleBtn.type = 'button'; titleBtn.className = 'presentation-table-title-btn'; titleBtn.dataset.presentationAction = 'open'; titleBtn.dataset.presentationId = doc.id; titleBtn.textContent = doc.title || '未命名演示文稿'; titleBtn.title = doc.title || '未命名演示文稿';
-            wrap.appendChild(titleBtn);
-            if (doc.favorite) { const fav = document.createElement('span'); fav.className = 'presentation-favorite-badge'; PivotSafeHtml.setHtml(fav, '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>'); fav.title = '已收藏'; wrap.appendChild(fav); }
-            tdTitle.appendChild(wrap);
-            const tdTpl = document.createElement('td'); const tplName = templateById(doc.template?.id)?.name || doc.template?.name || '自定义主题'; tdTpl.textContent = tplName; tdTpl.title = tplName;
-            const tdVer = document.createElement('td'); tdVer.className = 'text-center'; tdVer.textContent = 'v' + (doc.version || 1);
-            const tdSt = document.createElement('td'); tdSt.className = 'text-center'; const pill = document.createElement('span'); const sk = doc.status || 'draft'; pill.className = 'presentation-status-pill ' + sk; pill.textContent = doc.generation?.pending.length ? `待补齐 ${doc.generation.pending.length} 页` : statusLabel(sk); tdSt.appendChild(pill);
-            const tdRole = document.createElement('td'); tdRole.className = 'text-center'; const badge = document.createElement('span');
-            if (doc.isOwner !== false) { badge.className = 'presentation-role-badge is-owner'; badge.textContent = '我创建的'; }
-            else { badge.className = 'presentation-role-badge is-shared'; const rt = ({ editor: '可编辑', commenter: '可评论', viewer: '只读' }[doc.collaboratorRole] || '协作者'); badge.textContent = '共享 · ' + rt; badge.title = '共享文档（' + rt + '）'; }
-            tdRole.appendChild(badge);
-            const tdTags = document.createElement('td'); const tags = Array.isArray(doc.tags) ? doc.tags : [];
-            if (tags.length) { const sp = document.createElement('span'); sp.className = 'presentation-tag-text'; sp.textContent = tags.map(t => '#' + t).join(' '); sp.title = tags.join(', '); tdTags.appendChild(sp); }
-            else { const em = document.createElement('span'); em.className = 'presentation-empty-dash'; em.textContent = '-'; tdTags.appendChild(em); }
-            const tdTime = document.createElement('td'); const ft = formatTime(doc.updatedAt); tdTime.textContent = ft; tdTime.title = ft;
-            const tdAct = document.createElement('td'); tdAct.className = 'text-center'; const acts = document.createElement('div'); acts.className = 'presentation-row-actions';
-            [['打开', 'open', 'btn-primary'], [doc.favorite ? '取消收藏' : '收藏', 'favorite', 'btn-secondary'], ...((doc.isOwner !== false || doc.collaboratorRole === 'editor') ? [['标签', 'tags', 'btn-secondary']] : []), ...(doc.isOwner !== false ? [['复制', 'duplicate', 'btn-secondary'], ['删除', 'delete', 'btn-secondary btn-danger-hover']] : [])].forEach(([lbl, act, cls]) => {
-                const btn = document.createElement('button'); btn.type = 'button'; btn.className = cls; btn.textContent = lbl; btn.dataset.presentationAction = act; btn.dataset.presentationId = doc.id; btn.dataset.presentationFavorite = doc.favorite ? 'true' : 'false'; btn.dataset.presentationTags = JSON.stringify(tags); acts.appendChild(btn);
-            });
-            tdAct.appendChild(acts);
-            tr.append(tdIdx, tdTitle, tdTpl, tdVer, tdSt, tdRole, tdTags, tdTime, tdAct); tableBody.appendChild(tr);
-            if (doc.coverAssetRef) {
-                apiFetch(API + '/assets/content/by-ref?ref=' + encodeURIComponent(doc.coverAssetRef) + '&presentationId=' + encodeURIComponent(doc.id)).then(res => res.ok ? res.blob() : null).then(blob => {
-                    if (!blob || !tr.isConnected) return; const url = URL.createObjectURL(blob); state.coverUrls.set(doc.id, url); dot.style.backgroundImage = 'url(\"' + url + '\")'; dot.style.backgroundSize = 'cover'; dot.style.backgroundPosition = 'center';
-                }).catch(() => { });
-            }
-        });
-        renderLibraryPagination(total, limit, state.libraryPage);
-    }
-    function renderLibraryPagination(total, limit, page) {
-        const pager = byId('presentation-library-pagination');
-        if (!pager) return;
-        const fn = window.Pivot?.legacy?.renderWorkspacePagination || window.Pivot?.moduleApi?.('chat.ui', {})?.renderWorkspacePagination;
-        if (typeof fn !== 'function') { pager.replaceChildren(); return; }
-        fn(pager, { total, limit, page, onPageChange: p => { state.libraryPage = p; renderLibrary(); } });
-    }
-    function formatTime(value) {
-        if (!value) return '刚刚更新';
-        const date = new Date(String(value).replace(' ', 'T'));
-        return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString('zh-CN', { hour12: false });
-    }
-    function statusLabel(value) {
-        return { draft: '草稿', needs_attention: '待检查', ready: '可交付', archived: '已归档' }[value] || value || '草稿';
-    }
+    function renderLibrary() { window.Pivot.moduleApi('apps.presentations.library').render(state, { templateById, apiFetch, API }); }
+    const formatTime = value => window.Pivot.moduleApi('apps.presentations.library').formatTime(value);
     const collab = () => window.Pivot?.moduleApi?.('apps.presentations.collab');
     const presenter = () => window.Pivot?.moduleApi?.('apps.presentations.presenter');
     const templatePresenter = () => window.Pivot?.moduleApi?.('apps.presentations.templates');
@@ -805,7 +737,7 @@
             if (dropdownItem) dropdownItem.closest('details.presentation-dropdown')?.removeAttribute('open');
             view.querySelectorAll('.presentation-dropdown[open]').forEach(d => { if (!d.contains(event.target)) d.open = false; });
             const template = event.target.closest('[data-presentation-template-id]'); if (template) { if (state.active) applyTemplate(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); else createBlank(template.dataset.presentationTemplateId).catch(error => toast(error.message, 'error')); return; }
-            const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; const action = docAction.dataset.presentationAction; if (action === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (action === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (action === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); if (action === 'favorite') toggleFavoriteDocument(id, docAction.dataset.presentationFavorite === 'true').catch(error => toast(error.message, 'error')); if (action === 'tags') { let tags = []; try { tags = JSON.parse(docAction.dataset.presentationTags || '[]'); } catch (_) { } updateDocumentTags(id, tags).catch(error => toast(error.message, 'error')); } return; }
+            const docAction = event.target.closest('[data-presentation-action]'); if (docAction) { const id = docAction.dataset.presentationId; const action = docAction.dataset.presentationAction; if (action === 'open') openPresentation(id).catch(error => toast(error.message, 'error')); if (action === 'open-master') window.Pivot.moduleApi('apps.presentations.master').openDraft(id, docAction); if (action === 'duplicate') duplicateDocument(id).catch(error => toast(error.message, 'error')); if (action === 'delete') deleteDocument(id).catch(error => toast(error.message, 'error')); if (action === 'favorite') toggleFavoriteDocument(id, docAction.dataset.presentationFavorite === 'true').catch(error => toast(error.message, 'error')); if (action === 'tags') { let tags = []; try { tags = JSON.parse(docAction.dataset.presentationTags || '[]'); } catch (_) { } updateDocumentTags(id, tags).catch(error => toast(error.message, 'error')); } return; }
             const slideButton = event.target.closest('[data-presentation-slide-id]'); if (slideButton) { state.selectedSlideId = slideButton.dataset.presentationSlideId; state.selectedElementId = ''; state.selectedElementIds = []; renderEditor(); collab()?.sendPresenceHeartbeat?.(); syncRemoteSlide().catch(() => { }); return; }
             const elementNode = event.target.closest('[data-presentation-element-id]'); if (elementNode) { selectPresentationElement(elementNode.dataset.presentationElementId, { additive: event.shiftKey || event.ctrlKey || event.metaKey }); return; }
             const panel = event.target.closest('[data-presentation-panel]'); if (panel) { switchPanel(panel.dataset.presentationPanel); return; }
@@ -912,13 +844,13 @@
         const load = async list => { for (const name of list) await window.Pivot.loadScriptOnce(`/chat/${name}.js`); };
         await load(['apps-workbench-presentation-goals', 'presentation-colors', 'apps-workbench-presentation-canvas', 'presentation-template-preview', 'presentation-graphics', 'presentation-geometry']);
         await window.Pivot.presentationGeometry.loadDefaultCatalog();
-        await load(['apps-workbench-presentation-storyline', 'apps-workbench-presentation-studio', 'apps-workbench-presentation-master', 'apps-workbench-presentations-generation']);
+        await load(['apps-workbench-presentation-storyline', 'apps-workbench-presentation-studio', 'apps-workbench-presentation-master', 'apps-workbench-presentations-generation', 'apps-workbench-presentations-library']);
         generation ||= window.Pivot.moduleApi('apps.presentations.generation').create(state, {
             requestJson, beginAiRequest, endAiRequest, aiJsonOptions, isAiAbort, loadDocuments, openPresentation,
             flush: persistence.flush, requireModel: requirePresentationAiModel, toast, activeSlide, canEdit: canEditActivePresentation,
             formatChangeImpact: impact => presenter()?.formatChangeImpact?.(impact), recordHistory, renderEditor
         });
-        window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson, openCreateModal, toast });
+        window.Pivot.moduleApi('apps.presentations.master').bind(state, { requestJson, openCreateModal, loadDocuments, toast });
         await load(['presentation-native-geometry', 'apps-workbench-presentation-native-properties', 'apps-workbench-presentation-native']);
         window.Pivot.moduleApi('apps.presentations.native').bind(state, { requestJson });
         await load(['apps-workbench-presentation-catalog']);

@@ -81,6 +81,136 @@ async function word(name, text) {
     return { name, mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', buffer: await Packer.toBuffer(new Document({ sections: [{ children: [new Paragraph(text)] }] })) };
 }
 
+test('文稿状态筛选和标签一致，需处理状态说明如何恢复草稿', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context, undefined, 'light', false);
+        await page.addScriptTag({ url: '/chat/apps-workbench-presentations-library.js' });
+        const labels = await page.evaluate(() => {
+            const filter = document.createElement('select'), table = document.createElement('table'), body = document.createElement('tbody');
+            filter.id = 'presentation-library-status';
+            body.id = 'presentation-library-table-body';
+            table.appendChild(body);
+            document.body.append(filter, table);
+            const state = { libraryFilters: { status: 'needs_attention' }, documents: [
+                { id: 'problem', title: '版式待修', status: 'needs_attention' },
+                { id: 'ready', title: '完成稿', status: 'ready' }
+            ] };
+            window.Pivot.moduleApi('apps.presentations.library').render(state, { templateById: () => null });
+            return [...body.querySelectorAll('.presentation-status-pill')].map(pill => ({
+                label: pill.textContent, option: [...filter.options].find(option => pill.classList.contains(option.value || 'any'))?.textContent
+            }));
+        });
+        assert.deepEqual(labels, [{ label: '需处理', option: '需处理' }, { label: '已完成', option: '已完成' }]);
+        await expect(page.locator('#presentation-library-status')).toHaveValue('needs_attention');
+        await expect(page.getByText('需处理', { exact: true }).filter({ visible: true })).toHaveAttribute('title', /修复并保存后可恢复为草稿/);
+    } finally { await context.close(); }
+});
+
+test('草稿列表直接打开已完成的 PPT Master 初稿并可回到原入口', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context, undefined, 'light', false);
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'completed', draftFirst: true, request: { title: '项目测试' },
+            result: { files: [{ format: 'pptx', renditionId: 1, filename: '项目测试-初稿.pptx' }] }
+        } } }));
+        await page.addScriptTag({ url: '/chat/apps-workbench-presentations-library.js' });
+        await page.evaluate(() => {
+            const table = document.createElement('table'), body = document.createElement('tbody');
+            body.id = 'presentation-library-table-body'; table.appendChild(body); document.body.appendChild(table);
+            window.Pivot.moduleApi('apps.presentations.library').render({ documents: [
+                { id: 'fixture-task', title: '项目测试-初稿', status: 'draft', masterDraft: true, template: { name: 'PPT Master' } }
+            ], coverUrls: new Map() }, { templateById: () => null });
+            body.addEventListener('click', event => {
+                const button = event.target.closest('[data-presentation-action="open-master"]');
+                if (button) void window.Pivot.moduleApi('apps.presentations.master').openDraft(button.dataset.presentationId, button);
+            });
+        });
+        const entry = page.getByRole('button', { name: '项目测试-初稿', exact: true });
+        await entry.click();
+        const dialog = page.getByRole('dialog', { name: '完整制作过程' });
+        await expect(dialog).toContainText('初稿已生成');
+        await expect(dialog.getByRole('button', { name: '下载初稿（.pptx）' })).toBeVisible();
+        await expect(dialog.getByRole('button', { name: '编辑已生成页面' })).toBeVisible();
+        await entry.evaluate(button => button.replaceWith(button.cloneNode(true)));
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(entry).toBeFocused();
+    } finally { await context.close(); }
+});
+
+test('PPTX 与源包交付后收起重复快照，缺少对应交付文件时保留恢复入口', async () => {
+    const context = await fixture();
+    try {
+        const pptx = { format: 'pptx', renditionId: 1, filename: '经营回顾-初稿.pptx' };
+        const zip = { format: 'zip', renditionId: 2, filename: '经营回顾-项目源包.zip' };
+        for (const [status, files, sourceVisible, exportVisible] of [
+            ['completed', [pptx, zip], false, false],
+            ['completed', [pptx], true, false],
+            ['failed', [], true, true]
+        ]) {
+            const page = await pageFor(context, { width: 390, height: 844 });
+            const panel = page.locator('#presentation-master-status');
+            await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+                id: 'fixture-task', status, draftFirst: true, canPreviewExport: status === 'completed', canRegenerate: true,
+                progressSnapshot: { source: { count: 2 }, export: { pendingPages: [] }, passed: { pages: [1, 2] } },
+                result: { files }
+            } } }));
+            await page.locator('#presentation-master-start').click();
+            await expect(panel.getByText(status === 'completed' ? '初稿已生成' : '制作未完成', { exact: true })).toBeVisible();
+            for (const name of ['下载待核验整稿快照（.pptx）', '下载已通过页面（.pptx）', '将已通过页转存为独立文稿']) {
+                await expect(panel.getByRole('button', { name, exact: true })).toHaveCount(Number(exportVisible));
+            }
+            await expect(panel.getByRole('button', { name: '下载待核验项目源包', exact: true })).toHaveCount(Number(sourceVisible));
+            await expect(panel.getByText('自动保存的制作快照', { exact: true })).toHaveCount(Number(sourceVisible || exportVisible));
+            if (status === 'completed') {
+                for (const name of ['预览初稿', '修改整份初稿', '下载初稿（.pptx）', '编辑已生成页面']) {
+                    await expect(panel.getByRole('button', { name, exact: true })).toBeVisible();
+                }
+                await expect(panel.getByRole('button', { name: '下载完整项目源包', exact: true })).toHaveCount(Number(files.includes(zip)));
+            }
+            await page.close();
+        }
+    } finally { await context.close(); }
+});
+
+test('已完成的初稿可查看材料、逐页提纲并返回下载入口', async () => {
+    const context = await fixture();
+    try {
+        const viewport = { width: 390, height: 844 };
+        const page = await pageFor(context, viewport), panel = page.locator('#presentation-master-status');
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
+            id: 'fixture-task', status: 'completed', draftFirst: true,
+            checkpointProgress: {
+                requirementsLoaded: true,
+                materials: [{ title: '经营材料.docx', saved: true, reads: 2, complete: true }],
+                plans: [{ stage: 'design', status: 'automatic', summary: '按经营结果组织汇报',
+                    pages: [{ title: '经营概况', values: ['已核对事项 3 项'] }, { title: '后续安排', values: [] }] }]
+            },
+            result: { files: [{ format: 'pptx', renditionId: 1, filename: '经营回顾-初稿.pptx' }] }
+        } } }));
+        await page.locator('#presentation-master-start').click();
+        const outlineButton = panel.getByRole('button', { name: /查看材料与提纲/ });
+        await outlineButton.click();
+        const dialog = page.getByRole('dialog', { name: '材料与提纲' });
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toContainText('经营材料.docx');
+        await expect(dialog).toContainText('已读完整文字快照');
+        await expect(dialog.getByText('初稿清单', { exact: true })).toBeVisible();
+        await expect(dialog.getByText('共 2 页')).toBeVisible();
+        await expect(dialog.getByRole('heading', { name: '经营概况' })).toBeVisible();
+        await expect(dialog.getByRole('heading', { name: '后续安排' })).toBeVisible();
+        await expect(dialog).toContainText('已核对事项 3 项');
+        const bounds = await dialog.boundingBox();
+        assert(bounds && bounds.x >= 0 && bounds.x + bounds.width <= viewport.width);
+        await page.keyboard.press('Escape');
+        await expect(dialog).toBeHidden();
+        await expect(outlineButton).toBeFocused();
+        await expect(panel.getByRole('button', { name: '下载初稿（.pptx）' })).toBeVisible();
+    } finally { await context.close(); }
+});
+
 test('待核验草稿在失败面板可单独下载，保留继续制作入口', async () => {
     const context = await fixture();
     try {
@@ -361,7 +491,7 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
                 { ...prior, call: 1 },
                 { ...prior, call: 2, step: 2, outcome: 'model_failed', errorCode: 'PPT_MASTER_MODEL_TIMEOUT',
                     startedAt, durationMs: 119900, inputTokens: null, outputTokens: null },
-                { ...prior, call: 3, step: 2, startedAt, durationMs: 59950 },
+                { ...prior, call: 3, step: 2, startedAt, durationMs: 59950, outcome: 'citation_placeholder', errorCode: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' },
                 { ...prior, call: 4, step: 3, startedAt, durationMs: null },
                 { ...prior, call: 5, step: 4, durationMs: 0, outputTokens: 0 }
             ]
@@ -381,6 +511,9 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
             await expect(failed).toContainText('异常诊断：模型请求超时。');
             await expect(failed).toContainText('输入 未知，输出 未知，累计已记录 12');
             await expect(failed.locator('.presentation-master-usage-time')).toHaveAttribute('title', '开始时间（北京时间）：' + startedAt + '\n用时：2 分钟');
+            const placeholder = dialog.getByRole('listitem').filter({ hasText: '第 3 次模型调用' });
+            await expect(placeholder).toContainText('用待核对占位文字继续制作');
+            await expect(placeholder).toContainText('压缩 0 条历史写入');
             await expect(dialog.getByRole('listitem').filter({ hasText: '第 5 次模型调用' })).toContainText('输入 10，输出 0');
             const box = await dialog.boundingBox();
             assert(box && box.x >= 0 && box.x + box.width <= viewport.width && box.y >= 0 && box.y + box.height <= viewport.height);

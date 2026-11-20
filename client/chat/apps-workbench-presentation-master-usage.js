@@ -47,5 +47,16 @@
         return reason + '。';
     }
 
-    window.Pivot.exposeModule('apps.presentations.masterUsage', { timingLabel, formatMetrics, formatModelError });
+    function preparationDiagnostic(item) {
+        if (item.errorCode === 'PPT_MASTER_AUTHORING_READ_LIMIT') return '仍无首张页面回执，需写入规范或页面，或完成必要校验。';
+        return '';
+    }
+
+    function contextLabel(item) {
+        const b = item.breakdown;
+        const parts = b ? `（初始指引及任务 ${b.initial}，历史消息 ${b.history}，工具结果 ${b.toolResults || 0}，图片 ${b.images}）` : '';
+        return `预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，压缩 ${item.compactedWrites} 条历史写入。`;
+    }
+
+    window.Pivot.exposeModule('apps.presentations.masterUsage', { timingLabel, formatMetrics, formatModelError, preparationDiagnostic, contextLabel });
 })();

@@ -21,6 +21,7 @@ const { logger } = require('../../../logger');
 const { imageCoverage } = require('./model-input');
 const { progressFor } = require('./workflow-progress');
 const { checkpointProgressView } = require('./checkpoint-progress');
+const { startPageRepair } = require('./automatic-page-repair');
 const deployment = require('./deployment');
 const active = require('./continuation').createContinuationCoordinator();
 
@@ -66,7 +67,7 @@ function publicResult(row, task) {
         usedTokens: state?.usedTokens ?? data.usedTokens ?? 0, steps: state?.steps ?? data.steps ?? 0,
         actionSummary: actionSummary(state?.messages), inspectionDiagnostic: state?.inspectionDiagnostic,
         workflowProgress: state && progressFor(state),
-        ...(['failed', 'expired', 'cancelled'].includes(task.status) ? { checkpointProgress: checkpointProgressView(state, pending) } : {}),
+        ...(['completed', 'failed', 'expired', 'cancelled'].includes(task.status) ? { checkpointProgress: checkpointProgressView(state, pending) } : {}),
         modelRequest: state?.modelRequest, milestones: state?.milestones,
         imageCoverage: state?.prepared ? imageCoverage(state) : undefined, actionRetries: state?.actionRetries || 0,
         lastActionCorrection: state?.lastActionCorrection,
@@ -297,6 +298,28 @@ async function recent(user, { list = repository.recent, checkAccess = ensureAcce
     }
     return visible;
 }
+async function listDrafts(user, options, { list = repository.draftCandidates, checkAccess = ensureAccess,
+    rendition = require('../../agent-artifact-renditions').getRenditionForUser } = {}) {
+    if (options.tag || options.favorite || options.status && options.status !== 'draft') return [];
+    const { tenantId } = await require('../../agent-tenant-context').assertTenantContext(user);
+    const match = value => value ? '%' + value.replace(/[\\%_]/g, '\\$&') + '%' : '';
+    const rows = await list(user, tenantId, { ...options, search: match(options.search), createdBy: match(options.createdBy) });
+    const drafts = [];
+    for (const row of rows) {
+        try {
+            await checkAccess(user, row.request);
+            if (!(await rendition(row.rendition_id, user))) continue;
+        } catch (error) {
+            if ([403, 404].includes(error.status)) continue;
+            throw error;
+        }
+        const template = row.request.template;
+        const engineTemplate = template?.type === 'runtime' && require('../presentation-template-catalog').runtimeTemplate(template.id);
+        drafts.push({ id: row.id, masterDraft: true, title: row.artifact_title, status: 'draft', updatedAt: row.updated_at,
+            ownerName: row.nickname || row.username, template: { id: template?.id, name: engineTemplate?.name || 'PPT Master' } });
+    }
+    return drafts;
+}
 async function activeTask(user) {
     const row = await repository.findActive(user);
     if (!row) return null;
@@ -340,10 +363,11 @@ async function resume(user, id, input = {}) {
             throw runtime.error('修改意见请填写一千字以内的文字。');
         }
         const pages = [...input.pages].sort((a, b) => a - b);
-        state.pageRepair = { sha256: state.reviewDraft.sha256, pages, sourceFiles: pages.map(page => state.pageSources[page - 1]) };
-        const issues = state.pageReview.failedPages.filter(page => input.pages.includes(page.page));
-        state.messages.push({ role: 'user', content: '用户要求只修复选中的页面，保留其他页面。以下是已确认清单与本次修改意见：'
-            + JSON.stringify({ issues, note: input.repairNote?.trim() || '' }) });
+        const project = state.review?.approvals?.design?.plan?.project;
+        const previousPages = state.pageRepair?.pages;
+        if (!startPageRepair(state, project, pages, 1, { previousPages, note: input.repairNote?.trim() })) {
+            throw runtime.error('缺少原导出回执，暂不能从此检查点修页。请下载保留的草稿或重新生成整份。', 'PPT_MASTER_PAGE_REPAIR_UNAVAILABLE', 409);
+        }
     }
     if (changedModel) {
         await checkModel(user, { ...state.request, modelId }, { visionRequired: imageCoverage(state).total > 0 });
@@ -358,7 +382,7 @@ async function resume(user, id, input = {}) {
         state.messages ||= [];
         state.messages.push({ role: 'user', content: '用户在检查点补充说明 [引用来源 ' + source + ']：' + resumeNote });
     } else if (paused && changedModel) resetCitationRepair(state);
-    const stalled = row.error_code === 'PPT_MASTER_NO_PROGRESS';
+    const stalled = ['PPT_MASTER_NO_PROGRESS', 'PPT_MASTER_AUTHORING_READ_LIMIT'].includes(row.error_code);
     if (stalled || row.error_code === 'PPT_MASTER_PHASE_LIMIT' || paused && workflow && workflow.calls >= workflow.limit) delete state.workflowProgress;
     if (stalled || state.inspectionRepairPending) delete state.focusModelHistory;
     state.inspectionRepairAttempts = 0;
@@ -371,10 +395,12 @@ async function resume(user, id, input = {}) {
     }
     if (state.messages) {
         const recoveryCode = paused && row.error_code === 'PPT_MASTER_PHASE_LIMIT' ? CITATION_REVIEW_REQUIRED : row.error_code;
-        const repair = reviewRecoveryGuidance(state, recoveryCode, row.error_message);
+        const repair = input.pages === undefined ? reviewRecoveryGuidance(state, recoveryCode, row.error_message) : '';
         let workspaceCheck = '上一轮动作可能已经部分执行，请先用 list/read 核对相关任务文件，再决定下一步。';
         if (stalled) workspaceCheck = '从已保存的动作回执推进当前阶段。如某项文件状态仍不明确，先定向核对。';
-        if (hadCitationDraft) {
+        if (input.pages !== undefined) {
+            workspaceCheck = '按本次选页范围修复源页。整稿复检、定稿和导出由宿主执行。';
+        } else if (hadCitationDraft) {
             workspaceCheck = state.citationDraft
                 ? '沿用宿主保存的完整清单，优先根据待核对项、已读原文和用户补充提交 repairCitations。只在缺少具体证据时定向回读。'
                 : '以此前保存的清单为基础，按用户明确的修改要求重提完整清单。只在缺少具体证据时定向回读。';
@@ -413,4 +439,4 @@ async function regenerate(user, id, dependencies = {}, input = {}) {
     return (dependencies.start || start)(user, { ...settings, instruction, ...(sourceAssetId ? { sourceAssetId } : {}), materials }, { regeneratedFrom: id });
 }
 
-module.exports = { start, get, readReviewDraft, readSnapshot, ...reviewPreviews, respond, cancel, latest, recent, activeTask, run, resume, regenerate };
+module.exports = { start, get, readReviewDraft, readSnapshot, ...reviewPreviews, respond, cancel, latest, recent, listDrafts, activeTask, run, resume, regenerate };

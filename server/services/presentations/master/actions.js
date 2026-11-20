@@ -7,6 +7,7 @@ const { getSupplement } = require('./user-supplements');
 const { patchCitationDraft } = require('./citation-repair');
 const { requireChecks } = require('./tool-checks');
 const { HISTORY_PAGE_CHARS } = require('./observations');
+const { normalizeRuntimeReads } = require('./runtime-references');
 
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
@@ -30,6 +31,10 @@ function validateAction(action, state) {
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
     if (!state.review) return;
     if (state.pageRepair && !repairActionAllowed(state, action)) {
+        if (state.pageRepair.automatic && action.action === 'run' && ['check_svg', 'finalize', 'export'].includes(action.tool)) {
+            throw invalid('复检、定稿和导出由宿主执行。请只用 write 写回待修的已选源页。');
+        }
+        if (action.action === 'write') throw invalid('写入目标超出本次选页范围。请沿用原清单，仅写回已选源页，未选页面需要保留。');
         throw invalid('按页修复只允许编辑当前项目的页面源稿，或校验和导出当前项目。系统会核对未选页面是否保留。');
     }
     const supplementRead = action.action === 'read' && getSupplement(state, action.path);
@@ -84,6 +89,7 @@ async function validateTurn(output, state, verifySource) {
     if (choices !== 1) throw invalid('模型须明确选择操作、询问或最终交付，不能混合执行。');
     if (turn.actions) {
         if (!Array.isArray(turn.actions) || turn.actions.length > 6) throw invalid('单轮制作操作超过上限。');
+        if (state.review) turn = { ...turn, actions: normalizeRuntimeReads(turn.actions, state) };
         if (turn.actions.filter(action => action?.action === 'read_images').length > 1) throw invalid('每轮只请求一批图片。');
         for (const [index, action] of turn.actions.entries()) {
             validateAction(action, state);

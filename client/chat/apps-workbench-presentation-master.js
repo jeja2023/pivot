@@ -13,6 +13,7 @@
     }
     function isProcessCurrent(sequence) {
         const processModal = byId('presentation-master-process-modal');
+        if (processModal) delete processModal.dataset.wasWorking;
         return sequence === epoch && processModal && !processModal.classList.contains('hidden')
             && processModal.dataset.owner === actorId() && processModal.dataset.presentationId === presentationId();
     }
@@ -63,6 +64,12 @@
         if (processModal && !processModal.classList.contains('hidden')) processModal.classList.add('hidden');
         const focus = processReturnFocus; processReturnFocus = null;
         if (restoreFocus && focus?.isConnected) focus.focus();
+        else if (restoreFocus && focus?.dataset.presentationAction === 'open-master') {
+            const buttons = byId('presentation-library-table-body')?.querySelectorAll('[data-presentation-action="open-master"]') || [];
+            const replacement = [...buttons].find(button => button.dataset.presentationId === focus.dataset.presentationId
+                && button.classList.contains('presentation-table-title-btn') === focus.classList.contains('presentation-table-title-btn'));
+            (replacement || byId('presentation-library-status'))?.focus();
+        }
     }
     function exitProcessView() {
         if (historySession?.detail && isProcessCurrent(epoch)) {
@@ -278,13 +285,15 @@
     function updateProcessHeader() {
         const processModal = byId('presentation-master-process-modal'), dialog = processModal.querySelector('[role="dialog"]');
         const list = historySession && !historySession.detail;
+        const fromLibrary = processReturnFocus?.dataset.presentationAction === 'open-master';
         const title = list ? '完整制作记录' : '完整制作过程';
         dialog.setAttribute('aria-label', title);
         dialog.querySelector('h3').textContent = title;
         dialog.querySelector('.presentation-master-header-subtitle').hidden = Boolean(list);
         byId('presentation-master-process-hint').textContent = list ? '选择一条记录查看任务详情。'
             : historySession ? '点击「关闭」或按 Esc 返回完整制作记录。后台任务会继续运行。'
-                : '点击「关闭」或按 Esc 返回配置页面。后台任务会继续运行，如需取消请点击「停止制作」。';
+                : fromLibrary ? '点击「关闭」或按 Esc 返回文稿库。'
+                    : '点击「关闭」或按 Esc 返回配置页面。后台任务会继续运行，如需取消请点击「停止制作」。';
     }
     function errorText(error) { const message = String(error?.message || ''); return /[\u3400-\u9fff]/u.test(message) ? message : '处理未完成，请检查文件、网络或服务连接后重试。'; }
     function clearFormError() {
@@ -461,6 +470,20 @@
         }
     }
 
+    async function openDraft(id, trigger) {
+        if (preparation) return;
+        const sequence = ++epoch, actor = actorId(), target = presentationId();
+        try {
+            await loadReviewScripts();
+            if (sequence !== epoch || actor !== actorId() || target !== presentationId()) return;
+            closeProcessModal({ restoreFocus: false, resetEpoch: false });
+            openProcessModal({ trigger, initialMessage: '正在打开初稿…' });
+            await poll(id, sequence);
+        } catch (error) {
+            if (sequence === epoch && actor === actorId() && target === presentationId()) helpers.toast(errorText(error), 'error');
+        }
+    }
+
     async function loadTask(button, route, showAccountTask = false) {
         if (preparation) return;
         const sequence = ++epoch;
@@ -536,6 +559,7 @@
             }
             const data = await helpers.requestJson(API + '/tasks', { ...post({ ...request, materials, assetIds, ...(sourceAssetId ? { sourceAssetId } : {}) }), signal: controller.signal });
             ensureCurrent();
+            byId('presentation-master-process-modal').dataset.wasWorking = data.task.id;
             await poll(data.task.id, sequence);
         } catch (error) { showError(error, sequence); }
         finally {
@@ -564,7 +588,12 @@
             return;
         }
         if (!isProcessCurrent(sequence)) return;
+        const newlyCompleted = data.task.status === 'completed' && data.task.draftFirst && !historySession
+            && byId('presentation-master-process-modal').dataset.wasWorking === id;
+        if (data.task.status === 'working') byId('presentation-master-process-modal').dataset.wasWorking = id;
+        else delete byId('presentation-master-process-modal').dataset.wasWorking;
         renderTask(data.task);
+        if (newlyCompleted) void helpers.loadDocuments?.().catch(error => helpers.toast(errorText(error), 'error'));
         if (data.task.status === 'working') window.setTimeout(() => poll(id, sequence).catch(error => showError(error, sequence)), 1500);
     }
     function renderTask(value) {
@@ -841,5 +870,5 @@
             void opening.catch(error => showError(error, sequence));
         });
     }
-    window.Pivot.exposeModule('apps.presentations.master', { bind, open });
+    window.Pivot.exposeModule('apps.presentations.master', { bind, open, openDraft });
 })();

@@ -286,13 +286,15 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
     const runtime = require('../server/services/presentations/master/runtime');
     const { query } = require('../server/db/client');
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
-    const request = { title: '交付事务测试 ' + crypto.randomUUID() };
+    const request = { title: '交付事务测试 ' + crypto.randomUUID(), draftFirst: true };
     const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
     const lease = crypto.randomUUID(), pptx = Buffer.from('用于事务验收的合成主输出'), zip = Buffer.from('用于事务验收的合成源包');
     const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
     const receipt = { sha256: digest(pptx), projectSha256: digest(zip), packageCheck: { status: 'passed', slideCount: 1, currentExportSha256: digest(pptx) } };
     const deliveryContext = { engine: { runtimeId: 'sha256:' + 'a'.repeat(64), revision: 'synthetic-runtime' } };
-    const artifacts = () => query('SELECT id FROM agent_artifacts WHERE user_id=? AND title=?', [user.id, request.title]);
+    const artifacts = () => query('SELECT id FROM agent_artifacts WHERE user_id=? AND title=?', [user.id, request.title + '-初稿']);
+    const { listPresentations } = require('../server/services/presentations/presentation-service');
+    const listDrafts = filter => listPresentations(user, { includeMasterDrafts: true, status: 'draft', search: request.title, ...filter });
     let broken = true;
     t.mock.method(runtime, 'readOutput', async (_user, _id, file) => {
         if (file === 'presentation.pptx') return pptx;
@@ -320,11 +322,17 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
             const replay = await commitDelivery(user, task.id, request, prepared, executor);
             assert.deepEqual(first, replay);
             const txStore = taskStore.createToolTaskStore({ queryOne: executor.queryOne, execute: executor.execute });
-            assert.equal((await txStore.complete(task.id, user, { publicResult: replay }, { expectedLease: lease })).status, 'completed');
+            assert.equal((await txStore.complete(task.id, user, { state: { request }, publicResult: replay }, { expectedLease: lease })).status, 'completed');
             return first;
         });
         assert.equal((await artifacts()).length, 1);
         assert.equal(result.files.length, 2);
+        assert.deepEqual((await listDrafts()).map(({ id, masterDraft, status }) => ({ id, masterDraft, status })),
+            [{ id: task.id, masterDraft: true, status: 'draft' }]);
+        assert.deepEqual(await listDrafts({ status: 'ready' }), []);
+        assert.deepEqual(await listDrafts({ favorite: true }), []);
+        assert.deepEqual(await listDrafts({ search: request.title + '-缺失' }), []);
+        assert.deepEqual(await listDrafts({ includeMasterDrafts: false }), []);
         assert.match((await queryOne('SELECT renderer_version FROM agent_artifact_renditions WHERE id=?', [result.files[0].renditionId])).renderer_version, /^ppt-master-[a-f0-9]{20}$/);
         await assert.rejects(repository.withExecution(user, task.id, lease, () => assert.fail('成功任务不能再次登记')), { code: 'PPT_MASTER_LEASE_LOST' });
     } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }

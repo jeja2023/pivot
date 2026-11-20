@@ -204,6 +204,7 @@ test('初稿匹配同一批无法核对的数据时停止盲目重试并用占�
     assert.equal(state.milestones?.firstApproval, undefined);
     assert.deepEqual(checklist, [['经营回顾', ['数据待核对（第 1 项）']]]);
     assert.equal(state.draftCitationIssues[0].page, 1);
+    assert.equal(state.usageDiagnostics[1].turnSummary.outcome, 'citation_placeholder');
     const plan = state.review.approvals.design.plan;
     state.review.approvals.design.plan = { pages: plan.pages, project: plan.project, summary: plan.summary };
     assert.deepEqual(exportReview(state, 'report').checklist, checklist);

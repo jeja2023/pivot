@@ -74,9 +74,9 @@
     },
     {
       "file": "server/repositories/presentation-master-tasks.js",
-      "count": 19,
-      "rationale": "活动任务、审批和交付绑定账号与固定工具名称。通过页保存锁定任务并比对修订，自动快照和受控产物引用在带租约的任务行锁内一起更新。仅为替换后无引用的制作快照设置回收期限。历史按账号筛选，优先返回已保存任务。业务参数均绑定。",
-      "verification": "tests/presentation-master-postgres.test.js 验证租约和交付事务。tests/e2e/presentation-recovery.spec.js 验证普通账号查看持久快照、跨账号拒绝和原任务续作。"
+      "count": 20,
+      "rationale": "活动任务、审批和交付绑定账号与固定工具名称。快照和受控产物引用在带租约的任务行锁内更新。草稿目录按租户、任务所有者和已交付 PPTX 检索，复用来源和产物授权。业务参数均绑定。",
+      "verification": "tests/presentation-master-postgres.test.js 验证租约、交付事务及草稿目录过滤。tests/e2e/presentation-recovery.spec.js 验证快照回看、跨账号拒绝和原任务续作。"
     },
     {
       "file": "server/repositories/presentation-quality-tasks.js",

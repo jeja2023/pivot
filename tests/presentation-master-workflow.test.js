@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const directory = '../server/services/presentations/master/';
 const { drive } = require(directory + 'driver');
 const { allocateWorkflowCall, prepareManagedProject } = require(directory + 'workflow-progress');
@@ -37,6 +38,65 @@ test('只读图表检索不会重置制作阶段进展', () => {
     const observation = { action: 'run', result: { exitCode: 0, stdout: '图表参考' } };
     for (let index = 0; index < 4; index++) assert.equal(progress.evaluate([action], [observation]).productive, false);
     assert.equal(progress.stalled(), true);
+});
+
+test('首张页面阶段识别运行包资料，已有检查点的连续只读轮次转入真实写入', async () => {
+    const project = 'report', source = project + '/svg_output/P01.svg';
+    const state = {
+        request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 80, tokenBudget: 0 },
+        review: { approvals: { design: { plan: { project } } } },
+        bootstrapped: true, managedProject: project, steps: 9, usedTokens: 123, workflowPhaseFrom: 1,
+        workflowProgress: { phase: 'first_page', calls: 6 }, messages: [{ role: 'system', content: '首张页面验收' }]
+    };
+    for (let i = 0; i < 6; i++) {
+        const path = `references/page-${i}.md`;
+        state.messages.push({ role: 'assistant', content: JSON.stringify({ actions: [{ action: 'read_runtime', path }] }) },
+            { role: 'user', content: JSON.stringify([{ action: 'read_runtime', result: { path, text: '指引', nextOffset: null } }]) });
+    }
+    const executed = [];
+    let calls = 0;
+    const run = user => drive(user, 'task', state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async (_model, messages) => {
+            calls++;
+            if (calls === 1) return { actions: [{ action: 'read_runtime', path: 'references/modes/_index.md' }] };
+            if (calls === 2) {
+                assert.match(messages[0].content, /已达到首张页面的连续只读轮次/);
+                return { actions: [
+                    { action: 'read', path: 'references/executor-base.md', offset: 24000 },
+                    { action: 'write', path: source, text: '<svg/>' }
+                ] };
+            }
+            return { requestInput: { kind: 'clarification', question: '请补充下一页使用的材料。' } };
+        },
+        execute: async (_user, _id, action) => {
+            executed.push(action);
+            if (action.action === 'read_runtime') return { path: action.path, text: '运行包指引', offset: action.offset, nextOffset: null };
+            return { path: action.path, sha256: createHash('sha256').update(action.text).digest('hex') };
+        }
+    });
+    await run({ id: 1 });
+    assert.deepEqual(executed.map(({ action, path, offset }) => [action, path, offset]), [
+        ['read_runtime', 'references/executor-base.md', 24000], ['write', source, undefined]
+    ]);
+    assert.equal(state.milestones.firstPageWrite.steps, 10);
+    assert.equal(state.firstPageInspectionRounds, undefined);
+    assert.equal(state.usageDiagnostics[0].turnSummary.errorCode, 'PPT_MASTER_AUTHORING_READ_LIMIT');
+});
+
+test('不同指引的连续只读请求达到首张页面阈值后停止执行并保留检查点', async () => {
+    const state = { bootstrapped: true, managedProject: 'report', steps: 0, usedTokens: 0,
+        request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 80, tokenBudget: 0 },
+        review: { approvals: { design: { plan: { project: 'report' } } } }, messages: [{ role: 'system', content: '测试' }] };
+    let calls = 0, reads = 0;
+    await assert.rejects(drive({ id: 1 }, 'task', state, hooks, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async () => ({ actions: [{ action: 'read_runtime', path: 'references/page-' + ++calls + '.md' }] }),
+        execute: async (_user, _id, action) => { reads++; return { path: action.path, text: '指引', nextOffset: null }; }
+    }), { code: 'PPT_MASTER_AUTHORING_READ_LIMIT', message: /仍没有写入首张页面/ });
+    assert.equal(calls, 8);
+    assert.equal(reads, 6);
+    assert.equal(state.milestones?.firstPageWrite, undefined);
 });
 
 test('宿主项目准备复用已有工作区并明确导入文字', async () => {

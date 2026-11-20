@@ -70,11 +70,11 @@ function checkpointProgressView(state, pending) {
     }
     const plans = [];
     for (const stage of stages) {
-        const approved = state.review?.approvals?.[stage]?.plan;
-        if (approved) plans.push(planView(stage, 'approved', approved));
+        const record = state.review?.approvals?.[stage];
+        if (record?.plan) plans.push(planView(stage, record.basis === 'automatic' ? 'automatic' : 'approved', record.plan));
         if (pending?.stage === stage && !state.response) plans.push(planView(stage, 'pending', pending.plan));
         else if (stage === 'design' && state.citationDraft?.stage === stage) plans.push(planView(stage, 'citation_review', state.citationDraft.plan));
-        else if (!approved && latest.has(stage)) plans.push(planView(stage, 'previous', latest.get(stage)));
+        else if (!record?.plan && latest.has(stage)) plans.push(planView(stage, 'previous', latest.get(stage)));
     }
     return { requirementsLoaded: state.bootstrapped === true, materials: materials.map(materialView), plans: plans.filter(Boolean) };
 }

@@ -488,37 +488,70 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
     object-fit: contain;
 }
 
-.presentation-catalog-preview > .presentation-catalog-actions {
+.presentation-catalog-preview>.presentation-catalog-actions {
     justify-content: flex-end;
     flex-wrap: wrap;
     flex-shrink: 0;
 }
 
 @media (max-width: 760px) {
+
     .presentation-catalog-dialog .presentation-catalog-body-wrap,
-    .presentation-catalog-preview { padding: 12px; }
+    .presentation-catalog-preview {
+        padding: 12px;
+    }
+
     .presentation-catalog-toolbar-actions,
-    .presentation-catalog-search-wrap { width: 100%; margin: 0; }
-    .presentation-catalog-search-wrap { flex: 1 1 120px; min-width: 0; }
+    .presentation-catalog-search-wrap {
+        width: 100%;
+        margin: 0;
+    }
+
+    .presentation-catalog-search-wrap {
+        flex: 1 1 120px;
+        min-width: 0;
+    }
+
     .presentation-catalog-table :is(.presentation-catalog-seq-th, .presentation-catalog-seq-cell,
         .presentation-catalog-desc-th, .presentation-catalog-desc-cell, .presentation-catalog-source-th,
         .presentation-catalog-source-cell, .presentation-catalog-version-th, .presentation-catalog-version-cell,
-        .presentation-catalog-supported-th, .presentation-catalog-supported-cell) { display: none; }
+        .presentation-catalog-supported-th, .presentation-catalog-supported-cell) {
+        display: none;
+    }
+
     .presentation-catalog-table :is(.presentation-catalog-name-th, .presentation-catalog-name-cell) {
         width: 36%;
         min-width: 0;
         white-space: normal;
         overflow-wrap: anywhere;
     }
+
     .presentation-catalog-table :is(.presentation-catalog-controls-th, .presentation-catalog-controls-cell) {
         width: 64%;
         min-width: 0;
     }
-    .presentation-catalog-table .presentation-catalog-actions { flex-wrap: wrap; }
-    .presentation-catalog-dialog:has(.presentation-catalog-preview) { height: auto; }
-    .presentation-catalog-preview-toolbar .presentation-catalog-preview-layout { margin-left: 0; }
-    .presentation-catalog-preview-stage { flex: 0 0 auto; min-height: 100px; }
-    .presentation-catalog-preview-stage img { height: auto; border: 1px solid var(--border); }
+
+    .presentation-catalog-table .presentation-catalog-actions {
+        flex-wrap: wrap;
+    }
+
+    .presentation-catalog-dialog:has(.presentation-catalog-preview) {
+        height: auto;
+    }
+
+    .presentation-catalog-preview-toolbar .presentation-catalog-preview-layout {
+        margin-left: 0;
+    }
+
+    .presentation-catalog-preview-stage {
+        flex: 0 0 auto;
+        min-height: 100px;
+    }
+
+    .presentation-catalog-preview-stage img {
+        height: auto;
+        border: 1px solid var(--border);
+    }
 }
 
 .presentation-page-actions {
@@ -1834,6 +1867,385 @@ body.dark-mode .presentation-create-dialog-title-row .workspace-modal-close:hove
 #presentation-production-task-status:empty,
 .presentation-empty-note:empty {
     display: none !important;
+}
+
+#presentation-production-task-status,
+#presentation-design-task-status {
+    margin: 0;
+}
+
+.presentation-deck-task-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 11px 12px;
+    border-radius: 9px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--primary);
+    background: var(--surface);
+}
+
+.presentation-deck-task-card.is-blocked {
+    border-left-color: var(--danger);
+    background: color-mix(in srgb, var(--danger) 4%, var(--surface));
+}
+
+.presentation-deck-task-card.is-warning {
+    border-left-color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 5%, var(--surface));
+}
+
+.presentation-deck-task-card.is-passed {
+    border-left-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 4%, var(--surface));
+}
+
+.presentation-deck-task-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.presentation-deck-task-title {
+    font-size: 0.76rem;
+    font-weight: 750;
+    color: var(--text-main);
+}
+
+.presentation-deck-task-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    white-space: nowrap;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.presentation-deck-task-badge.is-blocked {
+    background: color-mix(in srgb, var(--danger) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--danger) 28%, transparent);
+    color: var(--danger);
+}
+
+.presentation-deck-task-badge.is-warning {
+    background: color-mix(in srgb, var(--warning) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 35%, transparent);
+    color: color-mix(in srgb, var(--warning) 85%, var(--text-main));
+}
+
+.presentation-deck-task-badge.is-passed,
+.presentation-deck-task-badge.is-working {
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--primary) 28%, transparent);
+    color: var(--primary);
+}
+
+.presentation-deck-task-msg {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    word-break: break-word;
+}
+
+.presentation-deck-task-metrics {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.presentation-deck-task-metric {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 650;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    color: var(--text-main);
+}
+
+.presentation-deck-task-metric.is-blocked {
+    color: var(--danger);
+    border-color: color-mix(in srgb, var(--danger) 30%, var(--border));
+}
+
+.presentation-deck-task-metric.is-warning {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.presentation-deck-task-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.presentation-deck-task-btn {
+    width: 100%;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 7px;
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+
+/* 整稿检查结果弹窗 */
+.presentation-deck-report-dialog {
+    width: min(860px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    border-radius: 16px !important;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+}
+
+.presentation-deck-report-head {
+    padding: 16px 20px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.presentation-deck-report-body {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding: 16px 20px;
+    overflow-y: auto;
+    min-height: 0;
+}
+
+.presentation-deck-report-stats {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.presentation-deck-report-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-side);
+}
+
+.presentation-deck-report-stat-label {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.presentation-deck-report-stat-val {
+    font-size: 0.96rem;
+    font-weight: 750;
+    color: var(--text-main);
+}
+
+.presentation-deck-report-stat.is-blocked .presentation-deck-report-stat-val {
+    color: var(--danger);
+}
+
+.presentation-deck-report-stat.is-warning .presentation-deck-report-stat-val {
+    color: var(--warning);
+}
+
+.presentation-deck-report-stat.is-passed .presentation-deck-report-stat-val {
+    color: var(--primary);
+}
+
+.presentation-deck-report-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.presentation-deck-report-section-title {
+    margin: 0;
+    font-size: 0.82rem;
+    font-weight: 750;
+    color: var(--text-main);
+}
+
+.presentation-deck-report-checks,
+.presentation-deck-report-reviews {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.presentation-deck-report-check-item {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+}
+
+.presentation-deck-report-check-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.presentation-deck-report-check-top strong {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-main);
+}
+
+.presentation-deck-report-check-item p {
+    margin: 0;
+    font-size: 0.72rem;
+    line-height: 1.45;
+    color: var(--text-muted);
+}
+
+.presentation-deck-report-issues-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.presentation-deck-report-filters {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.presentation-deck-report-filter-btn {
+    height: 26px;
+    padding: 0 10px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 650;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.presentation-deck-report-filter-btn.is-active {
+    border-color: var(--primary);
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+}
+
+.presentation-deck-report-issues-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 340px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.presentation-deck-report-issue {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--border);
+    background: var(--surface);
+}
+
+.presentation-deck-report-issue.is-blocking {
+    border-left-color: var(--danger);
+}
+
+.presentation-deck-report-issue.is-warning {
+    border-left-color: var(--warning);
+}
+
+.presentation-deck-report-issue-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.presentation-deck-report-slide-tag {
+    font-size: 0.68rem;
+    font-weight: 650;
+    color: var(--text-muted);
+}
+
+.presentation-deck-report-locate-btn {
+    margin-left: auto;
+    border: none;
+    background: transparent;
+    color: var(--primary);
+    font-size: 0.7rem;
+    font-weight: 650;
+    cursor: pointer;
+    padding: 2px 6px;
+    border-radius: 4px;
+}
+
+.presentation-deck-report-locate-btn:hover {
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.presentation-deck-report-issue-title {
+    font-size: 0.76rem;
+    font-weight: 700;
+    color: var(--text-main);
+    line-height: 1.4;
+}
+
+.presentation-deck-report-issue-tip {
+    margin: 0;
+    font-size: 0.71rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+}
+
+.presentation-deck-report-empty {
+    margin: 0;
+    padding: 16px;
+    text-align: center;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    background: var(--bg-side);
+    border-radius: 8px;
+    border: 1px dashed var(--border);
+}
+
+.presentation-deck-report-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+
+@media (max-width: 720px) {
+    .presentation-deck-report-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .presentation-deck-report-checks,
+    .presentation-deck-report-reviews {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 
 .presentation-issues-list .presentation-empty-note {

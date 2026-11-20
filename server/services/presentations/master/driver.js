@@ -10,13 +10,14 @@ const { pendingInput, planDigest, isLegacyDirection } = require('./confirmation'
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
 const { recordCheck, requireChecks } = require('./tool-checks');
-const { beginPageRepair, automaticTurn, recordRepairResult, stopAutomaticRepair } = require('./automatic-page-repair');
+const { beginPageRepair, automaticTurn, recordRepairResult, stopAutomaticRepair, repairPrompt } = require('./automatic-page-repair');
+const { repairIssuesText } = require('./repair-check-diagnostics');
 const { loadTemplateSpec, installTemplate } = require('./template-application');
 const { applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance } = require('./review-plan');
 const { pauseCitationReview, draftWithCitationPlaceholders, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { selectImagePage, imageCoverage } = require('./model-input');
 const { registerSupplement, getSupplement, readSupplement, supplementGuidance } = require('./user-supplements');
-const { allocateWorkflowCall, progressFor, prepareManagedProject } = require('./workflow-progress');
+const { allocateWorkflowCall, progressFor, prepareManagedProject, requireFirstPageProgress, recordFirstPageProgress } = require('./workflow-progress');
 const { deliverWithRecovery } = require('./delivery-recovery');
 const { sourceBundleLimit } = require('./delivery');
 
@@ -41,7 +42,7 @@ async function resolveModel(user, request) {
     if (Number(model.daily_token_limit) > 0 && await getModelDailyUsageAsync(user.id, model.id) >= Number(model.daily_token_limit)) throw runtime.error('当前模型今日额度已用完。', 'PPT_MASTER_QUOTA_EXCEEDED', 429);
     return model;
 }
-const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 'PPT_MASTER_MODEL_TRUNCATED', 'PPT_MASTER_CHECKLIST_REQUIRED']);
+const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 'PPT_MASTER_MODEL_TRUNCATED', 'PPT_MASTER_CHECKLIST_REQUIRED', 'PPT_MASTER_AUTHORING_READ_LIMIT']);
 const MAX_CITATION_REPAIRS = 3;
 const MAX_INSPECTION_REPAIRS = 2;
 const PAGED_READS = new Set(['read', 'read_runtime', 'read_history']);
@@ -69,7 +70,7 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
         const guidance = [allocateWorkflowCall(state), inspection.guidance(), reviewGuidance(state), supplementGuidance(state), imageHint, correction,
             state.templateSpec && '最终清单 plan.templateUse 必填 {rule,page,visibleText}。从 selectedTemplateSpec.text 逐字选取一条相关设计规范（12 至 350 字符），注明落实它的页码及该页实际标题或关键数据。宿主会把原模板安装到此项目并在交付时复核。',
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
-            state.pageRepair?.automatic ? `自动修页。按 approvedPageRepairs 读取源文件，对照已批准的标题及数据修正。只需用 write 写回剩余文件：${state.pageRepair.remaining.join('、')}。宿主会依次复检、重新导出和回读。仅在已有材料无法决定内容时提出具体问题。`
+            state.pageRepair?.automatic ? repairPrompt(state.pageRepair)
                 : state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
             state.citationRepair && CITATION_REPAIR_GUIDANCE, state.citationRepair && state.citationDraft && CITATION_PATCH_GUIDANCE,
             state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
@@ -79,6 +80,7 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
         try {
             if (usageRef.truncated) throw runtime.error('模型输出被截断，请拆为单页或减少同轮动作。', 'PPT_MASTER_MODEL_TRUNCATED', 422);
             const turn = await validateTurn(output, state, verifySource);
+            requireFirstPageProgress(state, turn);
             if (turn.requestInput?.plan?.templateUse && state.installedTemplateProject !== turn.requestInput.plan.project) {
                 await hooks.ensureCurrent();
                 await installTemplate(state, turn.requestInput.plan.project, op => (deps.execute || runtime.execute)(user, id, op, hooks));
@@ -98,11 +100,12 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
                 const first = failure.citationIssues[0];
                 const exhausted = attempts >= MAX_CITATION_REPAIRS || facts.size > 120 || designLimitReached
                     || Boolean(state.request.draftFirst && unchanged);
-                recordTurnDiagnostic(state, { outcome: exhausted ? 'failed' : 'retry', errorCode: CITATION_REVIEW_REQUIRED,
-                    citationCount: failure.citationIssues.length, ...(typeof first?.location === 'string' ? { citationLocation: first.location } : {}) });
+                const draft = exhausted && state.request.draftFirst && draftWithCitationPlaceholders(failure);
+                recordTurnDiagnostic(state, { outcome: draft ? 'citation_placeholder' : exhausted ? 'failed' : 'retry',
+                    errorCode: CITATION_REVIEW_REQUIRED, citationCount: failure.citationIssues.length,
+                    ...(typeof first?.location === 'string' ? { citationLocation: first.location } : {}) });
                 if (exhausted) {
                     state.citationFacts = [...facts.values()].slice(0, 120);
-                    const draft = state.request.draftFirst && draftWithCitationPlaceholders(failure);
                     if (draft) return { turn: { requestInput: draft }, readResultBudget, pendingCitations: failure.citationIssues };
                     throw pauseCitationReview(state);
                 }
@@ -125,7 +128,10 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
             correction = '上一回复未执行任何制作动作。请修正并只返回一个合法 JSON 对象。问题：' + failure.message;
             state.actionRetries = Number(state.actionRetries || 0) + 1;
             state.lastActionCorrection = failure.code;
-            await hooks.checkpoint(state, { phase: 'authoring', message: '模型操作格式或制作阶段不符，正在修正一次。' });
+            let message = '模型操作格式或制作阶段不符，正在修正一次。';
+            if (failure.code === 'PPT_MASTER_AUTHORING_READ_LIMIT') message = failure.message;
+            else if (state.pageRepair?.automatic) message = '修页操作未通过校验。请仅写回已选源页，复检、定稿和导出由宿主执行。';
+            await hooks.checkpoint(state, { phase: 'authoring', message });
         }
     }
 }
@@ -241,6 +247,7 @@ async function drive(user, id, state, hooks, deps = {}) {
                 state.installedTemplateProject = plan.project;
             }
             recordDraftPlan(state, plan);
+            delete state.firstPageInspectionRounds;
             state.draftCitationIssues = pendingCitations?.map(({ page, item, reason }) => ({ page, item, reason })) || [];
             markMilestone(state, 'firstPlan');
             state.messages.push({ role: 'assistant', content: JSON.stringify(turn) },
@@ -354,7 +361,10 @@ async function drive(user, id, state, hooks, deps = {}) {
             state.messages[state.messages.length - 1].content = JSON.stringify(observations);
             recordRepairResult(state, action, observations.at(-1), result);
             if (observations.at(-1).error) {
-                await hooks.checkpoint(state, { phase: 'authoring', message: '制作操作未完成，已保存诊断与检查点。' });
+                const detail = action.tool === 'check_svg' ? repairIssuesText(state.pageRepair?.checkIssues) : '';
+                await hooks.checkpoint(state, { phase: 'authoring', message: detail
+                    ? '整稿复检未通过：' + detail + '。正在按选页范围修正。'
+                    : '制作操作未完成，已保存诊断与检查点。' });
                 break;
             }
             if (confirmedWrite(action, observations.at(-1))) {
@@ -375,6 +385,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             if (JSON.stringify(state.messages).length > 650000) throw runtime.error('制作检查点超过当前保存上限，请保留项目后分批制作。', 'PPT_MASTER_HISTORY_LIMIT', 422);
         }
         const { progressed, productive, failed, repeated } = inspection.evaluate(turn.actions, observations);
+        recordFirstPageProgress(state, turn.actions, observations);
         if (productive) resetInspectionRepair(state);
         if (progressed || failed) {
             delete state.inspectionRepairPending;

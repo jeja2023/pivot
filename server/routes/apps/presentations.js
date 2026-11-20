@@ -351,6 +351,7 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
 
     router.get('/apps/presentations', authMiddleware, asyncHandler(async (req, res) => {
         res.json({ presentations: await listPresentations(req.user, {
+            includeMasterDrafts: req.query.includeMasterDrafts === 'true',
             limit: normalizeLimit(req.query.limit, 50, 100), search: req.query.search, templateId: req.query.templateId, status: req.query.status, tag: req.query.tag, favorite: req.query.favorite,
             createdBy: req.query.createdBy || req.query.created_by, updatedFrom: req.query.updatedFrom || req.query.updated_from, updatedTo: req.query.updatedTo || req.query.updated_to
         }) });

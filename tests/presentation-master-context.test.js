@@ -85,6 +85,12 @@ test('制作检查点用原始快照的分页回执计算进展，并保留可�
     assert.equal(checkpointProgressView(state).plans[1].status, 'citation_review');
     assert.equal(checkpointProgressView(state, requestInput).plans[1].status, 'pending');
     assert.deepEqual(checkpointProgressView({ ...state, messages: [], review: {}, citationDraft: null }).plans, []);
+    state.citationDraft = null;
+    state.review.approvals.design = { basis: 'automatic', plan: requestInput.plan };
+    const automatic = checkpointProgressView(state).plans[1];
+    assert.equal(automatic.status, 'automatic');
+    assert.deepEqual(automatic.pages, actual.plans[1].pages);
+    assert.doesNotMatch(JSON.stringify(automatic), /内部核验的原文/);
 });
 
 test('单轮窗口与累计预算分别限制模型调用，并预留输出和安全余量', () => {

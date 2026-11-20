@@ -278,27 +278,31 @@
     function mountSnapshots(panel, task, options) {
         const { node } = options, saved = task.progressSnapshot;
         if (!saved || task.status === 'working') return;
+        const files = task.status === 'completed' ? task.result?.files : null;
+        const source = !files?.some(file => file.format === 'zip') && saved.source;
+        const hasPptx = files?.some(file => file.format === 'pptx');
+        const exported = !hasPptx && saved.export, passed = !hasPptx && saved.passed;
+        if (!source && !exported && !passed) return;
         const section = node('section', 'presentation-master-review-panel');
         const controls = node('div', 'presentation-master-task-actions');
         section.appendChild(node('strong', '', '自动保存的制作快照'));
-        if (saved.source) {
-            const count = saved.source.count;
-            const summary = node('p', 'presentation-master-task-summary', count ? `已保留 ${count} 个源页文件，源稿待核验。` : '已保留待核验项目源文件。');
-            if (saved.source.files?.length) summary.title = saved.source.files.join('、');
+        if (source) {
+            const summary = node('p', 'presentation-master-task-summary', source.count ? `已保留 ${source.count} 个源页文件。` : '已保留项目源文件。');
+            if (source.files?.length) summary.title = source.files.join('、');
             section.appendChild(summary);
             addFileActions(controls, task, 'snapshots/source', '-待核验项目源包.zip', '下载待核验项目源包', '', options);
         }
-        if (saved.export) {
-            const pending = saved.export.pendingPages;
+        if (exported) {
+            const pending = exported.pendingPages;
             if (pending.length) section.appendChild(node('p', 'presentation-master-task-summary', `待核验页：${pending.join('、')}。`));
             addFileActions(controls, task, 'snapshots/export', '-待核验整稿快照.pptx', '下载待核验整稿快照（.pptx）', '', options);
         }
-        if (saved.passed) {
-            const label = saved.passed.historical ? '上一次可下载的通过页' : '已通过核验的快照页';
-            section.appendChild(node('p', 'presentation-master-task-summary', `${label}：${saved.passed.pages.join('、')}。`));
+        if (passed) {
+            const label = passed.historical ? '上一次可下载的通过页' : '已通过核验的快照页';
+            section.appendChild(node('p', 'presentation-master-task-summary', `${label}：${passed.pages.join('、')}。`));
             addFileActions(controls, task, 'snapshots/passed', '-已通过页面（部分文稿）.pptx', '下载已通过页面（.pptx）', '将已通过页转存为独立文稿', options);
         }
-        if (saved.subsetUnavailable) section.appendChild(node('p', 'presentation-master-task-summary', '本次导出中的部分资源无法独立提取，可下载整稿快照核对。'));
+        if (exported && saved.subsetUnavailable) section.appendChild(node('p', 'presentation-master-task-summary', '本次导出中的部分资源无法独立提取，可下载整稿快照核对。'));
         section.appendChild(controls);
         panel.appendChild(section);
     }
@@ -393,7 +397,8 @@
         PPT_MASTER_OPERATION_FAILED: '工具脚本执行失败', PPT_SERVICE_OPERATION_FAILED: '执行服务动作未通过', PPT_SERVICE_TIMEOUT: '执行服务动作超时' };
     const OUTCOME_BADGES = { productive: { text: '已写入推进', tone: 'completed' }, progressed: { text: '读取与检查', tone: 'working' },
         input_required: { text: '提交确认', tone: 'input_required' }, completed: { text: '导出交付', tone: 'completed' },
-        page_repair: { text: '自动修页', tone: 'input_required' }, retry: { text: '动作修正重试', tone: 'failed' },
+        page_repair: { text: '自动修页', tone: 'input_required' }, citation_placeholder: { text: '引文待核对', tone: 'input_required' },
+        retry: { text: '动作修正重试', tone: 'failed' },
         model_failed: { text: '模型调用失败', tone: 'failed' },
         tool_failed: { text: '工具未通过', tone: 'failed' }, stalled: { text: '重复无进展', tone: 'failed' }, failed: { text: '执行异常', tone: 'failed' } };
 
@@ -471,6 +476,7 @@
         }
         if (item.outcome === 'completed') return `提交最终${item.deliveryKind === 'template' ? '模板工作区' : '演示文件导出'}核验${item.path ? '（' + localizePath(item.path) + '）' : ''}`;
         if (item.outcome === 'page_repair') return `导出回读核验后转入按页自动修复（第 ${(item.repairPages || []).join('、')} 页）`;
+        if (item.outcome === 'citation_placeholder') return '用待核对占位文字继续制作';
         if (Array.isArray(item.actions) && item.actions.length) {
             return item.actions.map(formatDiagnosticLocation).filter(Boolean).join('；')
                 + (item.skippedActions ? `（其余 ${item.skippedActions} 项因前序失败未执行）` : '');
@@ -482,7 +488,10 @@
 
     function formatTurnError(item) {
         if (!item || typeof item !== 'object') return '';
-        if (item.outcome === 'model_failed') return window.Pivot.moduleApi('apps.presentations.masterUsage').formatModelError(item.errorCode);
+        const usage = window.Pivot.moduleApi('apps.presentations.masterUsage');
+        if (item.outcome === 'model_failed') return usage.formatModelError(item.errorCode);
+        const preparation = usage.preparationDiagnostic(item);
+        if (preparation) return preparation;
         if (item.outcome === 'retry') {
             if (item.errorCode === 'PPT_MASTER_CITATION_REVIEW_REQUIRED') {
                 return `清单引文待核对${item.citationCount ? '（共 ' + item.citationCount + ' 项' + (item.citationLocation ? '，首项：' + item.citationLocation : '') + '）' : ''}，宿主已自动发起查证重试。`;
@@ -583,7 +592,7 @@
     }
     function ensureCheckpointModal() {
         return ensureSubModal({ id: 'presentation-master-checkpoint-modal', title: '材料与提纲',
-            subtitle: '核对文字材料快照读取范围及已保存的沟通方向与逐页提纲', icon: DOC_ICON_PATHS,
+            subtitle: '材料与逐页提纲', icon: DOC_ICON_PATHS,
             bodyClass: 'presentation-master-checkpoint-body', bodyId: 'presentation-master-checkpoint-body', onClose: closeCheckpointModal });
     }
     function renderCheckpointBody() {
@@ -634,6 +643,7 @@
         const stageNames = { direction: '沟通方向', design: '逐页提纲', template: '模板方案' };
         const statusMeta = {
             approved: { label: '已确认', tone: 'completed' },
+            automatic: { label: '初稿清单', tone: 'completed' },
             pending: { label: '待确认', tone: 'input_required' },
             citation_review: { label: '引文待核对', tone: 'failed' },
             previous: { label: '历史方案', tone: 'expired' }
@@ -704,7 +714,7 @@
     function renderUsageList() {
         const list = byId('presentation-master-usage-list');
         if (!list) return;
-        const { timingLabel, formatMetrics } = window.Pivot.moduleApi('apps.presentations.masterUsage');
+        const { timingLabel, formatMetrics, contextLabel } = window.Pivot.moduleApi('apps.presentations.masterUsage');
         list.replaceChildren();
         for (const item of usageDiagnostics) {
             const row = el('li', 'presentation-master-usage-item');
@@ -732,8 +742,7 @@
                 if (item.errorCode) errEl.title = item.errorCode;
                 row.appendChild(errEl);
             }
-            const parts = item.breakdown ? `（初始指引及任务 ${item.breakdown.initial}，历史消息 ${item.breakdown.history}，工具结果 ${item.breakdown.toolResults || 0}，图片 ${item.breakdown.images}）` : '';
-            row.appendChild(el('p', 'presentation-master-usage-detail', `预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，已收敛 ${item.compactedWrites} 条文件写入正文。`));
+            row.appendChild(el('p', 'presentation-master-usage-detail', contextLabel(item)));
             list.appendChild(row);
         }
     }

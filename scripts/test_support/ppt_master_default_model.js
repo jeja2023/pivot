@@ -145,6 +145,7 @@ function turn(request, messages, assistant) {
     });
     const authored = assistant.some(item => item.actions?.some(action => action.path === project + '/spec_lock.md'));
     if (!authored) return { actions: [
+        { action: 'read', path: 'references/executor-base.md', length: 1200 },
         { action: 'write', path: project + '/design_spec.md', text: spec(roster, templateUse) },
         { action: 'write', path: project + '/spec_lock.md', text: lock() },
         { action: 'run', tool: 'project', args: ['validate', project] }

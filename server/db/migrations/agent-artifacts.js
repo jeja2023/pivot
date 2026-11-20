@@ -196,9 +196,23 @@ async function downPg(client, { logger }) {
   logger.info(`[${migrationId}] Artifacts 交互空间表回滚完成`);
 }
 
+async function checkPg(client) {
+  const result = await client.query(`
+    SELECT COUNT(*) AS matched
+    FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND (
+        (table_name = 'agent_artifact_versions' AND column_name IN ('note', 'metadata', 'created_by'))
+        OR (table_name = 'agent_artifacts' AND column_name IN ('note', 'current_version_id', 'description', 'metadata', 'parent_id', 'version', 'status'))
+      )
+  `);
+  return Number(result.rows[0]?.matched || 0) === 10;
+}
+
 module.exports = {
   id: migrationId,
   description: 'Artifacts 可视化交互空间',
   upPg,
+  checkPg,
   downPg
 };

@@ -26,6 +26,27 @@ async function recent(user) {
           AND (id IN (SELECT id FROM latest) OR result_json->'savedReviewPages' IS NOT NULL OR result_json->'progressSnapshots' IS NOT NULL)
         ORDER BY (result_json->'savedReviewPages' IS NOT NULL OR result_json->'progressSnapshots' IS NOT NULL) DESC, created_at DESC, id DESC`, [user.id, TOOL, user.id, TOOL]);
 }
+async function draftCandidates(user, tenantId, filters) {
+    const { search, templateId, createdBy, updatedFrom, updatedTo, limit } = filters;
+    return query(`SELECT t.id,t.updated_at,u.username,u.nickname,a.title AS artifact_title,r.id AS rendition_id,
+        (t.result_json->'state'->'request')-'materials'-'instruction' AS request
+        FROM tool_tasks t JOIN users u ON u.id=t.user_id
+        JOIN agent_artifact_renditions r ON r.tool_call_id='ppt-master:'||t.id AND r.tenant_id=?
+            AND r.created_by=t.user_id AND r.format='pptx' AND r.status='ready'
+        JOIN agent_artifacts a ON a.id=r.artifact_id AND a.user_id=t.user_id AND COALESCE(a.status,'active')<>'deleted'
+        WHERE t.user_id=? AND (t.tenant_id IS NULL OR t.tenant_id=r.tenant_id) AND t.tool_name=? AND t.status='completed'
+            AND t.result_json->'state'->'request'->>'draftFirst'='true'
+            AND (t.result_json->'publicResult'->'files') @> jsonb_build_array(jsonb_build_object('format','pptx','renditionId',r.id))
+            AND (?::text='' OR a.title ILIKE ?
+                OR (t.result_json->'state'->'review'->'approvals'->'design'->'plan'->'pages')::text ILIKE ?)
+            AND (?::text='' OR t.result_json->'state'->'request'->'template'->>'id'=?)
+            AND (?::text='' OR u.username ILIKE ? OR COALESCE(u.nickname,'') ILIKE ?)
+            AND (NULLIF(?::text,'') IS NULL OR t.updated_at>=NULLIF(?::text,'')::date)
+            AND (NULLIF(?::text,'') IS NULL OR t.updated_at<NULLIF(?::text,'')::date+INTERVAL '1 day')
+        ORDER BY t.updated_at DESC,t.id DESC LIMIT ?`,
+    [tenantId, user.id, TOOL, search, search, search, templateId, templateId, createdBy, createdBy, createdBy,
+        updatedFrom, updatedFrom, updatedTo, updatedTo, limit]);
+}
 async function saveReviewPages(user, id, revision, snapshot, commit) {
     return transaction(async client => {
         const row = await client.queryOne(`SELECT updated_at::text AS review_revision, result_json->'savedReviewPages' AS saved
@@ -113,4 +134,4 @@ async function admit(user, create, excludedTaskId = '') {
     });
 }
 
-module.exports = { TOOL, read, latest, recent, saveReviewPages, findActive, withExecution, saveProgressSnapshot, updateProgressRetention, claim, save, renew, release, parentActive, acceptResponse, resume, admit };
+module.exports = { TOOL, read, latest, recent, draftCandidates, saveReviewPages, findActive, withExecution, saveProgressSnapshot, updateProgressRetention, claim, save, renew, release, parentActive, acceptResponse, resume, admit };

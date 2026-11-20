@@ -238,7 +238,13 @@ async function listPresentations(user, options = {}) {
         ORDER BY CASE WHEN pf.presentation_id IS NULL THEN 1 ELSE 0 END, d.updated_at DESC, d.id DESC
         LIMIT ?
     `, [user.id, user.id, user.id, ...params, limit]);
-    return rows.map(row => toPublicPresentation(row));
+    const presentations = rows.map(row => toPublicPresentation(row));
+    if (options.includeMasterDrafts !== true) return presentations;
+    const drafts = await require('./master/tasks').listDrafts(user, {
+        search, templateId, status, tag, createdBy, updatedFrom, updatedTo, favorite: favoriteOnly, limit
+    });
+    return [...presentations, ...drafts].sort((a, b) => Number(b.favorite || false) - Number(a.favorite || false)
+        || Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).slice(0, limit);
 }
 
 async function setPresentationFavorite(user, clientId, favorite = true) {

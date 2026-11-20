@@ -160,7 +160,7 @@ function summarizeExecutedTurn(turn, observations, extra = {}) {
 function sanitizeTurnSummary(summary) {
     if (!summary || typeof summary !== 'object') return {};
     const out = {};
-    if (['progressed', 'productive', 'input_required', 'completed', 'page_repair', 'retry', 'model_failed', 'tool_failed', 'stalled', 'failed'].includes(summary.outcome)) out.outcome = summary.outcome;
+    if (['progressed', 'productive', 'input_required', 'completed', 'page_repair', 'citation_placeholder', 'retry', 'model_failed', 'tool_failed', 'stalled', 'failed'].includes(summary.outcome)) out.outcome = summary.outcome;
     if (['confirmation', 'clarification'].includes(summary.inputKind)) out.inputKind = summary.inputKind;
     if (['direction', 'design', 'template'].includes(summary.stage)) out.stage = summary.stage;
     if (Number.isSafeInteger(summary.planPages) && summary.planPages > 0) out.planPages = summary.planPages;

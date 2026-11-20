@@ -114,9 +114,9 @@ function createInspectionProgress(messages, phaseFrom = 0) {
         guidance() {
             if (failedRounds) return '最近的制作操作执行失败。请根据工具回执修正参数或文件后重试；若缺少事实、文件或能力，请提出明确的补充问题。';
             if (inspectionRounds < 6 && !repeatedRounds) return '';
-            return '宿主检测到当前阶段反复处于读取和检查。请先利用已获得的结果，避免再次请求相同文件页。仍有必需资料时，成批读取具体未读页。资料齐备时，按流程立即推进到初始化项目、提交用户确认、写入当前阶段文件或校验产物中的适用步骤。缺少关键事实或授权时，提交明确的补充问题。';
+            return '宿主检测到当前阶段反复处于读取和检查。请先利用已获得的结果，避免再次请求相同文件页。仍有必需资料时，成批读取具体未读页。资料齐备时，完成当前阶段清单、写入源稿或执行产物校验。缺少关键事实或授权时，提交明确的补充问题。';
         }
     };
 }
 
-module.exports = { createInspectionProgress };
+module.exports = { createInspectionProgress, isInspection };

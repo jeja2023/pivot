@@ -18,7 +18,7 @@
     "client/chat/agent-harness.js": 99193,
     "client/chat/agent-run-detail.js": 65289,
     "client/chat/apps-workbench-pdf-tools.js": 71373,
-    "client/chat/apps-workbench-presentations.js": 102830,
+    "client/chat/apps-workbench-presentations.js": 96004,
     "client/chat/dag-inspector.js": 76517,
     "client/chat/dag-wizard-fields.js": 66615,
     "client/chat/data-analysis/view.js": 78934,
