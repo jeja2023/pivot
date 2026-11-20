@@ -281,7 +281,7 @@ let userRecordsEventsBound = false;
 function scrollUserRecordsToBottom(isCurrent) {
     const wrapper = document.querySelector('.user-records-table-wrap');
     if (!wrapper) return;
-    const apply = () => { if (isCurrent()) wrapper.scrollTop = wrapper.scrollHeight; };
+    const apply = () => { if (typeof isCurrent !== 'function' || isCurrent()) wrapper.scrollTop = wrapper.scrollHeight; };
     apply();
     requestAnimationFrame(apply);
     setTimeout(apply, 80);

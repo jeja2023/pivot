@@ -693,7 +693,7 @@ test('viewing a session record scrolls to bottom', () => {
     assert.match(sessions, /scrollMessagesToBottom\?\.\(\{ duration: 2400 \}\)/);
     assert.match(sessions, /setTimeout\(\(\) => window\.Pivot\.legacy\.scrollMessagesToBottom\?\.\(\{ duration: 900 \}\), 320\)/);
     assert.match(users, /const displayData = sessionId \? data\.slice\(\)\.reverse\(\) : data;/);
-    assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\(\);/);
+    assert.match(users, /if \(sessionId\) scrollUserRecordsToBottom\([^)]*\);/);
 });
 
 test('usage audit page merges stats, details and admin report views', () => {

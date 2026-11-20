@@ -243,14 +243,14 @@ test('统一日额度在上游成功后只结算一次并释放预留', async t 
     const entered = Promise.withResolvers(), pendingResponse = Promise.withResolvers();
     let calls = 0;
     const url = await mockModel(t, (_, res) => { calls++; entered.resolve(); void pendingResponse.promise.then(() => reply(res, '合成答复')); });
-    const f = createChatFixture({ prefix: 'agent_quota_settlement', upstreamUrl: url, modelColumns: { daily_token_limit: 120 } });
+    const f = createChatFixture({ prefix: 'agent_quota_settlement', upstreamUrl: url, modelColumns: { daily_token_limit: 120, max_concurrent: 4 } });
     const model = await getRunnableModelForUserAsync(f.modelId, f.user);
     const messages = [{ role: 'user', content: '合成答复' }];
     const usageRef = {};
-    const call = callModelJson(model, messages, { user: f.user, maxTokens: 80, usageRef });
+    const call = callModelJson(model, messages, { user: f.user, maxTokens: 80, usageRef, timeoutMs: 5000 });
     try {
         await Promise.race([entered.promise, call]);
-        await assert.rejects(callModelJson(model, messages, { user: f.user, maxTokens: 80 }), { code: 'INSUFFICIENT_QUOTA' });
+        await assert.rejects(callModelJson(model, messages, { user: f.user, maxTokens: 80, timeoutMs: 5000 }), { code: 'INSUFFICIENT_QUOTA' });
         assert.ok(getInflightQuota(f.userId, f.modelId) > 0);
         pendingResponse.resolve();
         await recordAgentModelUsage(f.user, model, messages, await call, 'agent', '', { usageRef });
