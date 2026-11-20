@@ -1184,6 +1184,15 @@
     color: var(--primary);
 }
 
+.presentation-master-usage-time {
+    font-size: 0.74rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--border) 45%, transparent);
+}
+
 .presentation-master-usage-metrics {
     font-size: 0.78rem;
     font-weight: 500;

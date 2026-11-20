@@ -104,13 +104,14 @@ test('单轮窗口与累计预算分别限制模型调用，并预留输出和�
 
 test('诊断按供应方实际用量累计，缺失用量明确标记估算，且不保存正文', () => {
     const state = { steps: 10, usedTokens: 100 }, plan = { inputEstimate: 500, originalEstimate: 900, breakdown: { initial: 200, history: 300, toolResults: 0, images: 0 } };
-    usageRecord(state, plan, { usage: { prompt_tokens: 300, completion_tokens: 20 } }, '用户正文', 2, () => 10);
+    usageRecord(state, plan, { usage: { prompt_tokens: 300, completion_tokens: 20 } }, '用户正文', 2, () => 10, { startedAt: '2026-05-04 12:00:00', durationMs: 1500 });
     assert.equal(state.usedTokens, 420);
-    assert.deepEqual(state.usageDiagnostics[0], { call: 1, step: 11, inputTokens: 300, outputTokens: 20, inputEstimated: false, outputEstimated: false, inputEstimate: 500, originalEstimate: 900, compactedWrites: 2, breakdown: plan.breakdown, cumulativeTokens: 420 });
+    assert.deepEqual(state.usageDiagnostics[0], { call: 1, step: 11, inputTokens: 300, outputTokens: 20, inputEstimated: false, outputEstimated: false, inputEstimate: 500, originalEstimate: 900, compactedWrites: 2, breakdown: plan.breakdown, startedAt: '2026-05-04 12:00:00', durationMs: 1500, cumulativeTokens: 420 });
     usageRecord(state, plan, { usage: {} }, '敏感正文', 0, () => 10);
     assert.equal(state.usedTokens, 930);
     assert.equal(state.usageDiagnostics[1].inputEstimated, true);
     assert.equal(state.usageDiagnostics[1].outputEstimated, true);
+    assert.match(state.usageDiagnostics[1].startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
     assert.doesNotMatch(JSON.stringify(state.usageDiagnostics), /正文/);
 });
 
@@ -200,7 +201,7 @@ test('每轮用量明细展示脱敏的本轮工作、工具失败与历史检�
             }
         ],
         usageDiagnostics: [
-            { call: 1, step: 1, inputTokens: 100, outputTokens: 20, cumulativeTokens: 120 },
+            { call: 1, step: 1, inputTokens: 100, outputTokens: 20, cumulativeTokens: 120, startedAt: '2026-05-04 10:00:00', durationMs: 2500 },
             { call: 2, step: 1, inputTokens: 110, outputTokens: 30, cumulativeTokens: 260 },
             { call: 3, step: 2, inputTokens: 150, outputTokens: 40, cumulativeTokens: 450 }
         ]
@@ -208,6 +209,8 @@ test('每轮用量明细展示脱敏的本轮工作、工具失败与历史检�
     const view = usageDiagnosticsView(state, { code: 'PPT_MASTER_TOOL_REPEATED_FAILURE' });
     assert.equal(view[0].outcome, 'retry');
     assert.equal(view[0].errorCode, 'PPT_MASTER_ACTION_INVALID');
+    assert.equal(view[0].startedAt, '2026-05-04 10:00:00');
+    assert.equal(view[0].durationMs, 2500);
     assert.equal(view[1].outcome, 'productive');
     assert.deepEqual(view[1].actions, [
         { action: 'read_runtime', path: 'workflows/generate-pptx.md', offset: 0, nextOffset: 24000 },

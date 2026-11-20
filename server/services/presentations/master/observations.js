@@ -205,8 +205,12 @@ function usageDiagnosticsView(state, taskError) {
         turnsByStep.set(stepIndex, summarizeExecutedTurn(turn, observations));
     }
     return items.map((item, index) => {
-        const { call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown } = item;
-        const base = { call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown };
+        const { call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown, startedAt, durationMs } = item;
+        const base = {
+            call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown,
+            ...(startedAt ? { startedAt } : {}),
+            ...(typeof durationMs === 'number' && durationMs >= 0 ? { durationMs } : {})
+        };
         let summary = item.turnSummary && Object.keys(item.turnSummary).length ? sanitizeTurnSummary(item.turnSummary) : null;
         if (!summary) {
             const hasLaterSameStep = items.slice(index + 1).some(other => other.step === step);

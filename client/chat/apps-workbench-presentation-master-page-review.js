@@ -38,7 +38,7 @@
         note.rows = 2; note.maxLength = 4000;
         note.placeholder = '可粘贴包含数字、单位的原文。填写后需重新确认最终方案。';
         field.append(node('span', 'modal-form-label', '补充说明或修改意见（选填）'), note);
-        const revision = node('input'); revision.type = 'checkbox';
+        const revision = Object.assign(node('input'), { type: 'checkbox' });
         const label = node('label', 'presentation-master-page-review-check hidden');
         label.append(revision, node('span', '', '允许按上述说明调整原清单'));
         note.addEventListener('input', () => { label.classList.toggle('hidden', !note.value.trim()); });
@@ -62,9 +62,7 @@
             const card = node('div', 'presentation-master-page-review-card');
             const label = node('label', 'presentation-master-page-review-check');
             if (task.canRepairPages) {
-                const checkbox = node('input');
-                checkbox.type = 'checkbox';
-                checkbox.checked = true;
+                const checkbox = Object.assign(node('input'), { type: 'checkbox', checked: true });
                 label.appendChild(checkbox);
                 choices.push({ page: page.page, checkbox });
             }
@@ -145,8 +143,7 @@
         const dialog = node('dialog', 'workspace-modal presentation-master-page-image-dialog');
         dialog.setAttribute('aria-label', '单页预览 · ' + image.alt);
         const header = node('header', 'workspace-modal-header');
-        const close = node('button', 'btn-secondary workspace-modal-close', '关闭预览');
-        close.type = 'button';
+        const close = Object.assign(node('button', 'btn-secondary workspace-modal-close', '关闭预览'), { type: 'button' });
         close.addEventListener('click', () => dialog.close());
         header.append(node('h3', '', image.alt), close);
         const body = node('div', 'workspace-modal-body');
@@ -248,8 +245,7 @@
         mountPassedPages(row, panel, task, options);
         mountSnapshots(panel, task, options);
         if (task.canRegenerate) {
-            const regenerate = node('button', 'btn-secondary', '重新生成整份');
-            regenerate.type = 'button';
+            const regenerate = Object.assign(node('button', 'btn-secondary', '重新生成整份'), { type: 'button' });
             regenerate.addEventListener('click', async () => {
                 const sequence = getEpoch();
                 if (!await window.Pivot.legacy.showConfirm('重新生成整份', '将用原材料和设置创建一个新任务，重新计算模型用量。原任务和草稿会保留。')) return;
@@ -303,8 +299,7 @@
 
     function addFileActions(row, task, route, suffix, downloadLabel, importLabel, { node, getEpoch, isCurrent, showError, feedback, requestJson, openNative }) {
         const filename = String(task.request?.title || '演示文稿').replace(/[\r\n\\/]/g, '_').slice(0, 160 - suffix.length) + suffix;
-        const draft = node('button', 'btn-secondary', downloadLabel);
-        draft.type = 'button';
+        const draft = Object.assign(node('button', 'btn-secondary', downloadLabel), { type: 'button' });
         const readDraft = async (button, useFile) => {
             const sequence = getEpoch();
             button.disabled = true;
@@ -557,7 +552,7 @@
         const modal = el('div', 'modal-overlay presentation-master-usage-overlay hidden');
         modal.id = id;
         const dialog = el('section', 'workspace-modal presentation-master-usage-dialog');
-        dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', title);
+        Object.assign(dialog, { role: 'dialog', ariaModal: 'true' }); dialog.setAttribute('aria-label', title);
         const header = el('header', 'workspace-modal-header presentation-master-header');
         const headerInfo = el('div', 'presentation-master-header-info');
         const titleRow = el('div', 'presentation-master-header-title-row');
@@ -565,7 +560,7 @@
         headerIcon.appendChild(svgIcon(icon, 16));
         titleRow.append(headerIcon, el('h3', '', title));
         headerInfo.append(titleRow, el('p', 'presentation-master-header-subtitle', subtitle));
-        const closeBtn = el('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
+        const closeBtn = Object.assign(el('button', 'btn-secondary workspace-modal-close', '关闭'), { type: 'button' });
         closeBtn.addEventListener('click', () => onClose());
         header.append(headerInfo, closeBtn);
         const body = el('div', 'workspace-modal-body ' + bodyClass);
@@ -685,10 +680,7 @@
     }
     function ensureUsageBar(panel) {
         let bar = panel.querySelector('.presentation-master-usage-bar');
-        if (!bar) {
-            bar = el('div', 'presentation-master-usage-bar');
-            panel.appendChild(bar);
-        }
+        if (!bar) { bar = el('div', 'presentation-master-usage-bar'); panel.appendChild(bar); }
         return bar;
     }
     function ensureUsageModal() {
@@ -701,6 +693,20 @@
         }
         return modal;
     }
+    function formatTurnDuration(ms) {
+        const v = Number(ms);
+        if (!Number.isFinite(v) || v < 0) return '';
+        if (v < 1000) return `${Math.round(v)} 毫秒`;
+        const s = v / 1000;
+        if (s < 60) return `${s.toFixed(1).replace(/\.0$/, '')} 秒`;
+        const m = Math.floor(s / 60), r = Math.round(s % 60);
+        return r ? `${m} 分 ${r} 秒` : `${m} 分钟`;
+    }
+    function formatTurnTime(val) {
+        if (!val) return '';
+        if (typeof val === 'number') { const d = new Date(val); return Number.isNaN(d.getTime()) ? '' : d.toTimeString().slice(0, 8); }
+        return String(val).match(/(\d{2}:\d{2}:\d{2})/)?.[1] || String(val).trim();
+    }
     function renderUsageList() {
         const list = byId('presentation-master-usage-list');
         if (!list) return;
@@ -712,10 +718,13 @@
             stepGroup.appendChild(el('span', 'presentation-master-usage-step', `第 ${item.call || item.step} 次模型调用（步骤 ${item.step}）`));
             const badge = OUTCOME_BADGES[item.outcome];
             if (badge) stepGroup.appendChild(el('span', `presentation-master-task-badge ${badge.tone}`, badge.text));
-            top.append(
-                stepGroup,
-                el('span', 'presentation-master-usage-metrics', `输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}`)
-            );
+            const times = [item.startedAt && `${formatTurnTime(item.startedAt)} 开始`, item.durationMs >= 0 && `用时 ${formatTurnDuration(item.durationMs)}`].filter(Boolean);
+            if (times.length) {
+                const timeEl = el('span', 'presentation-master-usage-time', times.join(' · '));
+                timeEl.title = `开始时间：${item.startedAt || '-'}${item.durationMs >= 0 ? `\n用时：${formatTurnDuration(item.durationMs)}` : ''}`;
+                stepGroup.appendChild(timeEl);
+            }
+            top.append(stepGroup, el('span', 'presentation-master-usage-metrics', `输入 ${item.inputTokens}${item.inputEstimated ? '（估算）' : ''}，输出 ${item.outputTokens}${item.outputEstimated ? '（估算）' : ''}，累计 ${item.cumulativeTokens}`));
             row.appendChild(top);
             const work = formatTurnWork(item);
             if (work) {
@@ -747,8 +756,7 @@
         usageDiagnostics = Array.isArray(items) ? items : [];
         if (!usageDiagnostics.length) return;
         const usageBar = ensureUsageBar(panel);
-        const usageBtn = el('button', 'btn-secondary presentation-master-usage-btn');
-        usageBtn.type = 'button'; usageBtn.id = 'presentation-master-usage-btn';
+        const usageBtn = Object.assign(el('button', 'btn-secondary presentation-master-usage-btn'), { type: 'button', id: 'presentation-master-usage-btn' });
         usageBtn.append(svgIcon(USAGE_ICON_PATHS, 13), el('span', '', `查看每轮模型用量（共 ${usageDiagnostics.length} 轮）`));
         usageBtn.addEventListener('click', () => openUsageModal(usageBtn));
         usageBar.appendChild(usageBtn);
@@ -764,8 +772,7 @@
         const headline = ['查看材料与提纲', materials.length ? `已读取 ${read} / ${materials.length} 份文字材料` : '未提供文字材料',
             plans.length ? '有已保存方案' : '暂无已保存方案'];
         const bar = ensureUsageBar(panel);
-        const btn = el('button', 'btn-secondary presentation-master-usage-btn');
-        btn.type = 'button'; btn.id = 'presentation-master-checkpoint-btn';
+        const btn = Object.assign(el('button', 'btn-secondary presentation-master-usage-btn'), { type: 'button', id: 'presentation-master-checkpoint-btn' });
         btn.append(svgIcon(DOC_ICON_PATHS, 13), el('span', '', headline.join(' · ')));
         btn.addEventListener('click', () => openCheckpointModal(btn));
         bar.appendChild(btn);

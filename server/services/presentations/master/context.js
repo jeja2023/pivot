@@ -1,6 +1,7 @@
 'use strict';
 
 const { estimateMessagesTokens, getModelContextBudget } = require('../../context-budget');
+const { getBeijingTimestamp } = require('../../../time');
 const runtime = require('./runtime');
 const { confirmedWrite } = require('./observations');
 const MIN_OUTPUT_TOKENS = 2000;
@@ -101,7 +102,7 @@ function planRequest(messages, originalMessages, model, remainingTokens, limits 
     return { inputEstimate, originalEstimate, maxTokens, breakdown };
 }
 
-function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTokens) {
+function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTokens, timing = {}) {
     const usage = usageRef.usage || {};
     const rawInput = usage.input_tokens ?? usage.prompt_tokens ?? usage.inputTokens ?? usageRef.inputTokens;
     const rawOutput = usage.output_tokens ?? usage.completion_tokens ?? usage.outputTokens ?? usageRef.outputTokens;
@@ -109,9 +110,14 @@ function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTok
     const inputTokens = valid(rawInput) ? Number(rawInput) : plan.inputEstimate;
     const outputTokens = valid(rawOutput) ? Number(rawOutput) : estimateTokens(typeof output === 'string' ? output : JSON.stringify(output));
     const previous = Array.isArray(state.usageDiagnostics) ? state.usageDiagnostics : [];
+    const startedAt = timing.startedAt || usageRef.startedAt || getBeijingTimestamp();
+    const durationMs = typeof timing.durationMs === 'number'
+        ? Math.max(0, timing.durationMs)
+        : (typeof usageRef.providerMs === 'number' ? Math.max(0, (usageRef.queueMs || 0) + usageRef.providerMs) : undefined);
     const item = { call: Number(previous.at(-1)?.call || previous.length) + 1, step: Number(state.steps || 0) + 1, inputTokens, outputTokens,
         inputEstimated: !valid(rawInput), outputEstimated: !valid(rawOutput),
-        inputEstimate: plan.inputEstimate, originalEstimate: plan.originalEstimate, compactedWrites, breakdown: plan.breakdown };
+        inputEstimate: plan.inputEstimate, originalEstimate: plan.originalEstimate, compactedWrites, breakdown: plan.breakdown,
+        startedAt, ...(typeof durationMs === 'number' && durationMs >= 0 ? { durationMs } : {}) };
     state.usedTokens += inputTokens + outputTokens;
     item.cumulativeTokens = state.usedTokens;
     state.usageDiagnostics = [...previous, item].slice(-160);

@@ -10,6 +10,7 @@ const { compactMessages, planRequest, requestLimits, usageRecord } = require('./
 const { archiveOlderObservations } = require('./history');
 const { phaseMessages } = require('./phase-context');
 const { ensureModelQuota } = require('../../model-daily-quota');
+const { getBeijingTimestamp } = require('../../../time');
 const { READ_PAGE_CHARS, HISTORY_PAGE_CHARS } = require('./observations');
 
 function hostGuidance(state) {
@@ -88,6 +89,8 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
         // 为后续模型请求的指引、确认答复和工具元数据留出容量。
         const readResultBudget = Math.max(1000, Math.floor((limits.fullOutputInputBudget - plan.breakdown.initial) / 2));
         await hooks.ensureCurrent();
+        const turnStartedAt = getBeijingTimestamp();
+        const turnStartMs = Date.now();
         const usageRef = {};
         let output, releaseQuota = () => {};
         try {
@@ -103,7 +106,8 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
         }
         delete state.focusModelHistory;
         markImagePageRead(state, view.messages);
-        usageRecord(state, plan, usageRef, output, view.compactedWrites, estimateTokens);
+        const durationMs = Math.max(0, Date.now() - turnStartMs);
+        usageRecord(state, plan, usageRef, output, view.compactedWrites, estimateTokens, { startedAt: turnStartedAt, durationMs });
         try {
             if (!deps.callModel) await recordAgentModelUsage(user, model, view.messages, output, 'ppt_master_engine', state.request.runId || '', {
                 usageRef, budget: deps.budget, estimatedUsage: { inputTokens: plan.inputEstimate, outputTokens: estimateTokens(typeof output === 'string' ? output : JSON.stringify(output)) }
