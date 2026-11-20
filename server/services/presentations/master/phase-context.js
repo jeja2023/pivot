@@ -8,7 +8,9 @@ const SPEC_PRESERVING_TOOLS = new Set(['text_measure', 'check_svg', 'analyze_ima
 
 // 只有真实确认及同一项目的两份文件写入和上游校验均有回执，才能收起已完成的前置章节。
 function validatedProject(state) {
-    if (state.request?.operation !== 'generate' || state.request?.profile !== 'default' || state.confirmationRevisionPending || Number(state.confirmedGates || 0) < 2) return '';
+    if (state.request?.operation !== 'generate' || state.request?.profile !== 'default' || state.confirmationRevisionPending) return '';
+    const approvedProject = state.review?.approvals?.design?.plan?.project;
+    if (state.review ? !approvedProject : Number(state.confirmedGates || 0) < 2) return '';
     const files = new Map(); let validated = '';
     for (let index = 0; index < (state.messages || []).length; index++) {
         const assistant = state.messages[index], response = state.messages[index + 1];
@@ -37,7 +39,7 @@ function validatedProject(state) {
             } else if (['copy', 'copy_template', 'validate_template'].includes(action.action)) validated = '';
         });
     }
-    return validated;
+    return approvedProject && validated !== approvedProject ? '' : validated;
 }
 
 function phaseMessages(messages, state) {
@@ -55,7 +57,7 @@ function phaseMessages(messages, state) {
         const end = item.text.indexOf(routing ? '## 3. Generate PPTX Profiles and Stages' : '### Step 4: Strategist Phase');
         if (start < 0 || end <= start) return message;
         return { ...message, content: JSON.stringify({ ...item, text: item.text.slice(0, start)
-            + `\n[已取得两次用户确认和当前项目校验回执，暂收起${routing ? '已完成的流程选路表' : '步骤1至3'}；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。项目：${project}]\n\n` + item.text.slice(end),
+            + `\n[已取得用户对最终方案的批准和当前项目校验回执，暂收起${routing ? '已完成的流程选路表' : '步骤1至3'}；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。项目：${project}]\n\n` + item.text.slice(end),
         phase: 'validated_project', fullTextAvailable: true }) };
     });
     return { messages: result, phase: 'validated_project' };

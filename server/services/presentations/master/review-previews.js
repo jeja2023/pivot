@@ -11,8 +11,8 @@ const MAX_SNAPSHOT_BYTES = 32 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from('89504e470d0a1a0a', 'hex');
 
 function exportForPreview(row, task) {
-    if (!['failed', 'expired'].includes(task.status)) return '';
     const state = row.result_json.state;
+    if (!['failed', 'expired'].includes(task.status) && !(task.status === 'completed' && state?.request?.draftFirst)) return '';
     const project = state?.review?.approvals?.design?.plan?.project;
     if (!project) return '';
     for (let index = (state.messages || []).length - 1; index >= 0; index--) {

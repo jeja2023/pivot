@@ -188,6 +188,78 @@ test('模型超时的计时和未知用量随任务失败保存，重读仍可�
     } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
 });
 
+test('旧沟通方向等待项可直接继续，保留用量且不登记最终批准', { skip: !process.env.DATABASE_URL }, async () => {
+    const { get, respond } = require('../server/services/presentations/master/tasks');
+    const { identity } = require('../server/services/presentations/master/runtime');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', operation: 'generate', profile: 'default', pageCount: 8, modelId: '1', tokenBudget: 0, maxSteps: 5 };
+    const pendingInput = { stage: 'direction', question: '请确认沟通方向', plan: { summary: '经营汇报' } };
+    const state = { request, steps: 5, usedTokens: 8000, prepared: true, bootstrapped: true, runtimeImage: await identity(),
+        pendingKind: 'confirmation', pendingInput, review: { version: 1, approvals: {} },
+        messages: [{ role: 'system', content: '存量制作任务' }] };
+    const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
+    try {
+        const lease = crypto.randomUUID();
+        await repository.claim(user, task.id, lease);
+        await repository.save(user, task.id, lease, state, { phase: 'input_required' });
+        await taskStore.requestInput(task.id, user, pendingInput, { expectedLease: lease });
+        await repository.release(user, task.id, lease);
+        const { inputRequest } = await get(user, task.id);
+        assert.equal(inputRequest.kind, 'continue');
+        assert.equal(inputRequest.stage, undefined);
+        await assert.rejects(respond(user, task.id, { decision: 'approve', promptId: inputRequest.promptId }), { code: 'PPT_MASTER_CONFIRMATION_CHANGED' });
+        await assert.rejects(respond(user, task.id, { decision: 'continue' }), { code: 'PPT_MASTER_CONFIRMATION_CHANGED' });
+        await respond(user, task.id, { decision: 'continue', promptId: inputRequest.promptId });
+        let row;
+        for (let attempt = 0; attempt < 100; attempt++) {
+            row = await repository.read(user, task.id);
+            if (row.status === 'failed' && !row.result_json._lease) break;
+            await delay(20);
+        }
+        assert.equal(row.error_code, 'PPT_MASTER_STEP_LIMIT');
+        const resumed = row.result_json.state;
+        assert.equal(resumed.usedTokens, 8000);
+        assert.deepEqual(resumed.review.approvals, {});
+        assert.equal(resumed.pendingKind, undefined);
+        assert.equal(resumed.milestones?.firstApproval, undefined);
+        assert.match(resumed.messages.at(-1).content, /直接准备最终页面与关键数据清单/);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
+test('旧阶段上限与新引文暂停均可在补充原文后续作并保留八页草案', { skip: !process.env.DATABASE_URL }, async () => {
+    const { get, resume } = require('../server/services/presentations/master/tasks');
+    const { identity } = require('../server/services/presentations/master/runtime');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', operation: 'generate', profile: 'default', pageCount: 8, modelId: '1', tokenBudget: 0, maxSteps: 5 };
+    const draft = { stage: 'design', plan: { summary: '项目经营汇报', pages: Array.from({ length: 8 }, (_, index) => ({ title: '第 ' + (index + 1) + ' 页', values: [] })) } };
+    const issue = { location: '第 1 页第 1 项（inputs/material-1.md）', page: 1, item: 1, title: '第 1 页',
+        text: '收入120万元', reason: '关键数据未完整出现在引文中，请核对数字、单位及原文范围。' };
+    for (const errorCode of ['PPT_MASTER_PHASE_LIMIT', 'PPT_MASTER_CITATION_REVIEW_REQUIRED']) {
+        const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
+        const state = { request, usedTokens: 466661, steps: 5, prepared: true, bootstrapped: true, runtimeImage: await identity(), messages: [],
+            review: { version: 1, approvals: { direction: { plan: { summary: '经营汇报' } } } },
+            citationDraft: draft, citationRepair: [issue], workflowProgress: { phase: 'design', calls: 18 } };
+        try {
+            await taskStore.complete(task.id, user, { state }, { failed: true, errorCode });
+            assert.equal((await get(user, task.id)).citationReview.items[0].reason, issue.reason);
+            await assert.rejects(resume(user, task.id), { code: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' });
+            await resume(user, task.id, { resumeNote: '经核对，项目收入120万元。' });
+            let row;
+            for (let attempt = 0; attempt < 100; attempt++) {
+                row = await repository.read(user, task.id);
+                if (row.status === 'failed' && !row.result_json._lease) break;
+                await delay(20);
+            }
+            assert.equal(row.error_code, 'PPT_MASTER_STEP_LIMIT');
+            const resumed = row.result_json.state;
+            assert.equal(resumed.workflowProgress, undefined);
+            assert.equal(resumed.usedTokens, state.usedTokens);
+            assert.deepEqual(resumed.citationDraft, draft);
+            assert.match(resumed.messages.at(-1).content, /沿用宿主保存的完整清单.*repairCitations/);
+        } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+    }
+});
+
 test('活动制作可以跨文稿查询，过期读请求不会撤销刚延长的截止时间', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
     const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: { presentationId: 'previous-document' } });

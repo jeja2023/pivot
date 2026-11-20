@@ -21,13 +21,10 @@ test('首案阶段持续读取不同指引仍在阶段上限暂停，续跑保�
         callModel: async () => ({ actions: [{ action: 'read_runtime', path: 'references/topic-' + ++calls + '.md' }] }),
         execute: async (_user, _id, action) => ({ path: action.path, text: '当前指引', totalChars: 4, nextOffset: null }) };
     await assert.rejects(drive({ id: 1 }, 'case', current, hooks, dependencies), { code: 'PPT_MASTER_PHASE_LIMIT' });
-    assert.equal(calls, 12);
-    assert.equal(current.steps, 12);
+    assert.equal(calls, 18);
+    assert.equal(current.steps, 18);
     assert.ok(current.usedTokens > 0);
-    assert.equal(current.workflowProgress.phase, 'direction');
-    current.review.approvals.direction = { plan: {} };
-    assert.match(allocateWorkflowCall(current), /最终页面与关键数据清单/);
-    assert.deepEqual(current.workflowProgress, { phase: 'design', calls: 1 });
+    assert.deepEqual(current.workflowProgress, { phase: 'design', calls: 18 });
     current.review.approvals.design = { plan: { project: 'draft' } };
     assert.match(allocateWorkflowCall(current), /第一张页面 SVG/);
     current.milestones = { firstPageWrite: { steps: 13 } };

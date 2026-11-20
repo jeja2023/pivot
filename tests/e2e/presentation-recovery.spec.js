@@ -22,6 +22,13 @@ async function member(page, browser, models, engine = false) {
             token: process.env.PIVOT_E2E_PPT_MASTER_SERVICE_TOKEN, enabled: true
         } });
         expect(response.ok(), await response.text()).toBeTruthy();
+    } else {
+        const { config } = await (await page.request.get('/api/settings/ppt-master')).json();
+        if (config.enabled) {
+            const response = await page.request.put('/api/settings/ppt-master', { headers: await csrf(page.context()),
+                data: { revision: config.revision, enabled: false } });
+            expect(response.ok(), await response.text()).toBeTruthy();
+        }
     }
     const username = 'ppt_recover_' + Date.now().toString(36), password = 'PptRecovery-test123!';
     const created = await post(page, '/api/admin/users', { username, password, nickname: 'PPT恢复验收', role: 'user' });
@@ -76,35 +83,56 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         const { task: { id } } = await started.json();
         const read = async () => (await (await user.request.get(API + '/master/tasks/' + id)).json()).task;
         const panel = user.locator('#presentation-master-status');
-        for (const stage of ['direction', 'design']) {
-            await expect.poll(async () => { const t = await read(); return t.error?.message || t.inputRequest?.stage; }, { timeout: 60000 }).toBe(stage);
-            if (stage === 'design') expect((await read()).inputRequest.plan.templateUse.visibleText).toBe(title);
-            await panel.getByRole('button', { name: '确认并继续' }).click();
-        }
         await expect.poll(async () => (await read()).status, { timeout: 120000 }).toMatch(/^(completed|failed)$/);
         const done = await read();
         expect(done.status, done.error?.message || done.inputRequest?.question).toBe('completed');
-        expect(done.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, preservation: { pages: [2] }, templateSpecDigest: expect.any(String) });
+        expect(done.milestones.firstApproval).toBeUndefined();
+        expect(done.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, preservation: {
+            pages: [2], sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
+        }, templateSpecDigest: expect.any(String) });
         async function download(label) {
             const event = user.waitForEvent('download');
             await panel.getByRole('button', { name: label }).click();
             return fs.readFile(await (await event).path());
         }
-        const bytes = await download('下载演示文件（.pptx）');
+        const bytes = await download('下载初稿（.pptx）');
         const sources = await Zip.loadAsync(await download('下载完整项目源包'));
-        const original = await sources.file(/\/exports\/final\.pptx$/)[0].async('nodebuffer');
-        const revised = await sources.file(/\/exports\/repair-[^/]+\.pptx$/)[0].async('nodebuffer');
         const installed = sources.file(new RegExp('/templates/design_spec\\.style\\.' + style + '\\.md$'));
         expect(installed).toHaveLength(1);
-        expect(sha256(original)).toBe(done.result.checks.preservation.sha256);
+        const correctedSources = sources.file(/\/svg_output\/slide_02\.svg$/);
+        expect(correctedSources).toHaveLength(1);
+        expect(await correctedSources[0].async('string')).toContain('全年核定成本80.25万元');
         expect(sha256(bytes)).toBe(done.result.checks.currentExportSha256);
-        expect(bytes.equals(revised)).toBeTruthy();
-        const oldFile = await Zip.loadAsync(original), finalFile = await Zip.loadAsync(bytes);
-        expect(await oldFile.file('ppt/slides/slide2.xml').async('string')).toContain('全年核定成本90.25万元');
+        expect(sha256(bytes)).not.toBe(done.result.checks.preservation.sha256);
+        const finalFile = await Zip.loadAsync(bytes);
         expect(await finalFile.file('ppt/slides/slide1.xml').async('string')).toContain(title);
         const repaired = await finalFile.file('ppt/slides/slide2.xml').async('string');
         expect(repaired).toContain('全年核定成本80.25万元');
         expect(repaired).not.toContain('全年核定成本90.25万元');
+        if (style === 'consulting-decision') {
+            await panel.getByRole('button', { name: '预览初稿', exact: true }).click();
+            await expect(panel.getByRole('img', { name: /第 1 页/ })).toBeVisible({ timeout: 30000 });
+            const nativeBegin = user.waitForResponse(response => response.url().endsWith('/native/jobs') && response.request().method() === 'POST');
+            await panel.getByRole('button', { name: '编辑已生成页面' }).click();
+            const firstJob = (await (await nativeBegin).json()).task.id;
+            const getJob = async job => (await (await user.request.get(API + '/native/jobs/' + job)).json()).task;
+            await expect.poll(async () => (await getJob(firstJob)).status, { timeout: 60000 }).toBe('completed');
+            const nativeId = (await getJob(firstJob)).result.documentId;
+            await expect(user.locator('#presentation-native-version')).toHaveValue('1');
+            await user.locator('#presentation-native-slide').selectOption('1');
+            await user.getByRole('button', { name: 'AI 修改本页文字' }).click();
+            await user.locator('#input-prompt-textarea').fill('只修改本页标题为复核后的页面标题。');
+            await user.locator('#modal-input-prompt-ok').click();
+            await expect(user.locator('#presentation-native-version')).toHaveValue('2', { timeout: 60000 });
+            const readVersion = async version => Zip.loadAsync(await (await user.request.get(API + '/native/documents/' + nativeId + '/download?version=' + version)).body());
+            const [before, after] = await Promise.all([readVersion(1), readVersion(2)]);
+            for (const pageIndex of [1, 3]) {
+                const filename = `ppt/slides/slide${pageIndex}.xml`;
+                expect(await after.file(filename).async('string')).toBe(await before.file(filename).async('string'));
+            }
+            expect(await after.file('ppt/slides/slide2.xml').async('string')).toContain('复核后的页面标题');
+            expect(await before.file('ppt/slides/slide2.xml').async('string')).not.toContain('复核后的页面标题');
+        }
         if (process.env.E2E_PPT_MASTER_EVIDENCE_DIR) {
             await fs.mkdir(process.env.E2E_PPT_MASTER_EVIDENCE_DIR, { recursive: true });
             await fs.writeFile(path.join(process.env.E2E_PPT_MASTER_EVIDENCE_DIR, name + '经营复核.pptx'), bytes);
@@ -120,10 +148,8 @@ test('普通用户从文稿库回看标准制作的五页草稿，编辑后只�
     await user.locator('#presentation-create-topic').fill('标准制作断点验收');
     await user.locator('#presentation-create-pages').fill('7');
     await user.locator('#presentation-create-model').selectOption(ids[0]);
-    await user.locator('#presentation-create-submit-btn').click();
-    await expect(user.locator('#presentation-outline-confirm-btn')).toBeVisible({ timeout: 30000 });
     const failed = user.waitForResponse(response => response.url().endsWith('/ai/slides') && response.request().method() === 'POST');
-    await user.locator('#presentation-outline-confirm-btn').click();
+    await user.locator('#presentation-create-submit-btn').click();
     const failure = await failed;
     expect(failure.status(), await failure.text()).toBe(422);
     const id = failure.request().postDataJSON().draftId;
@@ -135,7 +161,7 @@ test('普通用户从文稿库回看标准制作的五页草稿，编辑后只�
     await user.reload({ waitUntil: 'domcontentloaded' });
     await openWorkbench(user);
     await expect(user.getByText('待补齐 2 页', { exact: true })).toBeVisible();
-    await user.getByRole('button', { name: '标准制作断点验收', exact: true }).click();
+    await user.getByRole('button', { name: '标准制作断点验收-初稿', exact: true }).click();
     await user.locator('[data-presentation-panel="story"]').click();
     await user.locator('#presentation-story-takeaway').fill('用户修改后的第一页面');
     await user.locator('#presentation-story-save').click();
@@ -171,10 +197,6 @@ test('普通用户回看完整制作快照，下载通过页并从原任务继�
     const { task: { id } } = await response.json();
     const read = async () => (await (await user.request.get(API + '/master/tasks/' + id)).json()).task;
     const panel = user.locator('#presentation-master-status');
-    for (const heading of ['确认沟通方向', '确认最终页面与关键数据清单']) {
-        await expect(panel).toContainText(heading, { timeout: 90000 });
-        await panel.getByRole('button', { name: '确认并继续' }).click();
-    }
     await expect.poll(async () => (await read()).status, { timeout: 120000 }).toBe('failed');
     expect((await read()).progressSnapshot).toMatchObject({ source: { count: 3 },
         export: { passedPages: [1, 3], pendingPages: [2] }, passed: { pages: [1, 3] } });
@@ -225,7 +247,7 @@ test('普通用户回看完整制作快照，下载通过页并从原任务继�
     expect(completed.result.checks.checkedPages).toBe(3);
 });
 
-test('普通用户补充事实、核对重排清单，并在引文失败后继续原任务', async ({ page, browser }) => {
+test('普通用户补充必要事实后，仍无法核对的引文用占位文字随初稿下载', async ({ page, browser }) => {
     test.setTimeout(240000);
     test.skip(!process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL, '需要本地独立 PPT Master 服务');
     const { user, ids } = await member(page, browser, ['ppt-master-citations-e2e'], true);
@@ -246,48 +268,17 @@ test('普通用户补充事实、核对重排清单，并在引文失败后继�
     const route = API + '/master/tasks/' + id;
     const read = async () => (await (await user.request.get(route)).json()).task;
     const panel = user.locator('#presentation-master-status');
-    await expect(panel).toContainText('确认沟通方向', { timeout: 90000 });
-    await panel.getByRole('button', { name: '确认并继续' }).click();
     await expect(panel).toContainText('请补充项目预算及其单位。', { timeout: 90000 });
     await panel.getByRole('textbox', { name: '对制作方案的实际答复' }).fill('经核实，项目预算80万元。');
     await panel.getByRole('button', { name: '提交答复并继续' }).click();
-    await expect(panel).toContainText('用户补充 1', { timeout: 90000 });
-    const proposal = await read();
-    expect(proposal.request.template?.type).toBe('runtime');
-    expect(proposal.inputRequest.plan.pages[0].values.map(value => value.text)).toEqual(['项目预算80万元', fixture.pages[0].fact]);
-    expect(proposal.inputRequest.plan.pages[0].values[0].source.path).toBe('user-supplement:1');
-    await panel.getByRole('button', { name: '确认并继续' }).click();
-    await expect(panel).toContainText('待核对的引文', { timeout: 90000 });
-    await expect(panel).toContainText('第 2 页第 1 项');
-    const failed = await read();
-    expect(failed.error.code).toBe('PPT_MASTER_CITATION_REVIEW_REQUIRED');
-    expect(failed.progressSnapshot.passed.pages).toEqual([1, 3]);
-    const partial = await user.request.get(route + '/snapshots/passed');
-    expect(partial.ok()).toBeTruthy();
-    await panel.getByRole('button', { name: '从检查点继续' }).click();
-    await expect(panel).toContainText('请补充可核对的事实、填写修改意见，或切换制作模型后继续。');
-    const unchanged = await read();
-    expect(unchanged.usedTokens).toBe(failed.usedTokens);
-    expect(unchanged.usageDiagnostics.length).toBe(failed.usageDiagnostics.length);
-    await user.reload({ waitUntil: 'domcontentloaded' });
-    await openWorkbench(user);
-    await user.getByRole('button', { name: '完整制作记录' }).click();
-    await user.getByRole('button', { name: /引文补充断点验收.*已保存制作快照/ }).click();
-    await panel.getByRole('textbox', { name: '补充说明或修改意见（选填）' }).fill('复核后确认，全年决算成本80.25万元。');
-    await panel.getByRole('button', { name: '从检查点继续' }).click();
-    await expect(panel).toContainText('用户补充 2', { timeout: 90000 });
-    const revised = await read();
-    expect(revised.status).toBe('input_required');
-    expect(revised.inputRequest.plan.pages[1].values[0].source.path).toBe('user-supplement:2');
-    expect(await (await user.request.get(route + '/snapshots/passed')).body()).toEqual(await partial.body());
-    await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toHaveCount(0);
-    await panel.getByRole('button', { name: '确认并继续' }).click();
-    await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toBeVisible({ timeout: 90000 });
-    expect((await read()).result.checks).toMatchObject({ checkedPages: 3, checkedValues: 4 });
+    await expect(panel.getByRole('button', { name: '下载初稿（.pptx）' })).toBeVisible({ timeout: 120000 });
+    const result = await read();
+    expect(result.draftCitationIssues).toEqual([expect.objectContaining({ page: 2, item: 1 })]);
+    expect(result.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 4 });
     const download = user.waitForEvent('download');
-    await panel.getByRole('button', { name: '下载演示文件（.pptx）' }).click();
+    await panel.getByRole('button', { name: '下载初稿（.pptx）' }).click();
     const file = await Zip.loadAsync(await fs.readFile(await (await download).path()));
     const repaired = await file.file('ppt/slides/slide2.xml').async('string');
-    expect(repaired).toContain('全年决算成本80.25万元');
+    expect(repaired).toContain('数据待核对');
     expect(repaired).not.toContain('全年核定成本90.25万元');
 });

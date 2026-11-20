@@ -1,25 +1,24 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { canonicalJson } = require('../../canonical-json');
 const { error } = require('./runtime');
 const { getSupplement } = require('./user-supplements');
-const { compact, containsValue, locateCitation, verifiedCorrection, originalLine } = require('./citation-repair');
+const { compact, containsValue, locateCitation, verifiedCorrection, originalLine, extendCitation, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { normalizeTemplateUse } = require('./template-application');
 
 const digest = value => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
+const draftPlanDigest = plan => createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex');
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const checklistError = message => error(message, 'PPT_MASTER_CHECKLIST_REQUIRED', 409);
 const labels = { direction: '沟通方向', design: '最终页面与关键数据清单', template: '模板制作方案' };
 const citationKey = ({ text, chart }) => digest([compact(text), ...(chart ? [compact(chart.series), compact(chart.category), chart.number] : [])]);
 const sourceLabel = path => path === 'instruction' ? '制作要求' : path.startsWith('user-supplement:') ? '用户补充 ' + path.split(':')[1] : path || '来源待核对';
-const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const sourcePath = /^inputs\/[A-Za-z0-9][A-Za-z0-9_.-]*\.md$/;
 const projectPath = /^(?!inputs(?:\/|$)|delivery(?:\/|$))[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*(?:\/[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*)*$/u;
 
-function requiredStages(request) {
-    if (request.operation === 'create_template') return ['template'];
-    if (request.operation === 'generate' && ['default', 'beautify'].includes(request.profile)) return ['direction', 'design'];
-    return ['design'];
+function confirmationStage(request) {
+    return request.operation === 'create_template' ? 'template' : 'design';
 }
 
 function initializeReview(state) {
@@ -45,12 +44,17 @@ function valueText(value, max, label, multiline = false) {
 }
 
 function nextStage(state) {
-    return requiredStages(state.request).find(stage => !state.review.approvals[stage]);
+    const stage = confirmationStage(state.request);
+    return state.review.approvals[stage] ? undefined : stage;
 }
 
 function checklistFor(plan) {
     return plan.pages.map(page => [page.title, page.values.map(value => value.chart
         ? [value.text, value.chart.series, value.chart.category, value.chart.number] : value.text)]);
+}
+
+function fixedPageCount(request) {
+    return request.operation === 'generate' && ['default', 'quick', 'image_to_pptx'].includes(request.profile);
 }
 
 function citationExcerpt(source, anchor) {
@@ -60,14 +64,12 @@ function citationExcerpt(source, anchor) {
 }
 
 async function normalizeStage(input, state, verifySource) {
-    const required = requiredStages(state.request);
     const stage = input.stage;
-    if (!required.includes(stage) || required.slice(0, required.indexOf(stage)).some(previous => !state.review.approvals[previous])) {
+    if (stage !== confirmationStage(state.request)) {
         throw invalid('请按制作流程提交当前待确认阶段：' + (labels[nextStage(state)] || '已批准方案的修订') + '。');
     }
     if (!input.plan || typeof input.plan !== 'object' || Array.isArray(input.plan)) throw invalid('请提供结构化的待确认方案。');
     const summary = valueText(input.plan.summary, 4000, '方案说明');
-    if (stage === 'direction') return { stage, plan: { summary } };
     const project = valueText(input.plan.project, 180, '任务项目目录');
     if (!projectPath.test(project)) throw invalid('请填写实际任务项目的相对目录。');
     if (state.managedProject && project !== state.managedProject) throw invalid('请使用宿主已经准备的项目：' + state.managedProject);
@@ -76,7 +78,7 @@ async function normalizeStage(input, state, verifySource) {
     const { pages } = input.plan;
     if (!Array.isArray(pages) || !pages.length || pages.length > 100) throw invalid('请逐页提交有顺序的清单，每页都要填写页面标题和关键数据数组。');
     const expected = state.request.pageCount;
-    if (state.request.operation === 'generate' && ['default', 'quick', 'image_to_pptx'].includes(state.request.profile) && pages.length !== expected) {
+    if (fixedPageCount(state.request) && pages.length !== expected) {
         throw invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`);
     }
     const normalized = [], sources = new Map(), failures = [], seen = new Set(), verified = new Set();
@@ -117,7 +119,9 @@ async function normalizeStage(input, state, verifySource) {
             const fact = { key, ...value, title, page: pageIndex + 1, item: valueIndex + 1 };
             values.push(value);
             if (entry.source === undefined) {
-                if (previous) failures.push({ ...fact, path: previous.path, excerpt: previous.excerpt, reason: '仍需为该数据项提供可核对的引用。' });
+                if (previous || state.request.draftFirst && /\d/u.test(compact(text))) {
+                    failures.push({ ...fact, path: previous?.path || '', excerpt: previous?.excerpt, reason: '仍需为该数据项提供可核对的引用。' });
+                }
                 continue;
             }
             let path, quote;
@@ -144,13 +148,12 @@ async function normalizeStage(input, state, verifySource) {
             const normalizedQuote = compact(quote);
             const quoteFound = containsValue(source.normalized, normalizedQuote);
             const containsText = containsValue(normalizedQuote, text);
-            if (!quoteFound && containsText) {
-                const original = originalLine(source, text);
-                if (original) {
-                    value.source.quote = original;
-                    verified.add(value);
-                    continue;
-                }
+            const original = !quoteFound && containsText ? originalLine(source, text)
+                : quoteFound && !containsText ? extendCitation(source, quote, text) : '';
+            if (original) {
+                value.source.quote = original;
+                verified.add(value);
+                continue;
             }
             if (!quoteFound || !containsText) {
                 if (!quoteFound && previous) {
@@ -200,14 +203,10 @@ async function normalizeStage(input, state, verifySource) {
     return { stage, plan };
 }
 
-function reopenReview(state, stage = requiredStages(state.request).at(-1)) {
-    if (!state.review) return;
+function reopenReview(state, stage = confirmationStage(state.request)) {
+    if (!state.review || stage !== confirmationStage(state.request)) return;
     const approvals = state.review.approvals;
-    const required = requiredStages(state.request);
-    const stageIndex = required.indexOf(stage);
-    if (stageIndex < 0) return;
-    if (stage === 'direction') delete state.citationDraft;
-    for (const stage of required.slice(stageIndex)) delete approvals[stage];
+    delete approvals[stage];
     delete state.deliveryReceipt;
     delete state.deliveryReview;
     delete state.reviewDraft;
@@ -219,7 +218,7 @@ function reopenReview(state, stage = requiredStages(state.request).at(-1)) {
 
 function applyReviewDecision(state, pending, approved) {
     const approvals = state.review.approvals;
-    if (!requiredStages(state.request).includes(pending.stage) || !pending.plan) return false;
+    if (pending.stage !== confirmationStage(state.request) || !pending.plan) return false;
     const postingDigest = digest(pending.plan), previous = approvals[pending.stage];
     if (approved && previous?.digest === postingDigest) return false;
     reopenReview(state, pending.stage);
@@ -228,11 +227,17 @@ function applyReviewDecision(state, pending, approved) {
     return true;
 }
 
+function recordDraftPlan(state, plan) {
+    reopenReview(state, 'design');
+    state.review.approvals.design = { basis: 'automatic', digest: draftPlanDigest(plan), plan };
+}
+
 function exportReview(state, project, templateOnly = false) {
     const missing = nextStage(state);
     if (missing) throw checklistError('请先提交并取得用户对' + labels[missing] + '的明确批准，再执行导出。');
     const approval = state.review.approvals[templateOnly ? 'template' : 'design'];
-    if (!approval || approval.digest !== digest(approval.plan) || approval.plan.project !== project) {
+    const planDigest = approval?.basis === 'automatic' ? draftPlanDigest : digest;
+    if (!approval || approval.digest !== planDigest(approval.plan) || approval.plan.project !== project) {
         throw checklistError('导出项目与用户批准的方案不一致，请核对任务目录和确认记录。');
     }
     if (state.request.template?.type === 'runtime' && (!state.templateSpec || approval.plan.templateUse?.id !== state.templateSpec.id
@@ -299,15 +304,20 @@ function pageRepairSources(report, project, count) {
 function reviewGuidance(state) {
     if (!state.review) return '';
     const stage = nextStage(state);
+    if (state.request.draftFirst && !stage) return '当前初稿清单已由宿主校验，请按该清单写入页面并核验导出。对缺少证据的数据保留清单中的待核对文字。';
+    const draftGuidance = state.request.draftFirst && stage === 'design'
+        ? '此任务先制作初稿。使用 requestInput.kind=confirmation 仅向宿主提交内部清单，宿主会自动校验并推进。'
+        : '等 Pivot 返回用户批准，无需另起确认服务。';
+    const pageCount = stage === 'design' && fixedPageCount(state.request) && state.request.pageCount;
     return stage
-        ? `当前宿主确认协议优先：下一阶段为 ${stage}（${labels[stage]}）。用 requestInput.kind=confirmation、stage=${stage}、question、plan 提交；等 Pivot 返回用户批准，无需另起确认服务。plan 填写 summary；design 或 template 还须填写实际 project，design 另填顺序 pages:[{title,values:[{text,source?:{path,quote}}]}]。引用材料时先读取实际来源，复制含指标、数字、单位和限定条件的连续原文作 quote，从该引文截取页面实际显示的 text。制作要求仅能佐证其中明确写出的事实。确认前不得 export 或最终交付。`
+        ? `当前宿主确认协议优先：下一阶段为 ${stage}（${labels[stage]}）。用 requestInput.kind=confirmation、stage=${stage}、question、plan 提交。${draftGuidance} plan 填写 summary，填写实际 project，design 另填顺序 pages:[{title,values:[{text,source?:{path,quote}}]}]。${pageCount ? `完整清单的 pages 必须按顺序含全部 ${pageCount} 页，无关键数据的页面填 values:[]。` : ''}引用材料时先读取实际来源，复制含指标、数字、单位和限定条件的连续原文作 quote，从该引文截取页面实际显示的 text。制作要求仅能佐证其中明确写出的事实。完成清单校验前禁止导出。`
         : '宿主确认阶段：必需阶段均已批准。按已批准的项目与清单继续制作；修改清单须重新提交用户批准。';
 }
 
 function reviewRecoveryGuidance(state, code, message) {
     const reason = String(message || '').slice(0, 500);
     if (code === 'PPT_MASTER_ACTION_INVALID' && reason) {
-        return '\n上次无效回复未执行。失败原因：' + reason + '\n按提示核对相关字段和当前材料后，仅修正存在问题的部分。';
+        return '\n上次无效回复未执行。失败原因：' + reason + '\n若保有待修清单，按待核对项提交局部修正；需要重提方案时，提交完整清单。';
     }
     if (code === CITATION_REVIEW_REQUIRED) {
         return '\n上次停在清单引文核对。结合用户补充的原文修正数据项，或按明确的修改要求重提清单。';
@@ -350,4 +360,4 @@ function resetCitationRepair(state, { allowRevision = false } = {}) {
     }
 }
 
-module.exports = { initializeReview, normalizeStage, applyReviewDecision, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, CITATION_REVIEW_REQUIRED, labels };
+module.exports = { initializeReview, normalizeStage, applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };

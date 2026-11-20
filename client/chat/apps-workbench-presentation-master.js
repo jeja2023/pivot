@@ -231,7 +231,7 @@
             headerIcon,
             node('h3', '', '完整制作过程')
         );
-        const headerSubtitle = node('p', 'presentation-master-header-subtitle', '实时展示模型预检、材料读取、分阶段确认与产物交付');
+        const headerSubtitle = node('p', 'presentation-master-header-subtitle', '实时展示模型预检、材料读取、方案确认与产物交付');
         headerInfo.append(headerTitleRow, headerSubtitle);
         const closeBtn = node('button', 'btn-secondary workspace-modal-close', '关闭'); closeBtn.type = 'button';
         closeBtn.addEventListener('click', exitProcessView);
@@ -574,7 +574,8 @@
         const feedback = node('p', 'presentation-master-task-feedback'); feedback.setAttribute('role', 'alert');
         const head = node('div', 'presentation-master-task-head');
         const headMeta = node('div', 'presentation-master-task-head-meta');
-        const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: '需要人工确认', completed: '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
+        const waitingLabel = value.inputRequest?.kind === 'continue' ? '可继续制作' : '需要人工确认';
+        const statusBadge = node('strong', 'presentation-master-task-badge ' + (value.status || ''), ({ working: '正在制作中', input_required: waitingLabel, completed: value.draftFirst ? '初稿已生成' : '制作完成', failed: '制作未完成', cancelled: '已取消', expired: '任务已过期' })[value.status] || '制作任务');
         headMeta.appendChild(statusBadge);
         if (value.request?.title) headMeta.appendChild(node('span', 'presentation-master-task-title', value.request.title));
         head.appendChild(headMeta);
@@ -599,6 +600,9 @@
         const budgetText = currentBudget === 0 ? '不限' : Number.isSafeInteger(currentBudget) ? `${currentBudget.toLocaleString('zh-CN')} 令牌` : '未记录';
         panel.appendChild(node('p', 'presentation-master-task-summary', `步骤 ${value.steps || 0}。已用约 ${Number(value.usedTokens || 0).toLocaleString('zh-CN')} 令牌。本任务累计预算 ${budgetText}。`));
         window.Pivot.moduleApi('apps.presentations.masterPageReview')?.mountTaskDiagnostics(panel, value, node);
+        for (const issue of value.draftCitationIssues || []) {
+            panel.appendChild(node('p', 'presentation-master-task-summary', `第 ${issue.page} 页第 ${issue.item} 项待核对 · ${issue.reason}`));
+        }
         const modal = historySession ? null : byId('presentation-master-modal');
         if (modal && (value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
             const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);
@@ -614,10 +618,10 @@
             head.appendChild(cancel);
         }
         if (value.inputRequest) {
-            const request = value.inputRequest || {}, confirmation = request.kind === 'confirmation';
+            const request = value.inputRequest, confirmation = request.kind === 'confirmation', continuing = request.kind === 'continue';
             const reviewBox = node('div', 'presentation-master-review-panel');
             if (request.stage) {
-                const stages = { direction: '确认沟通方向', design: '确认最终页面与关键数据清单', template: '确认模板制作方案' };
+                const stages = { design: '确认最终页面与关键数据清单', template: '确认模板制作方案' };
                 if (stages[request.stage]) {
                     const stageHead = node('div', 'presentation-master-review-stage');
                     const stageIcon = svgIcon([['path', { d: 'M9 11l3 3L22 4' }], ['path', { d: 'M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11' }]], 14);
@@ -665,7 +669,7 @@
             const submit = node('button', 'btn-primary presentation-master-confirm-btn'); submit.type = 'button';
             const confirmIcon = svgIcon([['polyline', { points: '20 6 9 17 4 12' }]], 14);
             confirmIcon.setAttribute('aria-hidden', 'true');
-            submit.append(confirmIcon, node('span', '', confirmation ? '确认并继续' : '提交答复并继续'));
+            submit.append(confirmIcon, node('span', '', continuing ? '继续制作' : confirmation ? '确认并继续' : '提交答复并继续'));
             const actions = node('div', 'presentation-master-task-actions presentation-master-confirm-actions');
             const revise = confirmation ? node('button', 'btn-secondary presentation-master-revise-btn') : null;
             if (revise) {
@@ -681,7 +685,7 @@
             syncActionState();
             async function respond(decision) {
                 const response = answer.value.trim();
-                if (decision !== 'approve' && !response) { feedback.textContent = '请先填写具体答复，再继续制作。'; answer.focus(); return; }
+                if (!['approve', 'continue'].includes(decision) && !response) { feedback.textContent = '请先填写具体答复，再继续制作。'; answer.focus(); return; }
                 if (decision === 'approve' && response) { feedback.textContent = '请提交已填写的修改意见，或清空意见后确认。'; answer.focus(); return; }
                 feedback.textContent = ''; submit.disabled = true; if (revise) revise.disabled = true;
                 const sequence = ++epoch;
@@ -690,9 +694,10 @@
                     await poll(value.id, sequence);
                 } catch (error) { if (isProcessCurrent(sequence)) { submit.disabled = false; if (revise) revise.disabled = false; feedback.textContent = errorText(error); } }
             }
-            submit.addEventListener('click', () => respond(confirmation ? 'approve' : 'clarify'));
+            submit.addEventListener('click', () => respond(continuing ? 'continue' : confirmation ? 'approve' : 'clarify'));
             revise?.addEventListener('click', () => respond('revise'));
-            reviewBox.append(answer, actions);
+            if (!continuing) reviewBox.appendChild(answer);
+            reviewBox.appendChild(actions);
             panel.appendChild(reviewBox);
         }
         if (value.recoverable) {
@@ -792,12 +797,12 @@
         window.Pivot.moduleApi('apps.presentations.masterPageReview').mountActions(actionRow, panel, value, {
             node, getEpoch: () => epoch, isCurrent: isProcessCurrent, showError: errorText, feedback,
             requestJson: helpers.requestJson, openNative,
-            async restart(id, regenerate) {
+            async restart(id, regenerate, note) {
                 const sequence = ++epoch;
                 if (!regenerate) return poll(id, sequence).catch(error => showError(error, sequence));
                 regenerate.disabled = true;
                 try {
-                    const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id) + '/regenerate', post({}));
+                    const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id) + '/regenerate', post(note ? { note } : {}));
                     if (isProcessCurrent(sequence)) await poll(data.task.id, sequence);
                 } catch (error) {
                     if (isProcessCurrent(sequence)) { feedback.textContent = errorText(error); regenerate.disabled = false; }
@@ -805,7 +810,8 @@
             }
         });
         for (const file of value.result?.files || []) {
-            const download = node('button', 'btn-secondary', file.format === 'pptx' ? '下载演示文件（.pptx）' : '下载完整项目源包'); download.type = 'button';
+            const download = node('button', 'btn-secondary', file.format === 'pptx'
+                ? (value.draftFirst ? '下载初稿（.pptx）' : '下载演示文件（.pptx）') : '下载完整项目源包'); download.type = 'button';
             download.addEventListener('click', async () => {
                 const sequence = epoch;
                 try { const data = await helpers.requestJson('/api/agents/renditions/' + file.renditionId + '/download-token', post({}));
@@ -816,7 +822,7 @@
             }); actionRow.appendChild(download);
             if (file.format === 'pptx') {
                 const edit = node('button', 'btn-secondary', '编辑已生成页面'); edit.type = 'button';
-                edit.addEventListener('click', () => openNative({ sourceRenditionId: String(file.renditionId), title: value.request?.title || '完整制作结果' }));
+                edit.addEventListener('click', () => openNative({ sourceRenditionId: String(file.renditionId), title: value.request?.title || '完整制作结果', modelId: value.request?.modelId }));
                 actionRow.appendChild(edit);
             }
         }

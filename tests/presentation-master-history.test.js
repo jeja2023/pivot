@@ -294,7 +294,8 @@ test('已确认且同一项目的设计文件经校验回执后仅收起固定�
     const original = [{ role: 'system', content: '安全边界' }, { role: 'user', content: JSON.stringify({ runtimeDocument: 'workflows/generate-pptx.md', text, nextOffset: null }) },
         ...write('design_spec.md', '设计规范'), ...write('spec_lock.md', '锁定内容'), ...validation,
         { role: 'user', content: '用户确认保留原始数据' }];
-    const state = { request: { operation: 'generate', profile: 'default' }, confirmedGates: 2, messages: original };
+    const state = { request: { operation: 'generate', profile: 'default' }, confirmedGates: 1, messages: original,
+        review: { approvals: { design: { plan: { project: 'project' } } } } };
     const result = phaseMessages(original, state), content = JSON.parse(result.messages[1].content).text;
     assert.match(content, /暂收起步骤1至3/);
     assert.match(content, /### Step 4: Strategist Phase/);
@@ -312,7 +313,8 @@ test('已确认且同一项目的设计文件经校验回执后仅收起固定�
     const calibrated = [...original, { role: 'assistant', content: JSON.stringify({ actions: [{ action: 'run', tool: 'text_measure', args: ['calibrate', 'project', '--outline'] }] }) },
         { role: 'user', content: JSON.stringify([{ action: 'run', result: { exitCode: 0 } }]) }];
     assert.match(JSON.parse(phaseMessages(calibrated, { ...state, messages: calibrated }).messages[1].content).text, /暂收起步骤1至3/);
-    assert.equal(phaseMessages(original, { ...state, confirmedGates: 1 }).messages[1], original[1]);
+    assert.equal(phaseMessages(original, { ...state, review: { approvals: { direction: {} } } }).messages[1], original[1]);
+    assert.equal(phaseMessages(original, { ...state, review: { approvals: { design: { plan: { project: 'other' } } } } }).messages[1], original[1]);
     assert.equal(phaseMessages(original, { ...state, request: { operation: 'generate', profile: 'quick' } }).messages[1], original[1]);
     const changed = original.map((message, index) => index === 1 ? { ...message, content: JSON.stringify({ runtimeDocument: 'workflows/generate-pptx.md', text: text + 'x', nextOffset: null }) } : message);
     assert.equal(phaseMessages(changed, state).messages[1], changed[1]);

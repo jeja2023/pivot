@@ -7,12 +7,12 @@
         flush, requireModel, toast, activeSlide, canEdit, formatChangeImpact, recordHistory, renderEditor }) {
         let draftPlan;
         async function openDraft(id) {
-            byId('presentation-outline-modal')?.classList.add('hidden');
+            byId('presentation-create-modal')?.classList.add('hidden');
             await loadDocuments();
             await openPresentation(id);
         }
 
-        async function generateSlides(outline) {
+        async function generateSlides(outline, { button, controller, isCurrent = () => true }) {
             const pending = state.pendingCreate;
             const outlineKey = JSON.stringify(outline);
             if (!pending.draftId || draftPlan?.pending !== pending || draftPlan.outlineKey !== outlineKey) {
@@ -20,31 +20,31 @@
                 draftPlan = { pending, outlineKey };
             }
             const draftId = pending.draftId;
-            const button = byId('presentation-outline-confirm-btn'), controller = beginAiRequest();
             button.disabled = true; button.textContent = '正在生成页面…';
             try {
-                const request = { ...pending, outline, title: outline.title || pending.topic };
-                const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller));
-                if (controller.signal.aborted || state.pendingCreate !== pending) return;
+                const title = String(outline.title || pending.topic).slice(0, 155) + '-初稿';
+                const request = { ...pending, outline, title };
+                const data = await requestJson(API + '/ai/slides', aiJsonOptions(request, controller, '-pages'));
+                if (controller.signal.aborted || state.pendingCreate !== pending || !isCurrent()) return;
                 await openDraft(data.draftId);
                 const warning = data.warnings?.find(Boolean);
-                toast(warning || '大纲页面已生成并保存。', warning ? 'warning' : 'success');
+                toast(warning || '演示初稿已生成并保存。', warning ? 'warning' : 'success');
             } catch (error) {
                 if (isAiAbort(error, controller)) { toast('AI 页面生成已取消。', 'warning'); return; }
-                if (state.pendingCreate !== pending) return;
+                if (state.pendingCreate !== pending || !isCurrent()) return;
                 if (error.code === 'PRESENTATION_GENERATION_PLAN_CHANGED') {
                     delete pending.draftId;
                     toast('原草稿已按旧大纲保存。再次点击“生成页面”可按当前大纲新建草稿。', 'warning');
                     return;
                 }
                 const partial = await requestJson(API + '/' + encodeURIComponent(draftId)).catch(() => null);
-                if (controller.signal.aborted || state.pendingCreate !== pending) return;
+                if (controller.signal.aborted || state.pendingCreate !== pending || !isCurrent()) return;
                 if (!partial?.presentation) throw error;
                 await openDraft(draftId);
                 toast(error.message + ' 已生成页面已保存，可补齐缺页。', 'warning');
             } finally {
                 endAiRequest(controller);
-                button.disabled = false; button.textContent = '生成页面';
+                button.disabled = false; button.textContent = '生成初稿';
             }
         }
 

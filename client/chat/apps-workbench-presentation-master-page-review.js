@@ -28,7 +28,7 @@
             section.appendChild(node('strong', '', '待核对的引文'));
             for (const item of task.citationReview.items) {
                 section.appendChild(node('p', 'presentation-master-task-summary',
-                    [item.location, item.title, item.text && '「' + item.text + '」'].filter(Boolean).join(' · ')));
+                    [item.location, item.title, item.text && '「' + item.text + '」', item.reason].filter(Boolean).join(' · ')));
             }
             section.appendChild(node('p', 'presentation-master-task-summary', '请补充带数字和单位的原文、说明怎么改，或切换制作模型后继续。'));
             container.appendChild(section);
@@ -159,7 +159,7 @@
         if (!task.canPreviewExport && !task.hasSavedReviewPages) return;
         const base = '/api/apps/presentations/master/tasks/' + encodeURIComponent(task.id) + '/review-pages';
         const savedButton = node('button', 'btn-secondary', '查看已保存页面');
-        const liveButton = node('button', 'btn-secondary', '查看已通过页面');
+        const liveButton = node('button', 'btn-secondary', task.draftFirst && task.status === 'completed' ? '预览初稿' : '查看已通过页面');
         savedButton.type = liveButton.type = 'button';
         if (task.hasSavedReviewPages) row.appendChild(savedButton);
         if (task.canPreviewExport) row.appendChild(liveButton);
@@ -207,7 +207,7 @@
                 image.addEventListener('load', () => { open.disabled = false; });
                 image.addEventListener('error', () => { imageError.textContent = '预览暂不可用，请重新打开该制作记录后再试。'; });
                 select.addEventListener('change', update);
-                if (!isSaved && exportRevision) {
+                if (!isSaved && exportRevision && task.status !== 'completed') {
                     const save = node('button', 'btn-primary', '保存已通过页面');
                     save.type = 'button';
                     notice.textContent = '将通过页面保存为图片，关闭后可从「完整制作记录」回看。';
@@ -245,9 +245,15 @@
         mountPassedPages(row, panel, task, options);
         mountSnapshots(panel, task, options);
         if (task.canRegenerate) {
-            const regenerate = Object.assign(node('button', 'btn-secondary', '重新生成整份'), { type: 'button' });
+            const draft = task.status === 'completed' && task.draftFirst;
+            const regenerate = Object.assign(node('button', 'btn-secondary', draft ? '修改整份初稿' : '重新生成整份'), { type: 'button' });
             regenerate.addEventListener('click', async () => {
                 const sequence = getEpoch();
+                if (draft) {
+                    const note = await window.Pivot.legacy.showInputPrompt?.({ title: '修改整份初稿', message: '填写修改要求。系统会沿用原材料和模板生成新版，并保留原稿。', multiline: true, required: true, maxLength: 4000 });
+                    if (note?.trim() && isCurrent(sequence)) await restart(task.id, regenerate, note.trim());
+                    return;
+                }
                 if (!await window.Pivot.legacy.showConfirm('重新生成整份', '将用原材料和设置创建一个新任务，重新计算模型用量。原任务和草稿会保留。')) return;
                 if (isCurrent(sequence)) await restart(task.id, regenerate);
             });

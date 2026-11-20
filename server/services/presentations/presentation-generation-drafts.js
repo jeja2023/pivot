@@ -13,9 +13,12 @@ function assertDraftId(id) {
 
 function planFor(request, roster) {
     const { title, topic, outline, templateId, templateVersion, materials, aspectRatio, language, productionProfile, instruction } = request;
-    const input = { title, topic, outline, templateId, templateVersion, materials, aspectRatio, language, productionProfile, instruction };
+    const input = { title, topic, outline, templateId, templateVersion, materials, aspectRatio, language, productionProfile, instruction,
+        ...(request.draftFirst === true ? { draftFirst: true } : {}) };
     return { digest: crypto.createHash('sha256').update(JSON.stringify(input)).digest('hex'), input,
-        templateDigest: request.template.snapshotDigest, roster: roster.map(page => ({ id: page.outlinePageId, title: page.title })), pages: {} };
+        templateDigest: request.template.snapshotDigest, roster: roster.map(page => ({ id: page.outlinePageId, title: page.title })), pages: {},
+        ...(input.draftFirst ? { draftReview: (Array.isArray(outline.assumptions) ? outline.assumptions : [])
+            .filter(item => typeof item === 'string' && item.trim()).slice(0, 30).map(item => item.slice(0, 300)) } : {}) };
 }
 
 async function lookup(user, id, required = false) {
@@ -96,7 +99,7 @@ async function saveGeneratedBatch(user, id, generation, compiled) {
         try {
             if (!current) return await service.createPresentation(user, { id, title: merged.content.title,
                 templateId: generation.input.templateId, templateVersion: generation.input.templateVersion,
-                content: merged.content, planApproval: { outline: generation.input.outline } }, { generation: next });
+                content: merged.content, ...(generation.input.draftFirst ? {} : { planApproval: { outline: generation.input.outline } }) }, { generation: next });
             return await service.savePresentationContent(user, id, { baseVersion: current.version, content: merged.content, note: '保存大纲生成页面' },
                 { expectedContentDigest: current.contentDigest, generation: next });
         } catch (error) {

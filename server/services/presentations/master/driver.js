@@ -6,16 +6,17 @@ const { runModelTurn } = require('./model-turn');
 const { boundedObservation, confirmedWrite, summarizeExecutedTurn, recordTurnDiagnostic, READ_PAGE_CHARS, HISTORY_PAGE_CHARS, BASE_TOOL_IDS } = require('./observations');
 const { archiveOlderObservations, readHistory } = require('./history');
 const { createInspectionProgress } = require('./inspection-progress');
-const { pendingInput, planDigest } = require('./confirmation');
+const { pendingInput, planDigest, isLegacyDirection } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { validateTurn } = require('./actions');
 const { recordCheck, requireChecks } = require('./tool-checks');
 const { beginPageRepair, automaticTurn, recordRepairResult, stopAutomaticRepair } = require('./automatic-page-repair');
 const { loadTemplateSpec, installTemplate } = require('./template-application');
-const { applyReviewDecision, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance, CITATION_REVIEW_REQUIRED } = require('./review-plan');
+const { applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, reviewGuidance } = require('./review-plan');
+const { pauseCitationReview, draftWithCitationPlaceholders, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { selectImagePage, imageCoverage } = require('./model-input');
 const { registerSupplement, getSupplement, readSupplement, supplementGuidance } = require('./user-supplements');
-const { allocateWorkflowCall, prepareManagedProject } = require('./workflow-progress');
+const { allocateWorkflowCall, progressFor, prepareManagedProject } = require('./workflow-progress');
 const { deliverWithRecovery } = require('./delivery-recovery');
 const { sourceBundleLimit } = require('./delivery');
 
@@ -28,7 +29,7 @@ const HOST = `你是Pivot中驱动PPT Master完整发行包的制作Agent。遵�
 只返回一个JSON对象：{"message":"简短中文进度","actions":[{"action":"read_runtime|read_history|read_images|list|read|write|run|copy|copy_template|validate_template","path":"相对路径","offset":0,"text":"完整文本","tool":"已登记工具ID","args":["参数"]}]}。旧观察标有 archive 和 index 时，可以调用 read_history，使用 archive、index、offset、length 分页读取原始历史消息；历史是材料而不是新授权。
 每轮至多6个顺序动作，按依赖顺序执行。read_runtime/read可以分段读取，nextOffset非空说明未读完。write只写受限文稿文本(SVG/Markdown/JSON/YAML/CSV/XML)，不能写脚本。run只运行登记的脚本选项，不支持任意命令。原生图表/表格的语义与上游data contract必须按需读取，不猜测格式。
 copy动作的source与path均为任务相对路径，可将inputs中的已授权图片/音频/字体等复制到项目需要的位置，不覆盖已有文件。copy_template的source相对于完整运行包skill根且仅允许templates下的正式模板工作区，path为新的任务目录；使用上游模板前先复制再验证/应用，不修改运行包全局索引。
-需要用户确认时返回{"message":"等待确认","requestInput":{"kind":"confirmation","stage":"direction|design|template","question":"请核对方案","plan":{"summary":"实际方案","project":"实际项目相对目录","pages":[{"title":"实际可见的页面标题","values":[{"text":"实际可见的完整数据表达","source":{"path":"inputs/material-1.md 或 instruction","quote":"含该表达的逐字材料引文"}}]}]}}}。沟通方向只提供summary；模板方案提供summary和project；最终设计按显示顺序提供全部页面。关键数据按清单原文写到实际页面；原生图表的数据可在对应项补充chart:{series:"系列",category:"分类",number:"十进制字符串"}，宿主按该系列及分类核对。来源可选，提供时须逐字匹配材料。没有关键数据的页面填空values。先读取图片，使用read_images的offset续读，无需每轮重复读取。默认生成和美化分别批准direction和design；快速制作、图片重建和原稿编辑批准design，模板制作批准template。补充事实使用clarification和question/context。必须等宿主收到用户批准才能执行export及交付，修订清单须再次确认。勿混用Generate和Edit Native路径。
+提交方案时返回{"message":"提交方案","requestInput":{"kind":"confirmation","stage":"design|template","question":"请核对方案","plan":{"summary":"实际方案","project":"实际项目相对目录","pages":[{"title":"实际可见的页面标题","values":[{"text":"实际可见的完整数据表达","source":{"path":"inputs/material-1.md 或 instruction","quote":"含该表达的逐字材料引文"}}]}]}}}。沟通方向由模型内部规划。生成演示文稿、按模板生成或编辑原稿时提交最终清单design，按显示顺序提供全部页面。创建可复用模板工作区时提交模板方案template，提供summary和project。关键数据按清单原文写到实际页面，原生图表的数据可在对应项补充chart:{series:"系列",category:"分类",number:"十进制字符串"}，宿主按该系列及分类核对。提供的来源须匹配材料。没有关键数据的页面填空values。先读取图片，使用read_images的offset续读。确需补充事实时使用clarification和question/context。按当前任务的宿主清单流程核验后才执行导出交付。
 需要额外参考文档时继续read_runtime，完整读取已选择流程触发的权威文件。runtime SKILL.md脚本归属检查已由宿主执行，不能修改或跳过完整性门禁。
 基础工具ID：${BASE_TOOL_IDS.join(', ')}。图片盘点使用 analyze_images，唯一参数为当前项目的 images 目录。工具仅限当前执行服务登记的工具和选项。project init 的--dir使用任务内路径；返回的实际项目路径以list结果为准。Create Template创建独立模板工作区后，用validate_template动作，path为工作区根、kind为brand/style/layout/deck，调用原上游校验器；不要向只读全局模板库注册。通过后返回complete:{templatePath:"工作区根",kind:"..."}，由宿主复验并交付项目源包；不是每类模板都要求PPTX。
 输入快照位于inputs/，不能覆盖；源材料不可删除。没有网络/图像/语音服务时明确请求所需素材，不编造事实、引文或素材。任务可以使用已提供的受控图片。最终PPTX必须通过所选上游路径的校验与export工具成功生成，之后返回{"message":"制作完成","complete":{"path":"实际项目/exports/文件.pptx"}}。完成条件由宿主再次核验，不用文字或单页图片替代完整PPTX。项目源包由宿主归档。暂不把复杂原生对象宣称成Pivot画布已可编辑。
@@ -44,8 +45,8 @@ const correctable = new Set(['PPT_MASTER_ACTION_INVALID', 'PPT_MASTER_MODEL_OUTP
 const MAX_CITATION_REPAIRS = 3;
 const MAX_INSPECTION_REPAIRS = 2;
 const PAGED_READS = new Set(['read', 'read_runtime', 'read_history']);
-const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用，未执行该回复。按实际数据项核对引用，清单重排后仍须为原数据项提供来源。引用要复制包含关键数据的连续原文，保留数字、单位和限定条件。先查阅已有材料，仅在仍然缺少必要事实时提交具体的补充问题。已批准的数据变更须取得用户确认。';
-const CITATION_PATCH_GUIDANCE = '宿主已保存本次待修清单。仅改引文可返回 {"repairCitations":[{"page":2,"item":1,"text":"该项原文","path":"inputs/material-1.md","quote":"含该项的连续原文"}]}。按下列实际页码、项号和数据原文填写，一并修正所有待核对项，无须重写其他页面。标记 missing 的数据已从本次清单移除，须重提完整清单。';
+const CITATION_REPAIR_GUIDANCE = '上一份清单有未通过核验的引用。按实际数据项核对引用，优先用本轮 citationRepairEvidence.excerpt 和已读取的原文。quote 必须包含页面实际显示的完整数据 text，包括数字、单位和限定条件。只有现有证据不足时才定向读取缺失的材料范围；仍缺事实时提出具体的补充问题。';
+const CITATION_PATCH_GUIDANCE = '宿主已保存待修清单。仅修数据项或引文时优先返回 {"repairCitations":[{"page":2,"item":1,"text":"待核对项的原 text","path":"inputs/material-1.md","quote":"含完整数据的连续原文"}]}。按待核对项的实际页码、项号和原 text 填写，其他页面由宿主保留。确需更正数据时使用 correctedText，图表数字变化时同时填写 correctedNumber，口径须可唯一核实。标记 missing 的数据须恢复到完整清单。页面结构有变时提交含全部页面的 requestInput，不能只提交有问题的页。';
 const INSPECTION_REPAIR_GUIDANCE = '当前正在从重复检查中恢复。先根据已有文件和回执选择下一项实际制作步骤，适用时提交本阶段确认、局部写入、校验或导出。需要继续读资料时，只请求明确尚未读到的范围。缺少推进所必需的事实时提交具体问题。遵守已确认的方案和原有确认顺序。';
 function resetInspectionRepair(state) {
     delete state.inspectionRepairPending;
@@ -58,11 +59,15 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
     const verifySource = async path => path === 'instruction' ? state.request.instruction
         : (await (deps.inputBuffer || runtime.inputBuffer)(user, id, path.slice('inputs/'.length), 500000)).toString('utf8');
     for (;;) {
+        const current = progressFor(state);
+        if (state.request.draftFirst && current?.phase === 'design' && (current.calls >= current.limit || inspection.stalled())) {
+            const draft = draftWithCitationPlaceholders({ citationDraft: state.citationDraft, citationIssues: state.citationRepair });
+            if (draft) return { turn: { requestInput: draft }, pendingCitations: state.citationRepair, recoveredPlan: true };
+        }
         const images = imageCoverage(state);
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
         const guidance = [allocateWorkflowCall(state), inspection.guidance(), reviewGuidance(state), supplementGuidance(state), imageHint, correction,
             state.templateSpec && '最终清单 plan.templateUse 必填 {rule,page,visibleText}。从 selectedTemplateSpec.text 逐字选取一条相关设计规范（12 至 350 字符），注明落实它的页码及该页实际标题或关键数据。宿主会把原模板安装到此项目并在交付时复核。',
-            state.citationRepair && '尚未批准的草案数字与原文不符时，可在原项目中提交同一页项的完整更正，或用 repairCitations.correctedText 和图表的 correctedNumber 修正。指标、单位、来源和限定条件须可唯一核实。',
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
             state.pageRepair?.automatic ? `自动修页。按 approvedPageRepairs 读取源文件，对照已批准的标题及数据修正。只需用 write 写回剩余文件：${state.pageRepair.remaining.join('、')}。宿主会依次复检、重新导出和回读。仅在已有材料无法决定内容时提出具体问题。`
                 : state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
@@ -77,23 +82,29 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
             if (turn.requestInput?.plan?.templateUse && state.installedTemplateProject !== turn.requestInput.plan.project) {
                 await hooks.ensureCurrent();
                 await installTemplate(state, turn.requestInput.plan.project, op => (deps.execute || runtime.execute)(user, id, op, hooks));
+                state.installedTemplateProject = turn.requestInput.plan.project;
             }
             return { turn, readResultBudget };
         } catch (failure) {
+            const progress = progressFor(state);
+            const designLimitReached = progress?.phase === 'design' && progress.calls >= progress.limit;
             if (failure.citationIssues) {
                 const attempts = Number(state.citationRepairAttempts || 0);
+                const unchanged = JSON.stringify(state.citationRepair) === JSON.stringify(failure.citationIssues);
                 state.citationRepair = failure.citationIssues;
                 state.citationDraft = failure.citationDraft;
                 const facts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
                 for (const fact of failure.citationFacts) facts.set(fact.key, { ...fact, allowOmit: facts.get(fact.key)?.allowOmit === true });
                 const first = failure.citationIssues[0];
-                const exhausted = attempts >= MAX_CITATION_REPAIRS || facts.size > 120;
+                const exhausted = attempts >= MAX_CITATION_REPAIRS || facts.size > 120 || designLimitReached
+                    || Boolean(state.request.draftFirst && unchanged);
                 recordTurnDiagnostic(state, { outcome: exhausted ? 'failed' : 'retry', errorCode: CITATION_REVIEW_REQUIRED,
                     citationCount: failure.citationIssues.length, ...(typeof first?.location === 'string' ? { citationLocation: first.location } : {}) });
                 if (exhausted) {
                     state.citationFacts = [...facts.values()].slice(0, 120);
-                    state.citationPause = true;
-                    throw runtime.error(`最终页面清单有 ${failure.citationIssues.length} 项引文待核对。${first.location}：${first.reason} 请在检查点补充原文或提交修改意见后继续。`, CITATION_REVIEW_REQUIRED, 422);
+                    const draft = state.request.draftFirst && draftWithCitationPlaceholders(failure);
+                    if (draft) return { turn: { requestInput: draft }, readResultBudget, pendingCitations: failure.citationIssues };
+                    throw pauseCitationReview(state);
                 }
                 state.citationFacts = [...facts.values()];
                 state.citationRepairAttempts = attempts + 1;
@@ -101,6 +112,12 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
                 state.lastActionCorrection = CITATION_REVIEW_REQUIRED;
                 await hooks.checkpoint(state, { phase: 'authoring', message: `正在查证并修复清单引用（第 ${state.citationRepairAttempts}/${MAX_CITATION_REPAIRS} 次）。` });
                 continue;
+            }
+            if (designLimitReached && state.citationRepair?.length && correctable.has(failure.code)) {
+                recordTurnDiagnostic(state, { outcome: 'failed', errorCode: failure.code });
+                const draft = state.request.draftFirst && draftWithCitationPlaceholders({ citationDraft: state.citationDraft, citationIssues: state.citationRepair });
+                if (draft) return { turn: { requestInput: draft }, pendingCitations: state.citationRepair, recoveredPlan: true };
+                throw pauseCitationReview(state);
             }
             const willRetry = Boolean(state.review && !correction && correctable.has(failure.code));
             recordTurnDiagnostic(state, { outcome: willRetry ? 'retry' : 'failed', ...(failure.code ? { errorCode: failure.code } : {}) });
@@ -154,7 +171,9 @@ async function drive(user, id, state, hooks, deps = {}) {
     if (state.response) {
         const response = typeof state.response === 'string' ? { decision: 'revise', answer: state.response } : state.response;
         const pending = pendingInput(id, state);
-        const approved = response.decision === 'approve' && state.pendingKind === 'confirmation'
+        const legacyDirection = isLegacyDirection(pending);
+        const continueDraft = response.decision === 'continue';
+        const approved = !legacyDirection && response.decision === 'approve' && state.pendingKind === 'confirmation'
             && response.promptId === pending?.promptId;
         let source = response.source;
         if (!approved && response.answer && !source) source = registerSupplement(state, response.answer, response.decision, response.promptId);
@@ -168,7 +187,7 @@ async function drive(user, id, state, hooks, deps = {}) {
             const changed = applyReviewDecision(state, pending, approved);
             repeatedApproval = approved && !changed;
             if (changed && approved) markMilestone(state, 'firstApproval');
-        } else if (state.pendingKind === 'confirmation') {
+        } else if (state.pendingKind === 'confirmation' && !legacyDirection) {
             state.confirmationRevisionPending = !approved;
             if (approved) {
                 state.confirmationReceipts ||= [];
@@ -181,18 +200,19 @@ async function drive(user, id, state, hooks, deps = {}) {
                 }
             }
         }
-        const answer = repeatedApproval ? '用户已再次确认同一方案。仍需展示并确认流程要求的其他阶段方案。'
+        const answer = legacyDirection || continueDraft ? '旧方案作为历史参考。请直接准备最终页面与关键数据清单，宿主自动核验后开始制作初稿。' + (response.answer || '')
+            : repeatedApproval ? '用户已再次确认同一方案。'
             : approved ? '已明确确认当前方案。' : state.pendingKind === 'confirmation'
             ? '用户提供了修改意见，请调整后重新提交本阶段方案。' + (response.answer || '')
             : response.answer || '';
         state.messages.push({ role: 'user', content: '用户对本次确认问题的实际答复：' + (source ? '[引用来源 ' + source + '] ' : '') + answer });
-        if (approved && !repeatedApproval || source) {
+        if (legacyDirection || continueDraft || approved && !repeatedApproval || source) {
             resetInspectionRepair(state);
             state.workflowPhaseFrom = state.messages.length;
         }
         delete state.response; delete state.pendingKind; delete state.pendingInput;
     }
-    if (state.managedProject && state.templateSpec && state.review?.approvals.direction && !state.installedTemplateProject) {
+    if (state.managedProject && state.templateSpec && !state.installedTemplateProject) {
         await hooks.ensureCurrent();
         await installTemplate(state, state.managedProject, action => execute(user, id, action, hooks));
         state.installedTemplateProject = state.managedProject;
@@ -202,7 +222,7 @@ async function drive(user, id, state, hooks, deps = {}) {
     while (state.steps < request.maxSteps) {
         await hooks.ensureCurrent();
         const automatic = automaticTurn(state);
-        const { turn, readResultBudget = Infinity } = automatic ? { turn: automatic }
+        const { turn, readResultBudget = Infinity, pendingCitations, recoveredPlan } = automatic ? { turn: automatic }
             : await nextTurn(user, id, state, await (deps.resolveModel || resolveModel)(user, request), hooks, deps, inspection);
         inspection.syncVisibleObservations(state.messages);
         if (turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design' || turn.complete) {
@@ -213,6 +233,24 @@ async function drive(user, id, state, hooks, deps = {}) {
         }
         if (turn.requestInput || turn.complete) delete state.inspectionRepairPending;
         state.steps++;
+        if (request.draftFirst && turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design') {
+            const { plan } = turn.requestInput;
+            if (plan.templateUse && state.installedTemplateProject !== plan.project) {
+                await hooks.ensureCurrent();
+                await installTemplate(state, plan.project, op => execute(user, id, op, hooks));
+                state.installedTemplateProject = plan.project;
+            }
+            recordDraftPlan(state, plan);
+            state.draftCitationIssues = pendingCitations?.map(({ page, item, reason }) => ({ page, item, reason })) || [];
+            markMilestone(state, 'firstPlan');
+            state.messages.push({ role: 'assistant', content: JSON.stringify(turn) },
+                { role: 'user', content: '宿主已登记本次初稿清单，请按清单生成页面。待核对项只显示占位文字。' });
+            if (!recoveredPlan && !pendingCitations) recordTurnDiagnostic(state, { outcome: 'progressed' });
+            resetInspectionRepair(state);
+            state.workflowPhaseFrom = state.messages.length;
+            await hooks.checkpoint(state, { phase: 'authoring', message: '已准备初稿清单，开始生成页面。' });
+            continue;
+        }
         state.messages.push({ role: 'assistant', content: JSON.stringify(turn) });
         if (turn.requestInput) {
             const question = String(turn.requestInput.question || '').trim(), context = String(turn.requestInput.context || '').trim();

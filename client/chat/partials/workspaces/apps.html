@@ -519,28 +519,11 @@
                                     <p>默认由AI设计；需要固定品牌时使用单位模板，也可沿用原稿设计。</p>
                                 </div>
                                 <div class="presentation-library-actions">
-                                    <button id="presentation-create-ai-btn" class="btn-primary" type="button" title="智能生成演示文稿大纲与页面">
-                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-                                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                                        </svg>
-                                        <span>AI 自由设计</span>
-                                    </button>
-                                    <button id="presentation-catalog-btn" class="btn-secondary presentation-btn-with-icon" type="button" data-presentation-catalog-open="all" title="查看内置标准模板与单位规范">
-                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-                                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
-                                            <line x1="3" y1="9" x2="21" y2="9"/>
-                                            <line x1="9" y1="21" x2="9" y2="9"/>
-                                        </svg>
-                                        <span>模板库</span>
-                                    </button>
+                                    <button id="presentation-create-ai-btn" class="btn-primary" type="button" title="智能生成演示文稿大纲与页面">AI 自由设计</button>
+                                    <button id="presentation-catalog-btn" class="btn-secondary" type="button" data-presentation-catalog-open="all" title="查看内置标准模板与单位规范">模板库</button>
                                     <button class="btn-secondary" type="button" data-presentation-master-history>完整制作记录</button>
                                     <details class="presentation-dropdown" id="presentation-more-create-dropdown">
                                         <summary class="btn-secondary presentation-dropdown-summary" title="更多创建与导入方式">
-                                            <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-                                                <circle cx="12" cy="12" r="1"/>
-                                                <circle cx="19" cy="12" r="1"/>
-                                                <circle cx="5" cy="12" r="1"/>
-                                            </svg>
                                             <span>更多创建</span>
                                             <svg class="presentation-dropdown-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
                                         </summary>
@@ -576,14 +559,7 @@
                                             </button>
                                         </div>
                                     </details>
-                                    <button id="presentation-refresh-btn" class="btn-secondary" type="button" title="刷新文稿列表">
-                                        <svg class="presentation-btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
-                                            <polyline points="23 4 23 10 17 10"/>
-                                            <polyline points="1 20 1 14 7 14"/>
-                                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                                        </svg>
-                                        <span>刷新</span>
-                                    </button>
+                                    <button id="presentation-refresh-btn" class="btn-secondary" type="button" title="刷新文稿列表">刷新</button>
                                 </div>
                             </div>
                             <div class="presentation-library-filters">
@@ -959,7 +935,7 @@
                                         </div>
                                         <label class="presentation-ai-model-selector" for="presentation-ai-model"><span>AI 模型</span><select id="presentation-ai-model" class="form-input" data-pivot-app-model="presentations" aria-label="选择 PPT AI 助手模型" disabled><option value="">加载模型中…</option></select></label>
                                         <div class="presentation-ai-prompt-group">
-                                            <label for="presentation-ai-instruction">对当前页面的要求</label>
+                                            <label for="presentation-ai-instruction">修改要求</label>
                                             <textarea id="presentation-ai-instruction" class="form-input" rows="4" placeholder="例如：将内容压缩成三项行动建议，保留事实和数字。"></textarea>
                                             <div class="presentation-ai-chips">
                                                 <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="将内容精炼为3项带量化数据的核心行动项，保持语气专业干练。">精简3项行动</button>
@@ -967,7 +943,7 @@
                                                 <button type="button" class="btn-secondary presentation-ai-chip" data-ai-instruction="检查当前页逻辑流、事实数据与错别字，提出修改建议。">检查逻辑与错别字</button>
                                             </div>
                                         </div>
-                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-visual-review-btn" class="btn-secondary" type="button">视觉复核当前页</button><button id="presentation-deck-review-btn" class="btn-secondary" type="button">整稿视觉复核</button><button id="presentation-deck-layout-btn" class="btn-secondary" type="button">优化整稿排版</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
+                                        <div class="presentation-ai-actions"><button id="presentation-ai-rewrite-btn" class="btn-primary" type="button">AI 改写当前页</button><button id="presentation-ai-revise-deck-btn" class="btn-secondary" type="button">按要求生成整份新稿</button><button id="presentation-ai-layout-variants-btn" class="btn-secondary" type="button">生成版式方案</button><button id="presentation-ai-continue-btn" class="btn-secondary" type="button">继续生成页面</button><button id="presentation-ai-validate-btn" class="btn-secondary" type="button">AI 内容检查</button><button id="presentation-visual-review-btn" class="btn-secondary" type="button">视觉复核当前页</button><button id="presentation-deck-review-btn" class="btn-secondary" type="button">整稿视觉复核</button><button id="presentation-deck-layout-btn" class="btn-secondary" type="button">优化整稿排版</button><button id="presentation-ai-stop-btn" class="btn-secondary" type="button">停止</button></div>
                                         <div id="presentation-design-task-status" class="presentation-ai-note" aria-live="polite"></div>
                                         <div id="presentation-layout-variants" class="presentation-layout-variants hidden" aria-live="polite"></div>
                                         <p class="presentation-ai-note">AI 改写先生成建议，确认后才会替换当前页面；内容检查仅提出可核实的问题。</p>
@@ -1339,12 +1315,12 @@
                                     <div class="presentation-create-actions presentation-ai-create-actions">
                                         <div class="presentation-create-actions-tip">
                                             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
-                                            <span>生成大纲后可逐页调整章节结构与关键要点，满意后再生成完整页面。</span>
+                                            <span>初稿保存后可逐页查看、修改并下载。</span>
                                         </div>
                                         <div class="presentation-create-buttons">
                                             <button id="presentation-create-cancel-btn" class="btn-secondary" type="button">取消</button>
                                             <button id="presentation-create-stop-btn" class="btn-secondary" type="button">停止生成</button>
-                                            <button id="presentation-create-submit-btn" class="btn-primary" type="submit">生成大纲</button>
+                                            <button id="presentation-create-submit-btn" class="btn-primary" type="submit">生成初稿</button>
                                         </div>
                                     </div>
                                 </form>
@@ -1444,26 +1420,6 @@
                                         <button id="presentation-export-options-save-btn" class="btn-primary" type="button">保存设置</button>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-                        <div id="presentation-outline-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-outline-title">
-                            <div class="modal presentation-outline-dialog">
-                                <div class="presentation-create-dialog-head">
-                                    <h3 id="presentation-outline-title">确认演示大纲</h3>
-                                    <p>以下按大纲层级展示章节、主题和要点；确认后将按此结构生成可编辑页面。</p>
-                                </div>
-                                <div class="presentation-outline-review">
-                                    <div class="presentation-outline-meta" aria-live="polite">
-                                        <span id="presentation-outline-page-count"></span>
-                                        <span>大纲预览</span>
-                                    </div>
-                                    <section id="presentation-outline-markdown" class="presentation-outline-markdown" aria-label="演示大纲预览"></section>
-                                </div>
-                                <div class="presentation-outline-confirmation" aria-live="polite">
-                                    <div id="presentation-outline-warnings" class="presentation-outline-warnings"></div>
-                                    <p id="presentation-outline-confirmation-status" class="presentation-outline-confirmation-status hidden"></p>
-                                </div>
-                                <div class="presentation-create-actions presentation-outline-actions"><button id="presentation-outline-cancel-btn" class="btn-secondary" type="button">取消</button><button id="presentation-outline-back-btn" class="btn-secondary" type="button">返回调整要求</button><button id="presentation-outline-confirm-all-btn" class="btn-secondary hidden" type="button">确认全部待确认项</button><button id="presentation-outline-stop-btn" class="btn-secondary" type="button">停止生成</button><button id="presentation-outline-confirm-btn" class="btn-primary" type="button">生成页面</button></div>
                             </div>
                         </div>
 <div id="presentation-presenter-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="presentation-presenter-title"><div class="modal presentation-presenter-dialog"><div class="presentation-create-dialog-head"><h3 id="presentation-presenter-title">演示者模式</h3><p><span id="presentation-presenter-timer">00:00</span> · <span id="presentation-presenter-counter"></span></p></div><div id="presentation-presenter-preview" class="presentation-presenter-preview"></div><section class="presentation-presenter-notes"><strong>提词与备注</strong><div id="presentation-presenter-notes-text" tabindex="0"></div></section><div class="presentation-create-actions"><button id="presentation-presenter-prev-btn" class="btn-secondary" type="button">上一页</button><button id="presentation-presenter-next-btn" class="btn-primary" type="button">下一页</button><button id="presentation-presenter-close-btn" class="btn-secondary" type="button">结束演示</button></div></div></div>

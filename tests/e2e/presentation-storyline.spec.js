@@ -19,10 +19,9 @@ test('整稿目标从创建带入结构，逐页叙事调整先预览再确认�
     await page.locator('#presentation-create-topic').fill('形成可执行的安排'); await page.locator('#presentation-create-pages').fill('3');
     await page.locator('#presentation-create-audience').fill('业务决策人员'); await page.locator('#presentation-create-purpose').fill('确定后续行动');
     await page.locator('#presentation-create-duration').fill('12');
-    await page.locator('#presentation-create-model').selectOption(String(model.id)); await page.locator('#presentation-create-submit-btn').click();
-    await expect(page.locator('#presentation-outline-confirm-btn')).toBeVisible({ timeout: 20000 });
+    await page.locator('#presentation-create-model').selectOption(String(model.id));
     const createdResponse = page.waitForResponse(response => response.url().endsWith('/api/apps/presentations/ai/slides') && response.request().method() === 'POST');
-    await page.locator('#presentation-outline-confirm-btn').click(); const created = await createdResponse; expect(created.ok(), await created.text()).toBeTruthy();
+    await page.locator('#presentation-create-submit-btn').click(); const created = await createdResponse; expect(created.ok(), await created.text()).toBeTruthy();
     const { draftId } = await created.json(), root = '/api/apps/presentations/' + draftId;
     const document = (await (await page.request.get(root)).json()).presentation;
     expect(document.content.metadata.productionProfile).toMatchObject({ audience: '业务决策人员', purpose: '确定后续行动', consumptionMode: 'presentation', targetDurationSeconds: 720 });

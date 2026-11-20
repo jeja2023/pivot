@@ -18,7 +18,7 @@ function presentationToolDefinitions() {
                 operation: { type: 'string', enum: ['generate', 'create_template', 'edit_native'] }, profile: { type: 'string', enum: ['default', 'quick', 'beautify', 'image_to_pptx'] },
                 title: { type: 'string', maxLength: 120 }, instruction: { type: 'string', maxLength: 16000 }, modelId: { type: 'string' }, pageCount: { type: 'integer', minimum: 1, maximum: 40 },
                 presentationId: { type: 'string' }, sourceAssetId: { type: 'string' }, assetIds: { type: 'array', maxItems: 20, items: { type: 'string' } }, answer: { type: 'string', maxLength: 12000 },
-                decision: { type: 'string', enum: ['approve', 'revise', 'clarify'], description: '仅在用户明确批准所展示的方案时填写 approve。' },
+                decision: { type: 'string', enum: ['approve', 'revise', 'clarify', 'continue'], description: '仅在用户明确批准所展示的方案时填写 approve。旧任务返回 kind=continue 且用户要求继续时使用 continue。' },
                 promptId: { type: 'string', pattern: '^[a-f0-9]{64}$' },
                 template: schema({ type: { type: 'string', enum: ['runtime', 'organization'] }, id: { type: 'string', maxLength: 96 }, version: { type: 'integer', minimum: 1 } }, ['type', 'id']),
                 materials: { type: 'array', maxItems: 20, items: schema({ title: { type: 'string' }, text: { type: 'string', maxLength: 120000 } }, ['text']) },

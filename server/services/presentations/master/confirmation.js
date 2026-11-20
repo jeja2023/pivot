@@ -21,10 +21,20 @@ function planDigest(pending) {
     return createHash('sha256').update(JSON.stringify([pending.question, pending.context])).digest('hex');
 }
 
-function parseDecision(input, pending) {
+function isLegacyDirection(pending) {
+    return pending?.kind === 'confirmation' && pending.stage === 'direction';
+}
+
+function parseDecision(input, pending, { continueDraft = false } = {}) {
     const response = typeof input === 'string' ? { answer: input } : (input || {});
     if (!pending || (response.promptId !== undefined && response.promptId !== pending.promptId)) {
         throw error('当前确认内容已变化，请刷新后核对新方案。', 'PPT_MASTER_CONFIRMATION_CHANGED', 409);
+    }
+    if (isLegacyDirection(pending) || continueDraft) {
+        if (response.decision !== 'continue' || response.promptId !== pending.promptId || response.answer) {
+            throw error('初稿已改为自动制作，请刷新后点击「继续制作」。', 'PPT_MASTER_CONFIRMATION_CHANGED', 409);
+        }
+        return { decision: 'continue', promptId: pending.promptId, answer: '' };
     }
     const decision = response.decision || (pending.kind === 'clarification' ? 'clarify' : 'revise');
     if (!(pending.kind === 'confirmation' ? ['approve', 'revise'] : ['clarify']).includes(decision)) throw error('请选择与当前问题匹配的处理方式。');
@@ -38,4 +48,4 @@ function parseDecision(input, pending) {
     return { decision, promptId: pending.promptId, answer };
 }
 
-module.exports = { pendingInput, parseDecision, planDigest };
+module.exports = { pendingInput, parseDecision, planDigest, isLegacyDirection };

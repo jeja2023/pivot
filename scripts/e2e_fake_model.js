@@ -52,6 +52,11 @@ const server = http.createServer((req, res) => {
             }
             if (payload.model === 'ppt-master-citations-e2e') content = JSON.stringify(recoveryModel.master(payload.messages || [], false, true));
             if (payload.model?.startsWith('ppt-master-automatic-e2e-')) content = JSON.stringify(recoveryModel.master(payload.messages || [], false, false, true));
+            if (payload.messages?.[0]?.content?.startsWith('按用户要求改写当前页现有文本对象')) {
+                const { objects } = JSON.parse(payload.messages[1].content);
+                const { objectId, runs: [run] } = objects[0];
+                content = JSON.stringify({ edits: [{ objectId, paragraph: run.paragraph, run: run.run, text: '复核后的页面标题' }] });
+            }
             if (payload.model === 'ppt-standard-recovery-fail-e2e' || payload.model === 'ppt-standard-recovery-finish-e2e') {
                 content = JSON.stringify(recoveryModel.standard(payload.messages || [], payload.model.endsWith('-fail-e2e')));
             }

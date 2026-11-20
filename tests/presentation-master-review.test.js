@@ -121,7 +121,7 @@ test('引文核对与图片同轮发送时，下一轮不会重复附图', async
     assert.equal(state.imagePage, undefined);
 });
 
-test('默认制作按阶段批准，非法动作批次整体拒绝，交付绑定页序、事实和当前项目', async () => {
+test('默认制作只批准最终清单，非法动作批次整体拒绝，交付绑定页序、事实和当前项目', async () => {
     const state = makeState(), executed = [];
     const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
     const turns = outputs => drive({ id: 1 }, 'task', state, hooks, {
@@ -140,18 +140,16 @@ test('默认制作按阶段批准，非法动作批次整体拒绝，交付绑�
         }
     });
     const early = { actions: [{ action: 'write', path: 'report/skip.md', text: '不得写入' }, { action: 'run', tool: 'export', args: ['report'] }] };
-    await turns([early, messages => { assert.match(messages[0].content, /尚|明确批准/); return direction; }]);
-    assert.deepEqual(executed, []);
-    assert.equal(state.actionRetries, 1);
-    approve(state);
     const bogus = globalThis.structuredClone(design);
     bogus.requestInput.plan.pages[0].values[0].source.quote = '并不存在的收入120万元。';
-    await turns([bogus, messages => {
+    await turns([early, messages => { assert.match(messages[0].content, /尚|明确批准/); return bogus; }, messages => {
         assert.match(messages[0].content, /未通过核验的引用/);
         assert.match(messages.at(-1).content, /引文与材料原文不一致/);
         return design;
     }]);
     assert.deepEqual(executed, []);
+    assert.equal(pendingInput('task', state).stage, 'design');
+    assert.equal(state.steps, 1);
     assert.throws(() => exportReview(state, 'report'), { code: 'PPT_MASTER_CHECKLIST_REQUIRED' });
     approve(state);
     const wrongProject = { actions: [{ action: 'run', tool: 'export', args: ['other'] }] };
@@ -162,6 +160,53 @@ test('默认制作按阶段批准，非法动作批次整体拒绝，交付绑�
     assert.deepEqual(executed.at(-1).checklist, [['经营回顾', ['收入120万元']]]);
     const expected = exportReview(state, 'report');
     assert.throws(() => verifyReceipt({ packageCheck: { slideCount: 1, checklistDigest: '旧回执' } }, expected), { code: 'PPT_MASTER_CHECKLIST_UNVERIFIED' });
+});
+
+test('生成、美化和按模板生成均跳过沟通方向，创建可复用模板仍确认模板方案', async () => {
+    const read = async () => '原始收入120万元。';
+    for (const profile of ['default', 'beautify']) {
+        const state = makeState(profile);
+        await assert.rejects(validateTurn(direction, state, read), /当前待确认阶段：最终页面与关键数据清单/);
+        await assert.rejects(validateTurn({ requestInput: { ...direction.requestInput, kind: 'clarification' } }, state, read), /沟通方向由模型规划/);
+        const turn = await validateTurn(globalThis.structuredClone(design), state, read);
+        assert.equal(turn.requestInput.stage, 'design');
+    }
+    const state = makeState();
+    state.request.operation = 'create_template';
+    await assert.rejects(validateTurn(direction, state, read), /当前待确认阶段：模板制作方案/);
+    const turn = await validateTurn({ requestInput: { kind: 'confirmation', stage: 'template', question: '确认模板方案？',
+        plan: { summary: '使用统一标题', project: 'report' } } }, state, read);
+    assert.equal(turn.requestInput.stage, 'template');
+});
+
+test('初稿匹配同一批无法核对的数据时停止盲目重试并用占位文字出稿', async () => {
+    const state = makeState(), checklist = [];
+    state.request.draftFirst = true;
+    const bad = globalThis.structuredClone(design);
+    bad.requestInput.plan.pages[0].values[0] = { text: '收入999万元' };
+    let calls = 0;
+    const result = await drive({ id: 1 }, 'task', state, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: async (_model, messages) => {
+            if (++calls <= 2) return globalThis.structuredClone(bad);
+            assert.match(messages.at(-1).content, /宿主已登记本次初稿清单/);
+            assert.match(messages.at(-2).content, /数据待核对/);
+            return { complete: { path: 'report/exports/final.pptx' } };
+        },
+        execute: async (_user, _id, action) => {
+            checklist.push(...action.checklist);
+            return { packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 1, checklistDigest: exportReview(state, 'report').checklistDigest } };
+        }
+    });
+    assert.equal(calls, 3);
+    assert.equal(result.pending, undefined);
+    assert.equal(state.review.approvals.design.basis, 'automatic');
+    assert.equal(state.milestones?.firstApproval, undefined);
+    assert.deepEqual(checklist, [['经营回顾', ['数据待核对（第 1 项）']]]);
+    assert.equal(state.draftCitationIssues[0].page, 1);
+    const plan = state.review.approvals.design.plan;
+    state.review.approvals.design.plan = { pages: plan.pages, project: plan.project, summary: plan.summary };
+    assert.deepEqual(exportReview(state, 'report').checklist, checklist);
 });
 
 test('图片可分页，清单确认要求读完所有图片，切换纯文本模型明确拒绝', async () => {
@@ -297,6 +342,80 @@ test('同一材料中的唯一完整数据行可还原引文，歧义、限定�
     assert.equal((await match('本期收入\n120 万元')).requestInput.plan.pages[0].values[0].source.quote, entry.source.quote);
     entry.source.quote = '收入\u0000120万元';
     await assert.rejects(match(raw), /无效字符/);
+});
+
+test('同一条唯一原文可补齐过短引文，其他行的同名数据不能借用', async () => {
+    const state = makeState('quick'), proposal = globalThis.structuredClone(design);
+    proposal.requestInput.plan.pages[0].values[0].source.quote = '收入120';
+    const run = raw => validateTurn(globalThis.structuredClone(proposal), state, async () => raw);
+    const verified = await run('费用80万元。\n收入 １２０ 万元。');
+    assert.equal(verified.requestInput.plan.pages[0].values[0].source.quote, '收入 １２０ 万元。');
+    for (const raw of ['收入120亿元。\n收入120万元。', '预计收入120万元。', '收入120万元以上。']) {
+        await assert.rejects(run(raw), /关键数据未完整出现在引文中/);
+    }
+});
+
+test('按模板生成 8 页时可从局部清单误提交恢复，阶段耗尽时保留 9 项引文问题', async () => {
+    const state = makeState();
+    const material = 'inputs/material-1.md', rule = '各页使用统一的一级标题样式和对齐位置';
+    state.request.pageCount = 8;
+    state.request.inputFiles = [{ path: material, kind: 'text' }];
+    state.request.template = { type: 'runtime', id: 'fixed-template' };
+    state.templateSpec = { id: 'fixed-template', path: 'templates/fixed-template', text: rule, digest: 'a'.repeat(64) };
+    state.managedProject = 'report';
+    const proposal = globalThis.structuredClone(design);
+    const originals = new Map();
+    const value = id => {
+        const text = `指标 ${id} 收入 120 万元`;
+        originals.set(text, `本期核准${text}。`);
+        return { text, source: { path: material, quote: text.replace(/ 万元$/, '') } };
+    };
+    const plan = proposal.requestInput.plan;
+    plan.pages = Array.from({ length: 8 }, (_, index) => ({ title: `经营回顾 ${index + 1}`, values: [value(index + 1)] }));
+    plan.pages[0].values.push(value(9));
+    plan.templateUse = { page: 1, rule, visibleText: plan.pages[0].title };
+    const partial = globalThis.structuredClone(proposal);
+    partial.requestInput.plan.pages = partial.requestInput.plan.pages.slice(0, 1);
+    const invoke = (current, callModel) => drive({ id: 1 }, 'task', current, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {
+        resolveModel: async () => ({ context_window_tokens: 256000 }),
+        callModel: (...args) => { assert.equal(current.installedTemplateProject, 'report'); return callModel(...args); },
+        inputBuffer: async () => Buffer.from([...originals.values()].join('\n')),
+        execute: async (_user, _id, action) => {
+            assert.equal(action.tool, 'apply_template', '引文修复期间仅预先安装所选模板');
+            assert.deepEqual(action.args, ['report', '--root', 'selected-template']);
+            return { exitCode: 0, templateSpecDigest: state.templateSpec.digest };
+        }
+    });
+
+    const exhausted = globalThis.structuredClone(state);
+    exhausted.workflowProgress = { phase: 'design', calls: 17 };
+    let attempts = 0;
+    await assert.rejects(invoke(exhausted, async () => { attempts++; return proposal; }),
+        { code: 'PPT_MASTER_CITATION_REVIEW_REQUIRED', message: /9 项引文待核对.*关键数据未完整出现在引文中/ });
+    assert.equal(attempts, 1);
+    assert.equal(exhausted.workflowProgress.calls, 18);
+    assert.equal(exhausted.usageDiagnostics.at(-1).turnSummary.outcome, 'failed');
+    assert.deepEqual(exhausted.citationDraft.plan.pages.map(page => page.title), plan.pages.map(page => page.title));
+
+    state.workflowProgress = { phase: 'design', calls: 15 };
+    const replies = [
+        messages => { assert.match(messages[0].content, /含全部 8 页/); return proposal; },
+        () => partial,
+        messages => {
+            assert.match(messages[0].content, /需要重提|不能只提交有问题的页/);
+            assert.match(messages[0].content, /请提交包含全部 8 页/);
+            const evidence = JSON.parse(messages.at(-1).content).citationRepairEvidence;
+            assert.equal(evidence.length, 9);
+            return { repairCitations: evidence.map(({ page, item, text }) => ({ page, item, text, path: material, quote: originals.get(text) })) };
+        }
+    ];
+    await invoke(state, (_model, messages) => replies.shift()(messages));
+    assert.equal(replies.length, 0);
+    const pending = pendingInput('task', state);
+    assert.deepEqual(pending.plan.pages.map(page => page.title), plan.pages.map(page => page.title));
+    assert.equal(pending.plan.templateUse.rule, rule);
+    assert.equal(pending.plan.pages.flatMap(page => page.values).length, 9);
+    assert.throws(() => exportReview(state, 'report'), /明确批准/);
 });
 
 test('多页同名数据逐项修复，检查点恢复后校验整份清单并重新请求确认', async () => {
@@ -520,7 +639,7 @@ test('通过页只能按当前核验结果保存，恢复后从已保存图片�
 test('重新生成从授权快照恢复完整材料并以新任务关联原任务', async () => {
     const { regenerate } = require('../server/services/presentations/master/tasks');
     const user = { id: 1 }, bytes = Buffer.from('完整原始材料');
-    const request = { title: '经营回顾', materials: [{ id: 'a', path: 'inputs/material-1.md', digest: createHash('sha256').update(bytes).digest('hex') }] };
+    const request = { title: '经营回顾', instruction: '保留经营数字。', materials: [{ id: 'a', path: 'inputs/material-1.md', digest: createHash('sha256').update(bytes).digest('hex') }] };
     const previous = { row: { result_json: { state: { request } } }, task: { status: 'failed' } };
     const options = { lookup: async () => previous, readOriginal: async () => bytes, start: async (_user, input, context) => {
         assert.equal(input.materials[0].text, '完整原始材料');
@@ -534,6 +653,12 @@ test('重新生成从授权快照恢复完整材料并以新任务关联原任�
     previous.task.status = 'working';
     await assert.rejects(regenerate(user, 'previous', options), { code: 'PPT_MASTER_REGENERATE_UNAVAILABLE' });
     previous.task.status = 'completed';
+    await regenerate(user, 'previous', { ...options, start: async (...args) => {
+        assert.equal(args[1].instruction, '保留经营数字。\n\n本次整份修改要求：\n缩短正文');
+        return options.start(...args);
+    } }, { note: '缩短正文' });
+    assert.equal(request.instruction, '保留经营数字。');
+    await assert.rejects(regenerate(user, 'previous', options, { note: ' ' }), /修改要求/);
     assert.equal(request.materials[0].text, undefined);
     await assert.rejects(regenerate(user, 'previous', { ...options, readOriginal: async () => Buffer.from('被更换的材料') }), /原材料快照已不可用/);
 });

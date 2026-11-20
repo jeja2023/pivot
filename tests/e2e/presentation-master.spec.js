@@ -7,7 +7,7 @@ const Zip = require('jszip');
 const sharp = require('sharp');
 const fixture = require('../../scripts/test_support/ppt_master_default_model');
 
-test('256K 默认完整制作用长材料分阶段确认、分页读取图片并核验真实PPTX与源包', async ({ page }, testInfo) => {
+test('256K 默认完整制作直接生成初稿，分页读取图片并核验真实PPTX与源包', async ({ page }, testInfo) => {
     test.setTimeout(420000);
     const fixtureEndpoint = process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL;
     test.skip(process.env.PIVOT_PPT_MASTER_ENABLED !== 'true' && !fixtureEndpoint, '需要已准备的固定版本完整运行镜像');
@@ -73,20 +73,18 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     expect(initial.recoverable).toBeTruthy();
     await expect(panel.getByRole('button', { name: '从检查点继续' })).toBeVisible();
     await panel.locator('#presentation-master-resume-budget').fill('0');
+    const resuming = page.waitForResponse(response => response.url().endsWith('/resume') && response.request().method() === 'POST');
     await panel.getByRole('button', { name: '从检查点继续' }).click();
-    await expect(panel).toContainText('确认沟通方向', { timeout: 150000 });
-    await expect(panel).toContainText('已修正模型动作 1 次');
-    await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toHaveCount(0);
-    await panel.getByRole('button', { name: '确认并继续' }).click();
-    await expect(panel).toContainText('确认最终页面与关键数据清单', { timeout: 150000 });
-    await expect(panel).toContainText('已发送 5 / 5 张图片给模型');
-    for (const expected of fixture.pages) await expect(panel).toContainText(expected.fact);
-    await panel.getByRole('button', { name: '确认并继续' }).click();
+    const resumed = await resuming;
+    expect(resumed.ok(), await resumed.text()).toBeTruthy();
+    expect((await resumed.json()).task.request.tokenBudget).toBe(0);
     await expect.poll(async () => (await readTask()).status, { timeout: 100000 }).toMatch(/^(?:completed|failed|expired|cancelled)$/);
     const completed = await readTask();
     expect(completed.status, completed.error?.message).toBe('completed');
-    await expect(panel.getByRole('button', { name: '下载演示文件（.pptx）' })).toBeVisible({ timeout: 100000 });
-    const download = page.waitForEvent('download'); await panel.getByRole('button', { name: '下载演示文件（.pptx）' }).click();
+    await expect(panel).toContainText('已发送 5 / 5 张图片给模型');
+    await expect(panel.getByRole('button', { name: '确认并继续' })).toHaveCount(0);
+    await expect(panel.getByRole('button', { name: '下载初稿（.pptx）' })).toBeVisible({ timeout: 100000 });
+    const download = page.waitForEvent('download'); await panel.getByRole('button', { name: '下载初稿（.pptx）' }).click();
     const file = await download; const zip = await Zip.loadAsync(await fs.readFile(await file.path()));
     expect(Object.keys(zip.files).filter(name => /^ppt\/slides\/slide\d+\.xml$/.test(name))).toHaveLength(3);
     for (const [index, expected] of fixture.pages.entries()) {
@@ -103,7 +101,8 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     expect(task.status).toBe('completed'); expect(task.result.files.map(item => item.format)).toEqual(['pptx', 'zip']);
     expect(task.modelRequest.contextWindow).toBe(256000);
     expect(task.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, checklistDigest: expect.any(String) });
-    expect(task.milestones.firstApproval.steps).toBeLessThan(task.milestones.firstPageWrite.steps);
+    expect(task.milestones.firstApproval).toBeUndefined();
+    expect(task.milestones.firstPlan.steps).toBeLessThan(task.milestones.firstPageWrite.steps);
     expect(task.milestones.delivered.usedTokens).toBeGreaterThan(0);
     expect(JSON.stringify(task)).not.toContain('上游权威指引'); expect(task.state).toBeUndefined();
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -113,7 +112,7 @@ test('256K 默认完整制作用长材料分阶段确认、分页读取图片并
     await page.getByRole('button', { name: '查看最近制作' }).click();
     const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
     await expect(processDialog).toBeVisible();
-    await expect(page.locator('#presentation-master-status')).toContainText('制作完成');
+    await expect(page.locator('#presentation-master-status')).toContainText('初稿已生成');
     const evidence = process.env.E2E_PPT_MASTER_EVIDENCE_DIR;
     if (evidence) await fs.mkdir(evidence, { recursive: true });
     const screenshotPath = name => evidence ? path.join(evidence, name) : testInfo.outputPath(name);

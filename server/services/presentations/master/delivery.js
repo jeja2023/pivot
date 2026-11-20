@@ -57,8 +57,9 @@ async function commitDelivery(user, taskId, request, prepared, executor) {
     const existing = [];
     for (const file of files) existing.push(await repository.findTaskRendition(executor, user, tenantId, toolCallId, file.format, meta.contentDigest));
     const previous = existing.find(Boolean);
+    const artifactTitle = request.draftFirst ? request.title.slice(0, 117).toWellFormed() + '-初稿' : request.title;
     const artifact = previous ? { id: previous.artifact_id } : await createStandaloneArtifact(user, {
-        type: 'ppt_master', title: request.title, content: JSON.stringify(metadata), note: 'PPT Master 完整制作引擎产物'
+        type: 'ppt_master', title: artifactTitle, content: JSON.stringify(metadata), note: 'PPT Master 完整制作引擎产物'
     }, { executor });
     if (request.runId) await repository.linkToRun(executor, user, artifact.id, request.runId);
     const runId = request.runId || `standalone-artifact:${artifact.id}`, results = [];
@@ -75,7 +76,8 @@ async function commitDelivery(user, taskId, request, prepared, executor) {
             await recordDeliveryEvent({ tenantId, renditionId: Number(record.id), runId, toolCallId, actorType: 'user', actorId: String(user.id),
                 eventType: 'presentation_render', pathHint: request.title + '.' + format, contentDigest: stored.contentDigest }, { executor });
         }
-        results.push({ renditionId: Number(record.id), artifactId: Number(artifact.id), format, byteSize: stored.byteSize, contentDigest: stored.contentDigest, filename: request.title + (format === 'zip' ? '-项目源包.zip' : '.pptx') });
+        const filename = format === 'zip' ? request.title + '-项目源包.zip' : artifactTitle + '.pptx';
+        results.push({ renditionId: Number(record.id), artifactId: Number(artifact.id), format, byteSize: stored.byteSize, contentDigest: stored.contentDigest, filename });
     }
     return { files: results, artifactId: Number(artifact.id), outputDigest: metadata.outputDigest, slideCount: metadata.checks.slideCount,
         checks: metadata.checks, editing: metadata.editing, ...(sourcePackageWarning ? { sourcePackageWarning } : {}) };

@@ -51,8 +51,9 @@ function master(messages, finish, citations = false, automatic = false) {
     const action = exports.length === 1 && finish ? exports[0] : null;
     if (action) {
         const project = action.args[0];
+        const revisedFact = citations ? designTurns.at(-1)?.requestInput.plan.pages[1].values[0].text || finalCost : '';
         return { actions: [
-            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(citations ? { ...fixture.pages[1], fact: finalCost } : fixture.pages[1]) },
+            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(citations ? { ...fixture.pages[1], fact: revisedFact } : fixture.pages[1]) },
             { action: 'run', tool: 'check_svg', args: [project, '--canonical-authoring', '--stage', 'final', '--json'] },
             { action: 'run', tool: 'finalize', args: [project] },
             { action: 'run', tool: 'export', args: [project, '--no-notes', '-o', project + '/exports/repaired.pptx'] }

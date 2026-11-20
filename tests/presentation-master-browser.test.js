@@ -746,7 +746,9 @@ test('失败检查点可查看材料读取范围和已保存提纲，也能区�
                             ]
                         }
                     ]
-                }
+                },
+                citationReview: { items: [{ location: '第 1 页第 1 项', title: '经营概况', text: '已核对事项 3 项',
+                    reason: '关键数据未完整出现在引文中，请核对数字、单位及原文范围。' }] }
             };
             return route.fulfill({ json: { task: failed } });
         });
@@ -765,6 +767,8 @@ test('失败检查点可查看材料读取范围和已保存提纲，也能区�
         await checkpointDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await expect(checkpointDialog).toBeHidden();
         await panel.getByRole('button', { name: '从检查点继续' }).click();
+        await expect(panel).toContainText('待核对的引文');
+        await expect(panel).toContainText('关键数据未完整出现在引文中，请核对数字、单位及原文范围。');
         await expect(panel.getByRole('button', { name: /有已保存方案/ })).toBeVisible();
         await panel.getByRole('button', { name: /查看材料与提纲/ }).click();
         await expect(checkpointDialog).toBeVisible();
@@ -866,6 +870,32 @@ test('累计预算不足时展示原预算，续跑可提高上限或改为不�
         await page.getByRole('button', { name: '查看最近制作' }).click();
         await expect(panel).toContainText('本任务累计预算 不限');
         await expect(budget).toHaveValue('');
+    } finally { await context.close(); }
+});
+
+test('旧沟通方向检查点只显示继续制作，后续仍确认最终清单', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context);
+        const promptId = 'c'.repeat(64);
+        let inputRequest = { kind: 'continue', promptId, question: '已保留当前制作进度，可以继续准备最终页面清单。' };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: {
+            task: { id: 'fixture-task', status: 'input_required', inputRequest }
+        } }));
+        await page.route('**/master/tasks/fixture-task/respond', route => {
+            assert.deepEqual(route.request().postDataJSON(), { answer: '', decision: 'continue', promptId });
+            inputRequest = { kind: 'confirmation', stage: 'design', question: '是否批准最终清单？', promptId: 'd'.repeat(64),
+                plan: { pages: [{ title: '项目概况', values: [] }] } };
+            return route.fulfill({ json: { task: { id: 'fixture-task', status: 'working' } } });
+        });
+        await page.locator('#presentation-master-start').click();
+        const panel = page.locator('#presentation-master-status');
+        await expect(panel).toContainText('可继续制作');
+        await expect(panel.getByRole('textbox', { name: '对制作方案的实际答复' })).toHaveCount(0);
+        await expect(panel.getByRole('button', { name: '确认并继续' })).toHaveCount(0);
+        await panel.getByRole('button', { name: '继续制作', exact: true }).click();
+        await expect(panel).toContainText('确认最终页面与关键数据清单');
+        await expect(panel.getByRole('button', { name: '确认并继续' })).toBeVisible();
     } finally { await context.close(); }
 });
 

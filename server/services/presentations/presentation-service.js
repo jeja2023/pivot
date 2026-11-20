@@ -138,7 +138,8 @@ function toPublicPresentation(row, { includeContent = false } = {}) {
     const generation = row.generation_json;
     if (generation) {
         const pending = generation.roster.filter(({ id }) => !Object.hasOwn(generation.pages, id));
-        output.generation = { total: generation.roster.length, pending, completed: generation.roster.length - pending.length };
+        output.generation = { total: generation.roster.length, pending, completed: generation.roster.length - pending.length,
+            ...(generation.draftReview ? { draftReview: generation.draftReview } : {}) };
     }
     if (includeContent) {
         output.content = parseJson(row.content_json, null);

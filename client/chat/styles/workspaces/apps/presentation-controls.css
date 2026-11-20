@@ -4368,6 +4368,208 @@ body.dark-mode .presentation-story-item-title,
     margin-top: auto;
 }
 
+.presentation-native-field-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+}
+
+.presentation-native-field-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--text-main);
+}
+
+.presentation-native-field-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.78rem;
+    font-weight: 650;
+    color: var(--text-main);
+    margin: 0;
+}
+
+.presentation-native-head-tools {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.presentation-native-count-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.presentation-native-refresh-btn {
+    border: none;
+    background: transparent;
+    color: var(--primary);
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 1px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+    transition: background 0.15s ease, opacity 0.15s ease;
+}
+
+.presentation-native-refresh-btn:hover {
+    background: color-mix(in srgb, var(--primary) 10%, transparent);
+}
+
+.presentation-native-refresh-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.presentation-native-select {
+    width: 100%;
+    height: 38px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-main);
+    font-size: 0.78rem;
+    padding: 0 10px;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.presentation-native-select:focus {
+    border-color: var(--primary);
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
+.presentation-native-select:disabled {
+    background: var(--bg-side);
+    color: var(--text-muted);
+    cursor: not-allowed;
+    border-style: dashed;
+}
+
+.presentation-native-doc-preview {
+    margin-top: 4px;
+    min-height: 48px;
+}
+
+.presentation-native-hint-text {
+    margin: 0;
+    font-size: 0.73rem;
+    color: var(--text-muted);
+    line-height: 1.45;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: var(--bg-side);
+    border: 1px dashed var(--border);
+}
+
+.presentation-native-doc-card {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px 10px;
+    background: var(--bg-side);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    animation: fadeIn 0.2s ease-in-out;
+}
+
+.presentation-native-doc-card-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.presentation-native-doc-title-wrap {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+}
+
+.presentation-native-doc-title-wrap svg {
+    flex-shrink: 0;
+    color: var(--primary);
+}
+
+.presentation-native-doc-title {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-main);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.presentation-native-version-pill {
+    flex-shrink: 0;
+    display: inline-block;
+    padding: 0 6px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    border-radius: 9999px;
+    background: color-mix(in srgb, var(--primary) 12%, transparent);
+    color: var(--primary);
+    border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
+}
+
+.presentation-native-doc-card-bottom {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.presentation-native-doc-time {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+.presentation-native-link-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.presentation-native-link-btn:hover {
+    color: var(--text-main);
+    background: var(--bg-hover);
+}
+
+.presentation-native-danger-link-btn {
+    border: none;
+    background: transparent;
+    color: var(--danger);
+    font-size: 0.72rem;
+    cursor: pointer;
+    padding: 2px 4px;
+    border-radius: 4px;
+    font-weight: 600;
+    transition: background 0.15s ease;
+}
+
+.presentation-native-danger-link-btn:hover {
+    background: color-mix(in srgb, var(--danger) 10%, transparent);
+}
+
 .presentation-native-existing-actions button {
     flex: 1;
     height: 36px;

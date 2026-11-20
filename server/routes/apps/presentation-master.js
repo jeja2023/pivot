@@ -66,7 +66,7 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
     router.post('/apps/presentations/master/tasks/:taskId/respond', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.respond(req.user, req.params.taskId, req.body) })));
     router.post('/apps/presentations/master/tasks/:taskId/resume', authMiddleware, asyncHandler(async (req, res) => res.json({ task: await tasks.resume(req.user, req.params.taskId, req.body || {}) })));
     router.post('/apps/presentations/master/tasks/:taskId/regenerate', authMiddleware, asyncHandler(async (req, res) => {
-        const task = await tasks.regenerate(req.user, req.params.taskId);
+        const task = await tasks.regenerate(req.user, req.params.taskId, undefined, req.body || {});
         writeLog(req, '重新生成整份PPT', `任务: ${task.id}`);
         res.status(202).json({ task });
     }));

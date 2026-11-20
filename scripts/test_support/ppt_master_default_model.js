@@ -105,12 +105,11 @@ function turn(request, messages, assistant) {
     const approved = stage => assistant.some(item => item.requestInput?.stage === stage);
     const plan = (stage, question, content) => ({ requestInput: { kind: 'confirmation', stage, question, plan: content } });
     const didRun = tool => assistant.some(item => item.actions?.some(action => action.tool === tool));
-    if (!approved('direction')) {
-        if (!system.includes('上一回复未执行任何制作动作')) return { actions: [
+    if (!assistant.length && !system.includes('上一回复未执行任何制作动作')) {
+        return { actions: [
             { action: 'write', path: 'forbidden-early-batch.md', text: '此文件不应执行写入。' },
             { action: 'run', tool: 'export', args: ['premature'] }
         ] };
-        return plan('direction', '是否同意按经营结果和执行安排组织汇报？', { summary: '从实际经营材料提取三项确认口径，供复核团队逐项核对。' });
     }
     const managed = messages.flatMap(item => {
         if (item.role !== 'user') return [];

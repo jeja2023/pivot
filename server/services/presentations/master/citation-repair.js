@@ -1,6 +1,7 @@
 'use strict';
 
 const { error } = require('./runtime');
+const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const compact = value => value.normalize('NFKC').replace(/\s+/gu, '');
 const citationFields = new Set(['page', 'item', 'text', 'path', 'quote', 'correctedText', 'correctedNumber']);
 const numericText = value => compact(value).replace(/−|负(?=\d)/gu, '-');
@@ -13,6 +14,29 @@ function containsValue(source, value) {
     const before = /^[+-]?\d/.test(needle) ? '(?<![\\d.+±-])(?<!\\d,)' + (/^\d/.test(needle) ? '\\+?' : '') : '';
     const after = /\d$/.test(needle) ? '(?!\\d|\\.\\d|,\\d{3})' : '';
     return new RegExp(before + escapePattern(needle) + after).test(numericText(source));
+}
+
+function pauseCitationReview(state) {
+    state.citationPause = true;
+    const [first] = state.citationRepair;
+    return error(`最终页面清单有 ${state.citationRepair.length} 项引文待核对。${first.location}：${first.reason} 请在检查点补充原文、提交修改意见或切换模型后继续。`, CITATION_REVIEW_REQUIRED, 422);
+}
+
+function draftWithCitationPlaceholders({ citationDraft, citationIssues }) {
+    if (!citationDraft?.plan || !citationIssues?.length || citationIssues.some(issue => issue.missing)) return null;
+    const plan = globalThis.structuredClone(citationDraft.plan);
+    for (const { page, item, text } of citationIssues) {
+        const target = plan.pages[page - 1];
+        const placeholder = `数据待核对（第 ${item} 项）`;
+        const use = plan.templateUse;
+        if (use?.page === page && use.visibleText === text) use.visibleText = placeholder;
+        if (containsValue(target.title, text)) {
+            if (use?.page === page && use.visibleText === target.title) use.visibleText = `第 ${page} 页（关键数据待核对）`;
+            target.title = `第 ${page} 页（关键数据待核对）`;
+        }
+        target.values[item - 1] = { text: placeholder };
+    }
+    return { ...citationDraft, context: plan.summary, plan };
 }
 
 // 修复轮只在任务已登记的文本来源中查找完整引文，多份材料同时命中时保留人工查证。
@@ -69,6 +93,15 @@ function originalLine(source, text) {
     return line && compact(line).includes(compact(text)) ? line : '';
 }
 
+// 只有已找到的短引文和完整数据确实落在同一条唯一原文时，才自动补长。
+function extendCitation(source, quote, text) {
+    const line = originalLine(source, text);
+    if (!line || !containsValue(line, quote)) return '';
+    const anchor = compact(quote);
+    const start = source.normalized.indexOf(anchor);
+    return start >= 0 && source.normalized.indexOf(anchor, start + 1) < 0 ? line : '';
+}
+
 function patchCitationDraft(state, changes) {
     const invalid = () => error('请按最新待核对清单的页码、项号和数据原文提交引用；清单结构变化时请重提完整方案。', 'PPT_MASTER_ACTION_INVALID', 422);
     if (!state.citationDraft || !Array.isArray(changes) || !changes.length || changes.length > 120) throw invalid();
@@ -96,4 +129,5 @@ function patchCitationDraft(state, changes) {
     return draft;
 }
 
-module.exports = { compact, containsValue, locateCitation, verifiedCorrection, originalLine, patchCitationDraft };
+module.exports = { compact, containsValue, locateCitation, verifiedCorrection, originalLine, extendCitation, patchCitationDraft,
+    pauseCitationReview, draftWithCitationPlaceholders, CITATION_REVIEW_REQUIRED };

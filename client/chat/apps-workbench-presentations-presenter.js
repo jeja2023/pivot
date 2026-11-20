@@ -690,123 +690,17 @@
     // ==========================================
     // 12. 大纲确认与结构化编辑
     // ==========================================
-    function outlineText(value, fallback = '', maxLength = 500) {
-        const text = String(value ?? fallback).replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-        return text.slice(0, maxLength);
-    }
-    function outlineTextList(value, maxItems = 12, maxLength = 500) {
-        if (!Array.isArray(value)) return [];
-        return value.map(item => outlineText(item, '', maxLength)).filter(Boolean).slice(0, maxItems);
-    }
-    function outlineSourceRefs(value, sourceIds = null) {
-        const refs = outlineTextList(value, 50, 160);
-        return sourceIds instanceof Set ? refs.filter(ref => sourceIds.has(ref)) : refs;
-    }
-    function outlineSourceIds(state) {
-        return new Set((state.pendingCreate?.materials || []).map((item, index) => String(item?.id || `source_${index + 1}`).trim()).filter(Boolean));
-    }
-    function outlineLayout(value, pageIndex, pageCount, labels = {}, template = null) {
-        const layout = String(value || '').trim();
-        const layouts = Array.isArray(template?.definition?.layouts) ? template.definition.layouts : [];
-        if (labels[layout] || layouts.some(item => item.id === layout)) return layout;
-        const preferred = role => layouts.find(item => item.id === role) || layouts.find(item => item.legacyLayoutId === role) || layouts.find(item => new RegExp(role === 'cover' ? 'cover|封面|title' : role === 'summary' ? 'summary|总结' : 'content|内容|正文', 'i').test(item.name || '')) || layouts[0];
-        if (pageIndex === 0) return preferred('cover')?.id || 'cover';
-        if (pageIndex === pageCount - 1) return preferred('summary')?.id || 'summary';
-        return preferred('title-content')?.id || 'title-content';
-    }
-    function normalizeOutlineForReview(input, fallbackTitle = '', labels = {}, template = null, sourceIds = null) {
-        const source = input && typeof input === 'object' ? input : {};
-        const rawSections = Array.isArray(source.outline) ? source.outline : (Array.isArray(source.slides) ? [{ section: '演示内容', slides: source.slides }] : []);
-        const totalSlides = rawSections.reduce((total, section) => total + (Array.isArray(section?.slides) ? section.slides.length : 0), 0);
-        let pageIndex = 0;
-        const outline = rawSections.map((section, sectionIndex) => {
-            const slides = (Array.isArray(section?.slides) ? section.slides : []).map((slide, slideIndex) => {
-                const currentIndex = pageIndex;
-                pageIndex += 1;
-                return {
-                    title: outlineText(slide?.title, `第 ${currentIndex + 1} 页`, 160),
-                    purpose: outlineText(slide?.purpose, '', 500),
-                    layoutHint: outlineLayout(slide?.layoutHint, currentIndex, totalSlides, labels, template),
-                    keyPoints: outlineTextList(slide?.keyPoints, 12, 500),
-                    sourceRefs: outlineSourceRefs(slide?.sourceRefs, sourceIds),
-                    order: slideIndex
-                };
-            });
-            return { section: outlineText(section?.section, `第 ${sectionIndex + 1} 部分`, 120), slides };
-        }).filter(section => section.slides.length);
-        if (!outline.length) throw new Error('AI 未生成可编辑的大纲，请返回修改后重新生成。');
-        return {
-            title: outlineText(source.title, fallbackTitle || '未命名演示文稿', 160),
-            outline,
-            assumptions: outlineTextList(source.assumptions, 50, 500),
-            warnings: outlineTextList(source.warnings, 50, 500)
-        };
-    }
-    function renderOutlineWarnings(outline, confirmations = new Set()) {
-        const target = byId('presentation-outline-warnings'); if (!target) return;
-        const messages = [...outline.assumptions.map((item, index) => ({ label: '待确认', text: item, index })), ...outline.warnings.map(item => ({ label: '提示', text: item }))];
-        target.replaceChildren(); target.classList.toggle('hidden', messages.length === 0);
-        messages.forEach(message => {
-            if (message.label === '待确认') {
-                const row = document.createElement('label'); row.className = 'presentation-outline-confirmation-item';
-                const checkbox = document.createElement('input'); checkbox.type = 'checkbox'; checkbox.dataset.presentationOutlineAssumption = String(message.index); checkbox.checked = confirmations.has(message.index);
-                const copy = document.createElement('span'); const label = document.createElement('strong'); label.textContent = message.label;
-                copy.append(label, document.createTextNode(message.text)); row.append(checkbox, copy); target.appendChild(row);
-                return;
-            }
-            const row = document.createElement('p'); const label = document.createElement('strong');
-            label.textContent = message.label; row.append(label, document.createTextNode(message.text)); target.appendChild(row);
-        });
-    }
-    function appendOutlineText(target, tagName, text, className = '') {
-        const node = document.createElement(tagName);
-        if (className) node.className = className;
-        node.textContent = text;
-        target.appendChild(node);
-        return node;
-    }
-    function renderOutlineDocument(target, outline) {
-        target.replaceChildren();
-        appendOutlineText(target, 'h2', outline.title, 'presentation-outline-document-title');
-        outline.outline.forEach(section => {
-            const sectionNode = document.createElement('section');
-            sectionNode.className = 'presentation-outline-document-section';
-            appendOutlineText(sectionNode, 'h3', section.section, 'presentation-outline-document-section-title');
-            section.slides.forEach(slide => {
-                const topic = document.createElement('article');
-                topic.className = 'presentation-outline-document-topic';
-                appendOutlineText(topic, 'h4', slide.title, 'presentation-outline-document-topic-title');
-                if (slide.purpose) appendOutlineText(topic, 'p', slide.purpose, 'presentation-outline-document-purpose');
-                const points = Array.isArray(slide.keyPoints) ? slide.keyPoints.filter(Boolean) : [];
-                if (points.length) {
-                    const pointList = document.createElement('div');
-                    pointList.className = 'presentation-outline-document-points';
-                    points.forEach(point => appendOutlineText(pointList, 'p', point, 'presentation-outline-document-point'));
-                    topic.appendChild(pointList);
-                }
-                sectionNode.appendChild(topic);
-            });
-            target.appendChild(sectionNode);
-        });
-    }
-    function renderOutlineReview(input, state, { labels = {}, templateById } = {}) {
-        const template = templateById?.(state.pendingCreate?.templateId);
-        const outline = normalizeOutlineForReview(input, state.pendingCreate?.topic || '', labels, template, outlineSourceIds(state));
-        state.pendingOutline = outline;
-        state.pendingOutlineConfirmations = new Set();
-        const preview = byId('presentation-outline-markdown'); if (preview) renderOutlineDocument(preview, outline);
-        const count = byId('presentation-outline-page-count'); if (count) count.textContent = '共 ' + outline.outline.length + ' 个章节 · ' + outline.outline.reduce((total, section) => total + section.slides.length, 0) + ' 个主题';
-        renderOutlineWarnings(outline, state.pendingOutlineConfirmations);
-    }
-    function collectOutlineFromReview(state, { labels = {}, templateById } = {}) {
-        return normalizeOutlineForReview(state.pendingOutline, state.pendingCreate?.topic || '', labels, templateById?.(state.pendingCreate?.templateId), outlineSourceIds(state));
-    }
-
     function renderEvidence(state) {
         const list = byId('presentation-evidence-list'); if (!list) return;
         list.replaceChildren();
         const content = state.active?.content; const sources = content?.sources || [];
         window.Pivot?.moduleApi?.('apps.presentations.studio')?.renderEvidence(list, state);
+        for (const item of state.active?.generation?.draftReview || []) {
+            const warning = document.createElement('p');
+            warning.className = 'presentation-empty-note';
+            warning.textContent = '待核对 · ' + item;
+            list.appendChild(warning);
+        }
         const approvedOutline = content?.metadata?.planApproval;
         if (approvedOutline?.status === 'approved') {
             const plan = document.createElement('article'); plan.className = 'presentation-evidence-card';
@@ -958,7 +852,7 @@
         loadPresentationMetrics, populateChartDatasetSelect, populateChartFields, loadChartDatasetFields, openDataChartModal, importDataChart,
         renderVersions, loadVersions, restoreVersion, exportPresentation,
         populateLayoutSelect, applyLayoutToSlide, openArtifactCreateModal, createFromArtifact,
-        renderTableElement, renderChartElement, renderOutlineReview, collectOutlineFromReview,
+        renderTableElement, renderChartElement,
         renderEvidence, formatChangeImpact, reviewActiveSlide, loadDeliveryGuide,
         renderLayoutVariants, generateLayoutVariants, applyLayoutVariant
     });

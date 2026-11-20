@@ -470,6 +470,15 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         } finally { abort.cleanup(); }
     }
 
+    router.post('/apps/presentations/native/documents/:id/ai/page-revision', authMiddleware, asyncHandler(async (req, res) => {
+        const { pageRevision } = require('../../services/presentations/native/page-revision');
+        const revision = await pageRevision(req.user, req.params.id, req.body);
+        return runAiRequest(req, res, { ...req.body, documentId: req.params.id }, revision.messages, {
+            source: 'presentation_native_page_revision', auditAction: 'PPT 原稿单页文字修改', maxTokens: 4000,
+            parse: result => revision.parse(result.content)
+        });
+    }));
+
     router.post('/apps/presentations/ai/outline', authMiddleware, asyncHandler(async (req, res) => {
         validateGenerationMaterials(req.body?.materials);
         const body = await withResolvedAiTemplate(req.user, { ...(req.body || {}), materials: normalizeMaterials(req.body) });

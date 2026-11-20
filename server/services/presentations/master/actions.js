@@ -91,9 +91,10 @@ async function validateTurn(output, state, verifySource) {
         }
     }
     if (turn.requestInput) {
-        const { question, context, kind } = turn.requestInput;
+        const { question, context, kind, stage } = turn.requestInput;
         if (typeof question !== 'string' || !question.trim() || question.length > 2000 || (context !== undefined && (typeof context !== 'string' || context.length > 12000))
             || !['confirmation', 'clarification'].includes(kind)) throw invalid('制作确认问题格式无效。');
+        if (kind === 'clarification' && stage === 'direction') throw invalid('沟通方向由模型规划。请准备最终方案，缺少必要事实时再提出具体问题。');
         if (state.pageRepair?.automatic && kind === 'clarification') {
             if (!state.pageRepair.missingSource) throw invalid('此次修页所需的标题和数据已获批准。请读取列出的源页并写回修正，所需材料读取失败时才提出具体问题。');
             turn.requestInput = { kind, question, context: ('无法读取本次修页需要的材料「' + state.pageRepair.missingSource + '」。' + (context || '')).slice(0, 12000) };
