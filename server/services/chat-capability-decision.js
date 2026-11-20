@@ -35,7 +35,13 @@ function normalizeCapabilityDecision(raw = {}, { action = 'direct_answer', promp
 
 function getCapabilityDecision(state = {}) {
     const decision = state.intentDecision;
-    return decision?.routing?.source === 'semantic_intent' && decision.shadow !== true ? decision.routing : null;
+    const route = decision?.routing;
+    if (route?.source !== 'semantic_intent' || decision.shadow === true) return null;
+    const config = state.routeConfig;
+    const legacy = config?.enabled === false || config?.shadowMode === true || state.autoRouteEnabled === false;
+    if (legacy) return null;
+    if (config?.autoRagEnabled === false && route.knowledge === 'required') return { ...route, knowledge: 'auto' };
+    return route;
 }
 
 module.exports = { isDirectConversation, normalizeCapabilityDecision, getCapabilityDecision };

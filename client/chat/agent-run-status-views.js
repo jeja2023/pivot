@@ -1,3 +1,29 @@
+function bindAgentPendingApproval(container, run, approval) {
+    const pending = run.metadata?.pendingApproval;
+    const binding = approval?.binding || (pending && { inputHash: pending.inputHash, key: pending.key || '', requestedAt: pending.requestedAt });
+    container.querySelectorAll('[data-agent-approve], [data-agent-reject]').forEach(button => {
+        button.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, button.hasAttribute('data-agent-approve'), { binding }));
+    });
+    container.querySelector('[data-agent-refresh-approval]')?.addEventListener('click', () => {
+        void window.Pivot.moduleApi('agent.runActions').refreshAgentRunApproval(run.id, binding);
+    });
+}
+
+function renderAgentPendingApproval(approval) {
+    const title = agentEscape(approval?.title || '智能体请求调用受保护的系统操作');
+    const fields = (approval?.fields || []).map(field => `<p>${agentEscape(field.label)}：${agentEscape(field.value)}</p>`).join('');
+    const expiresAt = String(approval?.expiresAt || '');
+    const expiryMs = Date.parse(/(?:Z|[+-]\d\d:\d\d)$/i.test(expiresAt) ? expiresAt : expiresAt.replace(' ', 'T') + '+08:00');
+    const expired = expiresAt && (!Number.isFinite(expiryMs) || expiryMs <= Date.now());
+    return `<div class="agent-approval-card agent-run-approval-card"><h4>待人工授权执行</h4>
+        <p>${title} ${agentEscape(approval?.location || '')}</p>${fields}
+        ${expired ? '<p>授权请求已过期，请更新后再审阅。</p>' : expiresAt ? '<p>本次请求有效至 ' + agentEscape(expiresAt) + '。</p>' : ''}
+        <label><input type="checkbox" id="agent-approval-remember-check"> 在本次任务中记住此操作授权</label>
+        <div class="agent-run-approval-actions"><button type="button" class="btn-primary btn-xs" data-agent-approve ${expired ? 'disabled' : ''}>同意放行</button>
+        <button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button>
+        ${expired ? '<button type="button" class="btn-secondary btn-xs" data-agent-refresh-approval>更新授权请求</button>' : ''}</div></div>`;
+}
+
 // 任务结果状态与证据渲染器，独立于页面交互事件绑定。
 /* eslint-disable no-undef */
 function agentRunRoundUsage(progress = {}) {

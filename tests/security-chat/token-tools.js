@@ -69,18 +69,19 @@ test('redactSecrets 不会修改原始对象引用', () => {
     assert.equal(redacted.api_key, '[REDACTED]');
 });
 
-test('estimateMessageTokens 中英文混合按 2:0.5 估算', () => {
-    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '中文测试' }]), Math.ceil(4 * 2));
+test('模型路由与上下文共用消息估算并计入消息包络', () => {
+    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '中文测试' }]), 4 + Math.ceil(4 * 2));
     const englishTokens = modelRouter.estimateMessageTokens([{ role: 'user', content: 'hello world' }]);
-    assert.ok(englishTokens >= 5 && englishTokens <= 8);
+    assert.equal(englishTokens, 4 + Math.ceil(11 * 0.5));
     assert.equal(modelRouter.estimateMessageTokens([]), 0);
-    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '' }]), 0);
+    assert.equal(modelRouter.estimateMessageTokens([{ role: 'user', content: '' }]), 4);
 });
 
-test('hasUsableInputWindow 在窗口未配置时视为足够', () => {
-    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 0 }, 9999), true);
-    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 100 }, 50), true);
-    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 100 }, 150), false);
+test('模型窗口检查保留原提示并使用统一预算', () => {
+    const messages = [{ role: 'user', content: '中'.repeat(300) }];
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 0 }, messages), true);
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 1000 }, messages), true);
+    assert.equal(modelRouter.hasUsableInputWindow({ max_input_tokens: 500 }, messages), false);
 });
 
 test('modelTotalPrice 累加输入输出单价并对缺失字段安全', () => {

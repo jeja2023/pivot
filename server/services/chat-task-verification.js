@@ -32,8 +32,14 @@ async function verifyAutomaticTaskWithModel({ run, user, contract, answer, obser
         } catch (_) { return { passed: false, reason: 'artifact_integrity_failed' }; }
     }
     const verifiedArtifacts = artifacts.map(item => ({ id: item.id, title: item.title, format: item.format, contentDigest: item.content_digest }));
-    const requiredFormats = contract.acceptance?.requiredFormats?.length ? contract.acceptance.requiredFormats
-        : contract.acceptance?.artifactRequired ? require('./task-display-title').requestedPresentationFormats(contract.goal || run.goal) : [];
+    let requiredFormats = contract.acceptance?.requiredFormats || [];
+    if (contract.acceptance?.artifactRequired && !requiredFormats.length) {
+        const scope = require('./agent-validators').parseJsonObject(fresh?.metadata || run.metadata);
+        const sourceId = scope?.chatBridge?.userMessageId;
+        const source = sourceId && await (deps.readTaskSource || require('../repositories/chat-conversation-turns').readTaskSource)(run.id, user.id, sourceId);
+        if (sourceId && !source) return { passed: false, reason: 'source_revoked', verifiedArtifacts };
+        requiredFormats = require('./task-display-title').requestedDeliveryFormats(source?.content || contract.goal || run.goal);
+    }
     if (requiredFormats.some(format => !artifacts.some(artifact => String(artifact.format).toLowerCase() === format))) return { passed: false,
         reason: 'artifact_format_missing', verifiedArtifacts, missing: requiredFormats.filter(format => !artifacts.some(artifact => String(artifact.format).toLowerCase() === format)).map(format => `尚未生成用户要求的 ${format.toUpperCase()} 文件`) };
     if (!await require('./knowledge-tool-results').revalidateKnowledgeToolEvidence(observations, user)) return { passed: false, reason: 'source_revoked', verifiedArtifacts };
@@ -71,7 +77,7 @@ async function verifyAutomaticTaskWithModel({ run, user, contract, answer, obser
             return { passed: false, reason: 'verification_context_limit', verifiedArtifacts, verifier: 'chat-deliverables-v1' };
         }
         const usageRef = {};
-        const output = await (deps.callModelJson || callModelJson)(model, messages, { user, budget, maxTokens: 800, temperature: 0, enableThinking: false, usageRef, signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, timeoutMs });
+        const output = await (deps.callModelJson || callModelJson)(model, messages, { user, budget, maxTokens: 800, temperature: 0, enableThinking: false, usageRef, source: 'chat_verification', signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal, timeoutMs });
         const usage = !deps.callModelJson ? await recordAgentModelUsage(user, model, messages, output, 'chat_verification', run.id, { usageRef, budget, allowBudgetExceeded: true }) : null;
         signal?.throwIfAborted();
         if (usage?.budgetExceeded) return { passed: false, reason: 'budget_exceeded' };

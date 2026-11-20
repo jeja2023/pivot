@@ -31,7 +31,7 @@ async function sendCompatibilityProbe(user, model, vision) {
     try {
         try {
             raw = await callModelJson(model, messages, { user, signal, maxTokens: 120, timeoutMs: 18000, enableThinking: false,
-                temperature: 0, usageRef, responseFormat: { type: 'json_object' } });
+                temperature: 0, usageRef, quotaManaged: true, responseFormat: { type: 'json_object' } });
         } catch (cause) {
             if (cause?.code === 'AI_ENDPOINT_CIRCUIT_OPEN') throw cause;
             throw error('模型端点未通过 JSON 或图片兼容性预检，请核对服务状态、接口协议与模型能力。', 'PPT_MASTER_MODEL_PREFLIGHT_FAILED', 422);

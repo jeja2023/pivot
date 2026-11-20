@@ -5,10 +5,40 @@ const { promisify } = require('node:util');
 const { gzip, gunzip } = require('node:zlib');
 const compress = promisify(gzip), decompress = promisify(gunzip);
 const { compactMessages } = require('./context');
+const { HISTORY_PAGE_CHARS } = require('./observations');
 const runtime = require('./runtime');
 
 const THRESHOLD = 500000, MAX_ARCHIVES = 64, MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
 const digest = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
+
+function observationBatch(message) {
+    if (message.role !== 'user' || typeof message.content !== 'string') return null;
+    let items;
+    try { items = JSON.parse(message.content); } catch (_) { return null; }
+    return Array.isArray(items) ? items : null;
+}
+
+function activePages(batches, before, phaseFrom) {
+    // 只保护有界的源材料和当前阶段指引，同一页优先保留最近的读取结果。
+    let materialChars = 48000, workflowChars = 96000;
+    const retained = new Set(), pages = new Set();
+    for (let index = batches.length - 1; index >= 0; index--) {
+        for (const item of batches[index] || []) {
+            const { path, text, offset } = item?.result || {};
+            if (item.error || typeof text !== 'string' || typeof path !== 'string') continue;
+            const material = item.action === 'read' && /^inputs\/material-[1-9]\d*\.md$/.test(path);
+            const workflow = item.action === 'read_runtime' && Number.isSafeInteger(phaseFrom) && index >= phaseFrom;
+            if (!material && !workflow) continue;
+            const key = JSON.stringify([item.action, path, offset ?? 0, text]);
+            if (pages.has(key) || index < before && text.length > (material ? materialChars : workflowChars)) continue;
+            pages.add(key);
+            retained.add(item);
+            if (material) materialChars -= text.length;
+            else workflowChars -= text.length;
+        }
+    }
+    return retained;
+}
 
 function reduceObservation(item, archive, index) {
     const result = item?.result;
@@ -20,13 +50,15 @@ function reduceObservation(item, archive, index) {
         note: '完整工具结果已归档。可按 archive、index 分页调用 read_history；核对当前文件时使用 read 或 list。' } };
 }
 
-async function archiveOlderObservations(state, { force = false, recentTurns = 4 } = {}) {
+async function archiveOlderObservations(state, { force = false, recentTurns = 4, preserveActive = false } = {}) {
     if (!Array.isArray(state.messages) || (!force && JSON.stringify(state.messages).length <= THRESHOLD)) return false;
     const existing = Array.isArray(state.historyArchives) ? state.historyArchives : [];
     const before = state.messages, view = compactMessages(before).messages;
     const lastAssistants = [];
     for (let index = before.length - 1; index >= 0 && lastAssistants.length < recentTurns; index--) if (before[index].role === 'assistant') lastAssistants.push(index);
     const protectedFrom = lastAssistants.at(-1) ?? 0, archived = {}, archiveIndex = existing.length;
+    const batches = before.map(observationBatch);
+    const retained = preserveActive ? activePages(batches, protectedFrom, state.workflowPhaseFrom) : null;
     for (let index = protectedFrom; index < before.length; index++) view[index] = before[index];
     for (let index = 0; index < protectedFrom; index++) {
         const original = before[index];
@@ -36,10 +68,9 @@ async function archiveOlderObservations(state, { force = false, recentTurns = 4 
         }
         if (original.role !== 'user' || typeof original.content !== 'string') continue;
         view[index] = original;
-        let entries;
-        try { entries = JSON.parse(original.content); } catch (_) { continue; }
-        if (!Array.isArray(entries)) continue;
-        const reduced = entries.map(item => reduceObservation(item, archiveIndex, index));
+        const entries = batches[index];
+        if (!entries) continue;
+        const reduced = entries.map(item => retained?.has(item) ? item : reduceObservation(item, archiveIndex, index));
         if (reduced.some((item, position) => item !== entries[position])) {
             archived[index] = original;
             view[index] = { ...original, content: JSON.stringify(reduced) };
@@ -57,8 +88,8 @@ async function archiveOlderObservations(state, { force = false, recentTurns = 4 
 }
 
 async function readHistory(state, action) {
-    const archive = Number(action.archive), index = Number(action.index), offset = Number(action.offset ?? 0), length = Number(action.length ?? 12000);
-    if (![archive, index, offset, length].every(Number.isSafeInteger) || archive < 0 || index < 0 || offset < 0 || length < 1 || length > 12000) throw runtime.error('历史读取参数无效。');
+    const archive = Number(action.archive), index = Number(action.index), offset = Number(action.offset ?? 0), length = Number(action.length ?? HISTORY_PAGE_CHARS);
+    if (![archive, index, offset, length].every(Number.isSafeInteger) || archive < 0 || index < 0 || offset < 0 || length < 1 || length > HISTORY_PAGE_CHARS) throw runtime.error('历史读取参数无效。');
     const entry = state.historyArchives?.[archive];
     if (!entry || !Number.isSafeInteger(entry.bytes) || entry.bytes < 0 || entry.bytes > MAX_ARCHIVE_BYTES || typeof entry.data !== 'string' || entry.data.length > MAX_ARCHIVE_BYTES) throw runtime.error('历史检查点不存在或已损坏。');
     let decoded;

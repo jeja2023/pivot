@@ -55,6 +55,9 @@ test('任务进度、审批续期、重复决定和暂停接口保留鉴权、�
         assert.notEqual(latest.approval.binding.requestedAt, feed.approval.binding.requestedAt);
         assert.equal((await post('/approval', { approve: true, ...feed.approval.binding })).status, 409);
         await execute("UPDATE agent_runs SET metadata = jsonb_set(metadata, '{taskContract,constraints}', '[\"更新后的要求\"]'::jsonb) WHERE id = ?", [runId]);
+        assert.equal((await post('/approval', { ...latest.approval.binding })).status, 400);
+        assert.equal((await post('/approval', { approve: 'false', ...latest.approval.binding })).status, 400);
+        assert.equal((await post('/approval', { approve: true })).status, 409);
         const approved = await Promise.all([post('/approval', { approve: true, ...latest.approval.binding }), post('/approval', { approve: true, ...latest.approval.binding })]);
         assert.ok(approved.every(item => item.status === 200));
         const record = await queryOne('SELECT status,metadata FROM agent_runs WHERE id = ?', [runId]);

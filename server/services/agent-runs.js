@@ -432,6 +432,7 @@ async function getRunDetailForUser(runId, user, options = {}) {
         progress: getRunProgress(run, steps || []),
         trace,
         checkpoints,
+        approval: run.status === 'approval_required' ? require('./chat-task-presentation').approvalSummary(metadata?.pendingApproval) : null,
         taskContract: metadata?.taskContract || null,
         verification: verification || metadata?.taskVerification || null,
         evidence: evidence || [],

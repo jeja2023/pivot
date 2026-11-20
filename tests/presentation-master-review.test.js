@@ -91,14 +91,14 @@ test('重复校验只在结果或源稿改变后推进，检查点恢复保留�
     const observation = { action: 'run', result: { exitCode: 0, stdout: '全部通过' } };
     const progress = createInspectionProgress([{ role: 'assistant', content: JSON.stringify({ actions: [action] }) },
         { role: 'user', content: JSON.stringify([observation]) }]);
-    for (let index = 0; index < 3; index++) assert.equal(progress.observe([action], [observation]), false);
+    for (let index = 0; index < 3; index++) assert.equal(progress.evaluate([action], [observation]).progressed, false);
     assert.equal(progress.stalled(), true);
-    const write = { action: 'write', path: 'report/svg_output/page.svg' };
+    const write = { action: 'write', path: 'report/svg_output/page.svg', savedSha256: 'a'.repeat(64) };
     const receipt = { action: 'write', result: { path: write.path, sha256: 'a'.repeat(64) } };
-    assert.equal(progress.observe([write], [receipt]), true);
-    assert.equal(progress.observe([action], [observation]), true);
-    assert.equal(progress.observe([write], [receipt]), false);
-    assert.equal(progress.observe([action], [observation]), false);
+    assert.equal(progress.evaluate([write], [receipt]).productive, true);
+    assert.equal(progress.evaluate([action], [observation]).progressed, true);
+    assert.equal(progress.evaluate([write], [receipt]).progressed, false);
+    assert.equal(progress.evaluate([action], [observation]).progressed, false);
 });
 
 test('引文核对与图片同轮发送时，下一轮不会重复附图', async () => {

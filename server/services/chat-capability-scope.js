@@ -22,7 +22,11 @@ function isAutomaticReadTool(raw, capabilities = []) {
 async function getChatCapabilityAvailability(user, deps = {}, options = {}) {
     try {
         const tools = await (deps.filterMcpToolsByCapability || filterMcpToolsByCapability)(await (deps.listCachedMcpTools || listCachedMcpTools)(null, user), user);
-        const visible = tools.filter(raw => !Array.isArray(options.manualAllowlist) || options.manualAllowlist.includes(raw.fullName || raw.name));
+        const excluded = new Set(options.excludedTools);
+        const visible = options.excludeTools === true ? [] : tools.filter(raw => {
+            const name = raw.fullName || raw.name;
+            return !excluded.has(name) && (!Array.isArray(options.manualAllowlist) || options.manualAllowlist.includes(name));
+        });
         const summaries = visible.map(raw => {
             const tool = visibleToolContract(raw);
             return { name: raw.fullName || tool.name, sourceName: redactRoutingText(String(raw.serverName || '')).slice(0, 80), description: redactRoutingText(String(tool.description || '')).slice(0, 240), capabilities: tool.capabilities,

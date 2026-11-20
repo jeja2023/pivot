@@ -170,16 +170,17 @@ test('复现日志中的 2048000 总预算与 1735413 剩余预算，继续能�
     } finally { await current.cleanup(); }
 });
 
-test('工作流节点重跑与完整重跑同样继承剩余预算', skipWithoutDatabase, async () => {
+test('工作流节点重跑与完整重跑继承剩余预算和模型策略', skipWithoutDatabase, async () => {
     for (const mode of ['rerun', 'dag']) {
         const current = await fixture(mode === 'dag' ? {
-            runMode: 'dag', dagSpec: { nodes: [{ id: 'node', tool: 'workflow.template', input: { template: '测试' } }] }
-        } : {});
+            runMode: 'dag', modelRouter: 'auto-load', dagSpec: { nodes: [{ id: 'node', tool: 'workflow.template', input: { template: '测试' } }] }
+        } : { modelRouter: 'auto-load' });
         try {
             await execute("UPDATE agent_runs SET status = 'error' WHERE id = ?", [current.original.id]);
             const resumed = mode === 'dag'
                 ? await current.lifecycle.resumeAgentRun(current.original.id, current.user)
                 : await current.lifecycle.rerunAgentRun(current.original.id, current.user);
+            assert.equal(resumed.model_router, 'auto-load');
             assert.equal(Number(resumed.max_token_budget), 1735413);
             assert.equal(parseJsonObject(resumed.budget_config).max_tokens_total, 1735413);
         } finally { await current.cleanup(); }

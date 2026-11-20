@@ -10,8 +10,8 @@ async function applyChatRouteCorrection({ correction, intentPrompt, sessionId, u
     const applied = { pausedRunIds: [], restrictedRunIds: [], status: 'applied' };
     try {
         // 纠正属于当前用户的控制权，不受自动执行开关和新建任务权限影响。
-        tasks = await (deps.budget ? deps.budget.run('correctionTasks', () => (deps.getConversationTasks || getConversationTasks)(sessionId, userId))
-            : (deps.getConversationTasks || getConversationTasks)(sessionId, userId));
+        tasks = await (deps.budget ? deps.budget.run('correctionTasks', () => (deps.getConversationTasks || getConversationTasks)(sessionId, userId, { activeOnly: true }))
+            : (deps.getConversationTasks || getConversationTasks)(sessionId, userId, { activeOnly: true }));
         if (signal?.aborted) throw signal.reason;
         const active = tasks.filter(task => task.active);
         if (active.length > 1) return { action: 'clarify', reasonCode: 'multiple_correction_targets',

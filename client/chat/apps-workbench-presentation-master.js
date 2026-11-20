@@ -2,7 +2,7 @@
     'use strict';
     const API = '/api/apps/presentations/master';
     let bound = false, state, helpers, epoch = 0, selectedTemplate = null, preparation = null, returnFocus = null, processReturnFocus = null;
-    let historySession = null;
+    let historySession = null, engineInfo = null;
     const byId = id => document.getElementById(id);
     const actorId = () => String(window.Pivot.legacy?.currentUser?.id || '');
     const presentationId = () => String(state.active?.id || '');
@@ -212,6 +212,7 @@
             selectedTemplate = null;
             window.Pivot.moduleApi('apps.presentations.masterForm')?.updateTemplateLock(false);
             renderTemplateCard();
+            if (engineInfo) renderEngineAvailability();
         });
     }
     function ensureProcessModal() {
@@ -310,6 +311,23 @@
         showFormError(text);
     }
 
+    function renderEngineAvailability() {
+        const modal = byId('presentation-master-modal'), start = byId('presentation-master-start');
+        const templateOnly = byId('presentation-master-operation')?.value === 'create_template';
+        const ready = engineInfo.enabled && (templateOnly ? engineInfo.templateReady : engineInfo.generationReady) !== false;
+        modal.dataset.engineEnabled = ready ? 'true' : 'false';
+        start.disabled = !ready;
+        if (ready) return renderEngineReady();
+        const fallback = node('button', 'btn-secondary', '使用标准演示制作'); fallback.type = 'button';
+        fallback.addEventListener('click', () => {
+            const goals = window.Pivot.moduleApi('apps.presentations.goals'), profile = goals.read('presentation-master');
+            closeModal(); helpers.openCreateModal(); goals.fill('presentation-create', profile);
+        });
+        const message = engineInfo.enabled ? '完整制作服务缺少当前流程所需的核验能力，请更新独立服务镜像。'
+            : '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。';
+        byId('presentation-master-engine-state').replaceChildren(node('p', 'presentation-master-task-message', message), fallback);
+    }
+
     function renderEngineReady() {
         const panel = byId('presentation-master-engine-state');
         if (!panel) return;
@@ -340,6 +358,7 @@
         const modal = byId('presentation-master-modal');
         modal.dataset.owner = actor; modal.dataset.presentationId = target;
         modal.dataset.engineEnabled = 'false';
+        engineInfo = null;
         modal.classList.remove('hidden');
         clearFormError();
         const startButton = byId('presentation-master-start');
@@ -376,14 +395,8 @@
             if (!isCurrent(sequence)) return;
             const { engine } = await helpers.requestJson(API + '/info');
             if (!isCurrent(sequence)) return;
-            modal.dataset.engineEnabled = engine.enabled ? 'true' : 'false';
-            startButton.disabled = !engine.enabled;
-            if (engine.enabled) renderEngineReady();
-            else {
-                const fallback = node('button', 'btn-secondary', '使用标准演示制作'); fallback.type = 'button';
-                fallback.addEventListener('click', () => { const profile = window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master'); closeModal(); helpers.openCreateModal(); window.Pivot.moduleApi('apps.presentations.goals').fill('presentation-create', profile); });
-                byId('presentation-master-engine-state').replaceChildren(node('p', 'presentation-master-task-message', '完整制作服务未连接或暂不可用，标准演示创建、编辑和导出继续可用。'), fallback);
-            }
+            engineInfo = engine;
+            renderEngineAvailability();
         } catch (error) { showError(error, sequence); }
         finally { if (isCurrent(sequence)) { byId('presentation-master-history').disabled = false; byId('presentation-master-active').disabled = false; } }
     }
@@ -578,36 +591,7 @@
         const currentBudget = value.request?.tokenBudget;
         const budgetText = currentBudget === 0 ? '不限' : Number.isSafeInteger(currentBudget) ? `${currentBudget.toLocaleString('zh-CN')} 令牌` : '未记录';
         panel.appendChild(node('p', 'presentation-master-task-summary', `步骤 ${value.steps || 0}。已用约 ${Number(value.usedTokens || 0).toLocaleString('zh-CN')} 令牌。本任务累计预算 ${budgetText}。`));
-        if (value.imageCoverage?.total) panel.appendChild(node('p', 'presentation-master-task-summary', `已发送 ${value.imageCoverage.read} / ${value.imageCoverage.total} 张图片给模型。`));
-        if (value.actionRetries) panel.appendChild(node('p', 'presentation-master-task-summary', `已修正模型动作 ${value.actionRetries} 次。`));
-        const audit = value.result?.checks;
-        if (audit?.checklistDigest) panel.appendChild(node('p', 'presentation-master-task-summary', `交付已按批准清单核对 ${audit.checkedPages} 页及 ${audit.checkedValues} 项关键数据。`));
-        const actions = value.actionSummary;
-        if (actions && value.steps > 0) {
-            const writeText = actions.writes ? `已确认直接写入 ${actions.writes} 次。最近写入 ${actions.lastWrittenPath}。` : '当前检查点暂无直接写入回执。';
-            const labels = { read: '读取任务文件', read_runtime: '读取指引', read_history: '回读历史', read_images: '分页读取图片', list: '列出文件', write: '写入文件',
-                run: '执行工具', copy: '复制文件', copy_template: '复制模板', validate_template: '校验模板', pending: '待确认的操作' };
-            const recent = (actions.lastActions || []).map(item => labels[item.action] && labels[item.action] + (item.failed ? '未完成' : '')).filter(Boolean);
-            panel.appendChild(node('p', 'presentation-master-task-summary', writeText + (actions.failedWrites ? `写入失败 ${actions.failedWrites} 次。` : '') +
-                (actions.runtimeReads ? `已读取指引 ${actions.runtimeReads} 次。` : '') +
-                (recent.length ? '最近工具动作包括' + recent.join('、') + '。' : '')));
-        }
-        if (value.modelRequest) {
-            const { contextWindow, configuredInputLimit, inputEstimate, outputLimit, timeoutSeconds } = value.modelRequest;
-            const parts = [contextWindow && `单轮窗口 ${contextWindow.toLocaleString('zh-CN')}`,
-                configuredInputLimit && `配置输入上限 ${configuredInputLimit.toLocaleString('zh-CN')}`,
-                `预计输入 ${Number(inputEstimate || 0).toLocaleString('zh-CN')}`, outputLimit && `本轮输出上限 ${outputLimit.toLocaleString('zh-CN')}`].filter(Boolean);
-            panel.appendChild(node('p', 'presentation-master-task-summary', parts.join('，') + ' 令牌。' +
-                (timeoutSeconds ? `请求时限 ${timeoutSeconds} 秒。` : '')));
-        }
-        if (value.milestones && Object.keys(value.milestones).length) {
-            const labels = { firstPlan: '首次提交方案', firstApproval: '首次方案确认', firstWrite: '首次写入回执', firstPageWrite: '首次页面写入', delivered: '交付登记' };
-            const milestones = Object.entries(labels).filter(([key]) => value.milestones[key]).map(([key, label]) => {
-                const stage = value.milestones[key];
-                return `${label}（第 ${stage.steps} 步，用时 ${Math.ceil(stage.elapsedMs / 1000)} 秒，累计 ${stage.usedTokens.toLocaleString('zh-CN')} 令牌）`;
-            });
-            panel.appendChild(node('p', 'presentation-master-task-summary', milestones.join('，') + '。'));
-        }
+        window.Pivot.moduleApi('apps.presentations.masterPageReview')?.mountTaskDiagnostics(panel, value, node);
         const modal = historySession ? null : byId('presentation-master-modal');
         if (modal && (value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
             const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);

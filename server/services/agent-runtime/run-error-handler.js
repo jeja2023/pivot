@@ -10,8 +10,8 @@ function createAgentRunErrorHandler(deps = {}) {
     } = deps;
 
     async function handle(error, context = {}) {
-        const { runId, user, runForSummary, modelCfgForSummary, observations = [], taskBudget, markExecutionLeaseLost } = context;
-        const e = error;
+        const { runId, user, runForSummary, modelCfgForSummary, observations = [], taskBudget, signal, markExecutionLeaseLost } = context;
+        const e = signal?.aborted && signal.reason instanceof Error ? signal.reason : error;
         if (e.code === 'AGENT_RUN_LEASE_LOST') {
             // 持久化取消状态和租约归属为准。旧实例失去执行权后不能提交结果；
             // 仍归属本实例的任务会安全回到队列。
@@ -29,7 +29,7 @@ function createAgentRunErrorHandler(deps = {}) {
         }
         logger.error({ err: e.message, runId }, '智能体运行失败');
         const currentStatus = await getRunStatus(runId);
-        if (e.code === 'AGENT_USER_REVOKED' || isRunCancelled(runId) || currentStatus === 'cancelled') {
+        if (e.code === 'AGENT_USER_REVOKED' || currentStatus === 'cancelled') {
             if (currentStatus !== 'cancelled' && currentStatus !== 'deleted') {
                 await updateRun(runId, {
                     status: 'cancelled',
@@ -60,7 +60,7 @@ function createAgentRunErrorHandler(deps = {}) {
             return;
         }
         if (['AGENT_BUDGET_EXCEEDED', 'AGENT_TIMEOUT', 'AGENT_FINALIZATION_REQUIRED'].includes(e.code)) {
-            if (['AGENT_TIMEOUT', 'AGENT_FINALIZATION_REQUIRED'].includes(e.code) && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, taskBudget, error: e, reason: 'timeout' })) {
+            if (['AGENT_TIMEOUT', 'AGENT_FINALIZATION_REQUIRED'].includes(e.code) && !signal?.aborted && runForSummary && await continueRunFromCheckpoint({ run: runForSummary, runId, user, taskBudget, error: e, reason: 'timeout' })) {
                 return;
             }
             if (taskBudget) taskBudget.phase = 'finalization';
@@ -73,17 +73,17 @@ function createAgentRunErrorHandler(deps = {}) {
                 : '任务已达到预算上限，以下为已完成的部分结果。';
             let answer = '';
             const tokenBudgetExhausted = taskBudget && taskBudget.counts.tokens_total >= taskBudget.limits.max_tokens_total;
-            if (modelCfgForSummary && runForSummary && !tokenBudgetExhausted) {
+            if (!signal?.aborted && modelCfgForSummary && runForSummary && !tokenBudgetExhausted) {
                 try {
                     answer = await withTimeout(
-                        () => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {
-                            budget: taskBudget,
+                        modelSignal => synthesizeFinalAnswer(modelCfgForSummary, runForSummary.goal, observations, user, runId, {
+                            budget: taskBudget, signal: modelSignal,
                             allowBudgetExceeded: true,
                             skillInstructions: getRunMetadata(runForSummary).skillInstructions || '',
                             chatAgent: runForSummary ? getRunMetadata(runForSummary).chatBridge : null
                         }),
                         30000,
-                        'partial final summary'
+                        'partial final summary', { signal }
                     );
                 } catch (summaryError) {
                     logger.warn({ runId, err: summaryError.message }, '资源受限后的部分结果总结失败');
@@ -117,7 +117,7 @@ function createAgentRunErrorHandler(deps = {}) {
         const retryRow = await loadRetryRow(runId);
         const retryLimit = normalizePositiveInt(retryRow?.retry_limit, 0, 0, 5);
         const retryCount = normalizePositiveInt(retryRow?.retry_count, 0, 0, 99);
-        if (retryCount < retryLimit && !['AGENT_BUDGET_EXCEEDED', 'AGENT_TIMEOUT', 'AGENT_INVALID_STATUS_TRANSITION', 'AGENT_HOOK_DENIED', 'CONTEXT_LENGTH_EXCEEDED', 'SKILL_INSTRUCTIONS_LIMIT'].includes(e.code)) {
+        if (retryCount < retryLimit && !['AGENT_BUDGET_EXCEEDED', 'AGENT_TIMEOUT', 'AGENT_INVALID_STATUS_TRANSITION', 'AGENT_HOOK_DENIED', 'INSUFFICIENT_QUOTA', 'CONTEXT_LENGTH_EXCEEDED', 'SKILL_INSTRUCTIONS_LIMIT'].includes(e.code)) {
             const resumeContext = await buildAgentResumeContext(runId);
             const retryAttempt = retryCount + 1;
             const retryDelayMs = calculateAgentRetryDelayMs(retryAttempt);

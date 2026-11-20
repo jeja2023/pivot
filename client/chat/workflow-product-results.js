@@ -8,7 +8,7 @@
     const bridge = () => window.Pivot?.moduleApi?.('agent.workflowBridge') || {};
     const escape = text => window.Pivot?.legacy?.PivotSafeHtml?.escapeHtml?.(String(text ?? '')) ?? String(text ?? '');
     const parse = value => { if (value && typeof value === 'object') return value; try { return JSON.parse(value || '{}'); } catch (_) { return {}; } };
-    const statusNames = { queued: '已排队', running: '运行中', needs_input: '需要补充', awaiting_commit: '等待提交', paused: '已暂停', waiting_approval: '等待审批', partial: '部分完成', completed: '已完成', error: '失败', cancelled: '已取消', completed_with_errors: '部分完成', waiting_delay: '等待延时', verifying: '正在验收' };
+    const statusNames = { queued: '已排队', running: '运行中', executing: '执行中', observing: '观察中', diagnosing: '诊断中', replanning: '重新规划', resuming: '恢复中', planning: '规划中', needs_input: '需要补充', awaiting_commit: '等待提交', paused: '已暂停', waiting_approval: '等待审批', partial: '部分完成', completed: '已完成', error: '失败', cancelled: '已取消', completed_with_errors: '部分完成', waiting_delay: '等待延时', verifying: '正在验收' };
 
     function getStatusSvg(status, size = 14) {
         const s = size;
@@ -385,7 +385,7 @@
                 const current = detail.run;
                 const deliveries = (detail.dagNodes || []).filter(node => node.tool_name === 'workflow.output' && node.status === 'completed' && node.output !== undefined);
                 const output = deliveries.length ? { workflowDeliveries: deliveries.map(node => ({ title: node.title || node.node_key, output: node.output })) } : current.final_answer || undefined;
-                const inFlight = ['queued', 'running', 'verifying', 'planning', 'waiting_delay'].includes(current.status);
+                const inFlight = ['queued', 'running', 'planning', 'executing', 'observing', 'diagnosing', 'replanning', 'resuming', 'verifying', 'waiting_delay'].includes(current.status);
                 const shouldOpen = openModal || inFlight;
                 render({ title: '运行结果', source, output, input: parse(current.metadata).dagInputs, nodes: detail.dagNodes || [], run: current, error: current.error_message, openModal: shouldOpen });
                 if (inFlight) timer = setTimeout(poll, 1400);

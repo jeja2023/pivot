@@ -55,6 +55,39 @@ test('完整引擎接纳与任务创建在同一事务中，多个请求不能�
     } finally { for (const id of created) await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [id, user.id]); }
 });
 
+test('活跃检查点和心跳延长到期时间，超过执行上限或租约过期时不能延长', { skip: !process.env.DATABASE_URL }, async () => {
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const task = await taskStore.create({ user, toolName: repository.TOOL, ttlMs: 600000 });
+    const lease = crypto.randomUUID(), state = { request: { presentationId: '' }, steps: 31 };
+    try {
+        assert.ok(await repository.claim(user, task.id, lease));
+        assert.equal(await repository.renew(user, task.id, crypto.randomUUID()), null);
+        assert.ok(await repository.renew(user, task.id, lease));
+        const renewed = await repository.read(user, task.id);
+        assert.ok(Date.parse(renewed.expires_at) > Date.now() + 55 * 60000);
+        assert.ok(renewed.result_json._runDeadline > Date.now() / 1000 + 7.9 * 3600);
+        await execute(`UPDATE tool_tasks SET expires_at=NOW()+INTERVAL '10 minutes',
+            result_json=result_json||jsonb_build_object('_runDeadline', extract(epoch from NOW()+INTERVAL '40 minutes')) WHERE id=?`, [task.id]);
+        assert.ok(await repository.save(user, task.id, lease, state, { phase: 'authoring' }));
+        const saved = await repository.read(user, task.id);
+        const { expiry_epoch: expires } = await queryOne('SELECT extract(epoch from expires_at) AS expiry_epoch FROM tool_tasks WHERE id=?', [task.id]);
+        assert.equal(Number(expires), saved.result_json._runDeadline);
+        assert.equal(saved.result_json.state.steps, 31);
+        await execute("UPDATE tool_tasks SET result_json=result_json||jsonb_build_object('_leaseUntil',extract(epoch from NOW())-1) WHERE id=?", [task.id]);
+        assert.equal(await repository.renew(user, task.id, lease), null);
+        assert.equal(await repository.save(user, task.id, lease, state, {}), null);
+        const nextLease = crypto.randomUUID();
+        assert.ok(await repository.claim(user, task.id, nextLease));
+        assert.equal((await repository.read(user, task.id)).result_json._runDeadline, saved.result_json._runDeadline);
+        await execute("UPDATE tool_tasks SET expires_at=NOW()-INTERVAL '1 second' WHERE id=?", [task.id]);
+        assert.equal(await repository.renew(user, task.id, nextLease), null);
+        assert.equal((await taskStore.getForUser(task.id, user)).status, 'expired');
+        assert.ok(await repository.resume(user, task.id, state));
+        assert.ok(await repository.claim(user, task.id, lease));
+        assert.ok((await repository.read(user, task.id)).result_json._runDeadline > saved.result_json._runDeadline);
+    } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+});
+
 test('过期检查点可续跑，待确认任务必须先提交实际答复，取消任务不能复活', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
     const task = await taskStore.create({ user, toolName: repository.TOOL, ttlMs: 600000 });
@@ -164,6 +197,7 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
     let broken = true;
     t.mock.method(runtime, 'readOutput', async (_user, _id, file) => {
         if (file === 'presentation.pptx') return pptx;
+        if (broken === 'large') throw runtime.error('超过大小上限', 'PPT_SERVICE_RESPONSE_TOO_LARGE', 502);
         if (broken) throw new Error('模拟源包传输失败');
         return zip;
     });
@@ -171,6 +205,10 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
         assert.ok(await repository.claim(user, task.id, lease));
         await assert.rejects(prepareDelivery(user, task.id, request, receipt, deliveryContext), /传输失败/);
         assert.equal((await artifacts()).length, 0);
+        broken = 'large';
+        const withoutBundle = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
+        assert.deepEqual(withoutBundle.files.map(file => file.format), ['pptx']);
+        assert.match(withoutBundle.sourcePackageWarning, /完整项目源包/);
         broken = false;
         const prepared = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
         await assert.rejects(repository.withExecution(user, task.id, lease, async executor => {

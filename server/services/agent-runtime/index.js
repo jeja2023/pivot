@@ -425,6 +425,15 @@ function getAgentRuntimeDeps(signal = null, taskBudget = null) {
         recordAgentEvent,
         recordAgentEventBatch,
         verifyAgentOutcome: options => verifyAndRecordTaskOutcome({ ...options, setRunMetadata }),
+        onDagVerificationFinalized: async (run, status) => {
+            try { await publishAgentRunEvent(run.id, 'updated'); }
+            catch (error) { logger.warn({ runId: run.id, code: error.code }, '工作流核验状态通知失败'); }
+            try { await recordAgentEvent({ runId: run.id, userId: run.user_id,
+                type: TERMINAL_STATUSES.has(status) ? 'run.completed' : status === 'awaiting_commit' ? 'run.paused' : 'run.status_changed',
+                payload: { from: 'verifying', to: status }, eventKey: 'verification-finished:' + crypto.randomUUID() }); }
+            catch (error) { logger.warn({ runId: run.id, code: error.code }, '工作流核验状态事件写入失败'); }
+            await runState.finalizeTerminalRun(run.id, status);
+        },
         pollAgentControlMessages: async (runId, user, options) => {
             // 进程在 apply 后、ack 前崩溃时，先补发 ACK；状态已是 applied 的消息
             // 不会再次进入 claim/apply，从而保持恰好一次的业务应用语义。
@@ -633,6 +642,10 @@ async function recoverAgentRuns() {
         });
     }
 
+    try { await recoverCommittedTaskRuns(); }
+    catch (error) { logger.warn({ code: error.code }, '补齐任务事务提交回执失败'); }
+    try { await require('../agent-goals').recoverGoalRunDeliveries(); }
+    catch (error) { logger.warn({ code: error.code }, '持续目标交付恢复扫描失败'); }
     const recoveredQueued = await getAgentQueue().recoverQueued(100, { deferSchedule: true });
     let recoveredChatResults = null;
     let expiredBrowserSessions = 0;
@@ -791,21 +804,36 @@ async function assertRunCanContinue(runId) {
     }
 }
 
+async function recoverCommittedTaskRuns() {
+    const pending = await query(`SELECT r.id, t.id AS transaction_id, t.committed_at FROM agent_runs r
+        JOIN agent_task_transactions t ON t.run_id = r.id AND t.user_id = r.user_id AND t.id::text = COALESCE(r.metadata->>'taskTransactionId', r.metadata->>'task_transaction_id')
+        WHERE r.status = 'awaiting_commit' AND r.deleted_at IS NULL AND t.status = 'committed' ORDER BY t.committed_at LIMIT 100`);
+    for (const receipt of pending) {
+        try {
+            const owner = await getRunUser(receipt.id);
+            if (!owner) continue;
+            await finalizeCommittedTaskTransactionRun(receipt.id, owner, { id: receipt.transaction_id, runId: receipt.id,
+                committedAt: receipt.committed_at, status: 'committed' });
+        } catch (error) { logger.warn({ runId: receipt.id, code: error.code }, '任务终态仍待补齐'); }
+    }
+}
+
 async function finalizeCommittedTaskTransactionRun(runId, user, transaction) {
     const run = await getRunForUser(runId, user);
     if (!run) return null;
     if (run.status !== 'awaiting_commit') return run;
-    await updateRun(run.id, {
-        status: 'completed',
-        error_message: '',
-        completed_at: getBeijingTimestamp(),
-        updated_at: getBeijingTimestamp()
-    });
-    await setRunMetadata(run.id, {
-        taskTransactionId: transaction.id,
-        taskTransactionStatus: transaction.status,
-        taskTransactionCommittedAt: transaction.committedAt || getBeijingTimestamp()
-    });
+    if (transaction.status !== 'committed' || transaction.runId !== run.id) return run;
+    const metadata = getRunMetadata(run);
+    const primaryTransaction = metadata.taskTransactionId || metadata.task_transaction_id;
+    if (primaryTransaction && primaryTransaction !== transaction.id) {
+        throw Object.assign(new Error('提交回执与当前任务事务不一致。'), { status: 409, code: 'AGENT_TASK_TRANSACTION_MISMATCH' });
+    }
+    const updated = await updateRunCas(run.id, ['awaiting_commit'], {
+        status: 'completed', error_message: '', completed_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp(),
+        metadata: JSON.stringify({ taskTransactionId: transaction.id, taskTransactionStatus: transaction.status,
+            taskTransactionCommittedAt: transaction.committedAt || getBeijingTimestamp() })
+    }, { mergeMetadata: true });
+    if (!updated) return await getRunForUser(run.id, user);
     await createAgentNotification(user.id, run.id, 'completed', '任务已提交', getAgentRunTitle(run));
     return await getRunForUser(run.id, user);
 }

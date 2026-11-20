@@ -7,7 +7,7 @@ const service = require('../presentation-service');
 const runtime = require('./runtime');
 const contract = require('./contract');
 const { drive } = require('./driver');
-const { actionSummary } = require('./observations');
+const { actionSummary, usageDiagnosticsView } = require('./observations');
 const { prepareDelivery, commitDelivery } = require('./delivery');
 const { pendingInput, parseDecision } = require('./confirmation');
 const { markMilestone } = require('./milestones');
@@ -18,6 +18,8 @@ const { createReviewPreviewService, exportForPreview } = require('./review-previ
 const progressSnapshots = require('./progress-snapshots');
 const { logger } = require('../../../logger');
 const { imageCoverage } = require('./model-input');
+const { progressFor } = require('./workflow-progress');
+const { checkpointProgressView } = require('./checkpoint-progress');
 const deployment = require('./deployment');
 const active = require('./continuation').createContinuationCoordinator();
 
@@ -52,9 +54,13 @@ function publicResult(row, task) {
         request: state ? { title: state.request.title, operation: state.request.operation, profile: state.request.profile, presentationId: state.request.presentationId,
             pageCount: state.request.pageCount, modelId: state.request.modelId, maxSteps: state.request.maxSteps, tokenBudget: state.request.tokenBudget, productionProfile: state.request.productionProfile, template: state.request.template || null } : undefined,
         usedTokens: state?.usedTokens ?? data.usedTokens ?? 0, steps: state?.steps ?? data.steps ?? 0,
-        actionSummary: actionSummary(state?.messages), modelRequest: state?.modelRequest, milestones: state?.milestones,
+        actionSummary: actionSummary(state?.messages), inspectionDiagnostic: state?.inspectionDiagnostic,
+        workflowProgress: state && progressFor(state),
+        ...(['failed', 'expired', 'cancelled'].includes(task.status) ? { checkpointProgress: checkpointProgressView(state, pending) } : {}),
+        modelRequest: state?.modelRequest, milestones: state?.milestones,
         imageCoverage: state?.prepared ? imageCoverage(state) : undefined, actionRetries: state?.actionRetries || 0,
-        usageDiagnostics: Array.isArray(state?.usageDiagnostics) ? state.usageDiagnostics.map(({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown }) => ({ call, step, inputTokens, outputTokens, inputEstimated, outputEstimated, inputEstimate, originalEstimate, compactedWrites, cumulativeTokens, breakdown })) : [],
+        lastActionCorrection: state?.lastActionCorrection,
+        usageDiagnostics: usageDiagnosticsView(state, task.error),
         recoverable: Boolean(state && (!state.pendingKind || state.response) && (task.status === 'failed' || task.status === 'expired' || task.status === 'working' && Number(data._leaseUntil || 0) < Date.now() / 1000)),
         ...(paused ? { citationReview: { items: (state?.citationRepair || []).map(({ location, text, title }) => ({ location, text, title })) } } : {}),
         ...(reviewDraftFor(row, task) ? { hasReviewDraft: true } : {}),
@@ -208,7 +214,7 @@ async function run(id, user, deps = {}) {
         const prepared = deps.deliver ? null : await (deps.prepareDelivery || prepareDelivery)(user, id, state.request, result.receipt, { signal, engine: state.engine });
         await ensureCurrent();
         const message = result.receipt.templateOnly ? '模板工作区通过上游校验，完整模板源包已登记。尚未自动发布到组织模板库。'
-            : '制作完成；可下载原生PPTX和项目源包。复杂对象在PowerPoint或上游项目中继续编辑，尚未转换为Pivot画布元素。';
+            : prepared?.sourcePackageWarning || '制作完成。可下载原生 PPTX 和项目源包，复杂对象可在 PowerPoint 或上游项目中继续编辑。';
         const finish = async executor => {
             const completionStore = executor ? taskStore.createToolTaskStore({ queryOne: executor.queryOne, execute: executor.execute }) : store;
             const output = deps.deliver ? await deps.deliver(user, id, state.request, result.receipt, { signal, engine: state.engine })
@@ -229,15 +235,9 @@ async function run(id, user, deps = {}) {
 }
 async function start(user, input, context = {}) {
     const available = await runtime.availability();
-    if (!available.enabled) throw runtime.error(available.message, 'PPT_MASTER_UNAVAILABLE', 503);
-    if (available.transport === 'service' && !available.checklistReady) {
-        throw runtime.error('独立PPT制作服务尚未支持交付清单核验，请更新执行镜像。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
-    }
     const request = { ...contract.normalize(input), runId: String(context.run?.id || context.runId || ''),
         ...(context.regeneratedFrom ? { regeneratedFrom: context.regeneratedFrom } : {}) };
-    if (available.transport === 'service' && request.operation !== 'create_template' && !available.currentExportReady) {
-        throw runtime.error('独立 PPT 服务需要更新到支持修订稿导出回执的镜像，再开始制作。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
-    }
+    runtime.requireReady(available, request.operation);
     const visionRequired = await ensureAccess(user, request);
     await checkModel(user, request, { visionRequired });
     const task = await repository.admit(user, client => { deployment.assertAccepting(); return taskStore.createToolTaskStore({ queryOne: client.queryOne, execute: client.execute }).create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 60 * 60 * 1000 }); });
@@ -341,10 +341,12 @@ async function resume(user, id, input = {}) {
         state.messages ||= [];
         state.messages.push({ role: 'user', content: '用户在检查点补充说明 [引用来源 ' + source + ']：' + resumeNote });
     } else if (paused && changedModel) resetCitationRepair(state);
-    if (row.error_code === 'PPT_MASTER_NO_PROGRESS') {
-        state.inspectionRepairAttempts = 0;
-        state.inspectionRepairPending = true;
-    }
+    const stalled = row.error_code === 'PPT_MASTER_NO_PROGRESS';
+    if (stalled || row.error_code === 'PPT_MASTER_PHASE_LIMIT') delete state.workflowProgress;
+    if (stalled || state.inspectionRepairPending) delete state.focusModelHistory;
+    state.inspectionRepairAttempts = 0;
+    delete state.inspectionRepairPending;
+    delete state.inspectionDiagnostic;
     // 旧检查点可能只保存了转发超时或带超时原因的熔断错误。
     if (['PPT_MASTER_MODEL_TIMEOUT', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
         || row.error_code === 'AI_ENDPOINT_CIRCUIT_OPEN' && /timeout of \d+ms exceeded/i.test(row.error_message || '')) {
@@ -352,7 +354,10 @@ async function resume(user, id, input = {}) {
     }
     if (state.messages) {
         const repair = reviewRecoveryGuidance(state, row.error_code, row.error_message);
-        state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。上一轮动作可能已经部分执行，请先list/read核对现有任务文件，再决定下一步；不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' + repair });
+        const workspaceCheck = stalled ? '从已保存的动作回执推进当前阶段。如某项文件状态仍不明确，先定向核对。'
+            : '上一轮动作可能已经部分执行，请先用 list/read 核对相关任务文件，再决定下一步。';
+        state.messages.push({ role: 'user', content: '宿主中断后从已保存检查点继续。' + workspaceCheck
+            + '不能盲目覆盖或重复创建项目。累计用量与步骤没有重置。' + repair });
     }
     if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id, state, input.pages === undefined ? null : input.draftRevision); }, id)) throw runtime.error('任务状态已变化或仍持有有效执行租约。', 'PPT_MASTER_BUSY', 409);
     setImmediate(() => run(id, user).catch(() => {})); return get(user, id);

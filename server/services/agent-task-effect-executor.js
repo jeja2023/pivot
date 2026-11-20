@@ -211,19 +211,23 @@ async function executeAndCommitTaskTransaction(transactionId, user, commitEviden
         error.status = 404;
         throw error;
     }
-    if (transaction.status !== 'awaiting_commit') {
+    if (!['committed', 'awaiting_commit'].includes(transaction.status)) {
         const error = new Error('任务事务尚未通过验收或已被处理。');
         error.code = 'AGENT_TASK_TRANSACTION_NOT_READY';
         error.status = 409;
         throw error;
     }
-    const run = await queryOne('SELECT status, deleted_at FROM agent_runs WHERE id = ? AND user_id = ?', [transaction.runId, user?.id]);
-    if (!run || run.deleted_at || run.status !== 'awaiting_commit') {
+    const run = await queryOne('SELECT status, deleted_at, metadata FROM agent_runs WHERE id = ? AND user_id = ?', [transaction.runId, user?.id]);
+    const metadata = require('./agent-validators').parseJsonObject(run?.metadata);
+    const primary = metadata?.taskTransactionId || metadata?.task_transaction_id;
+    if (!run || run.deleted_at || (primary && primary !== transaction.id) ||
+        (transaction.status !== 'committed' && run.status !== 'awaiting_commit')) {
         const error = new Error('任务已隐藏、停止或不在等待提交状态，不能执行事务副作用。');
         error.code = 'AGENT_TASK_RUN_NOT_COMMITTABLE';
         error.status = 409;
         throw error;
     }
+    if (transaction.status === 'committed') return transaction;
     // 必须在执行任何待提交外部效果之前检查预览，避免先发送通知或写入远端，
     // 随后才发现影子工作区状态登记失败而无法提交事务。
     assertPreviewEffectsReady(transaction.effects);

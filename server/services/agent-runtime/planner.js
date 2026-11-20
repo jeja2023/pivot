@@ -1,6 +1,6 @@
-const { callModelText, recordAgentModelUsage } = require('../agent-model');
+const { callModelText, recordAgentModelUsage, resolveAgentMaxTokens } = require('../agent-model');
 const { normalizeContextConfig, normalizeRunMode } = require('../agent-validators');
-const { fitMessagesToContextBudget, getModelContextBudget } = require('../context-budget');
+const { fitMessagesToContextBudget, getModelContextBudget, estimateMessagesTokens } = require('../context-budget');
 const { compactAgentContextMessages } = require('../agent-context-semantic-compression');
 const { logger } = require('../../logger');
 const { AGENT_ANSWER_MIN_MAX_TOKENS } = require('../agent-model');
@@ -201,7 +201,7 @@ function buildPlannerMessages(goal, toolList, observations, runMode = 'standard'
     return attachPromptManifest(fitted, manifestForSections(sections));
 }
 
-async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
+function buildFinalAnswerPrompt(goal, observations, options = {}, activeSummaryCore = summaryCoreSection()) {
     const finalContext = {
         chatHistory: options.chatHistory,
         chatAgent: options.chatAgent,
@@ -209,7 +209,6 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
         projectContextPack: options.projectContextPack,
         goalContext: options.goalContext
     };
-    const activeSummaryCore = user ? await resolveActivePromptSection('agent_summary_core', summaryCoreSection(), user) : summaryCoreSection();
     const sections = [
         activeSummaryCore,
         ...(options.capabilityFallback ? [createPromptSection({ key: 'agent_capability_fallback', version: '1', owner: 'platform.runtime', stability: 'dynamic',
@@ -240,7 +239,14 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
             )
         }
     ];
-    const fitted = { messages: attachPromptManifest(fitAgentMessages(messages, modelCfg), manifestForSections(sections)) };
+    return { messages, sections };
+}
+
+async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, runId = '', options = {}) {
+    const activeSummaryCore = user ? await resolveActivePromptSection('agent_summary_core', summaryCoreSection(), user) : summaryCoreSection();
+    const { messages, sections } = buildFinalAnswerPrompt(goal, observations, options, activeSummaryCore);
+    const maxOutputTokens = resolveAgentMaxTokens(modelCfg, { minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS });
+    const fitted = { messages: attachPromptManifest(fitAgentMessages(messages, modelCfg, { maxOutputTokens }), manifestForSections(sections)) };
     if (options.skillInstructions && !fitted.messages.some(message => String(message.content || '').includes(String(options.skillInstructions).trim()))) {
         throw Object.assign(new Error('完整技能指引超过总结模型容量，请更换模型或精简技能后重试。'), { code: 'CONTEXT_LENGTH_EXCEEDED' });
     }
@@ -250,28 +256,30 @@ async function synthesizeFinalAnswer(modelCfg, goal, observations, user = null, 
     const usageRef = {};
     // 最终答案是面向用户的完整回复，不能沿用规划一步的 1200 兜底预算，否则综合
     // 多步观察的答案会被直接截断。minMaxTokens 只抬下限，模型配置更高时不被压低。
-    const content = await callModelText(modelCfg, fitted.messages, {
-        budget: options.budget,
-        user,
-        signal: options.signal || null,
-        usageRef,
-        minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS,
-        timeoutMs: options.timeoutMs
-    });
-    if (usageRef.truncated) {
-        logger.warn({
-            runId,
-            maxTokens: usageRef.maxTokens,
-            outputTokens: usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens ?? null,
-            observations: observations.length
-        }, 'Agent 最终答案因输出预算耗尽被截断，请提高模型的最大输出 Token 或 AGENT_ANSWER_MIN_MAX_TOKENS');
+    let outputLimit = maxOutputTokens;
+    if (options.requireComplete && options.budget) {
+        const budget = options.budget;
+        const reserve = Math.min(budget.policy?.reserveTokens || 0, Math.floor(budget.limits.max_tokens_total / 10));
+        const inputTokens = estimateMessagesTokens(fitted.messages);
+        outputLimit = Math.min(maxOutputTokens, budget.limits.max_tokens_total - budget.counts.tokens_total - inputTokens - reserve);
+        if (outputLimit < 1) throw Object.assign(new Error('剩余额度需要保留给交付核验'), { code: 'AGENT_SUMMARY_BUDGET_RESERVED' });
     }
-    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, {
-        budget: options.budget,
-        usageRef,
-        allowBudgetExceeded: options.allowBudgetExceeded === true
+    const content = await callModelText(modelCfg, fitted.messages, {
+        budget: options.budget, user, source: 'agent_summary', signal: options.signal || null, usageRef,
+        maxTokens: outputLimit, timeoutMs: options.timeoutMs
     });
-    return sanitizeUserVisibleText(content) || '未能生成最终答案。';
+    if (user) await recordAgentModelUsage(user, modelCfg, fitted.messages, content, 'agent_summary', runId, {
+        budget: options.budget, usageRef, allowBudgetExceeded: options.allowBudgetExceeded === true
+    });
+    const answer = sanitizeUserVisibleText(content);
+    if (options.requireComplete && (usageRef.truncated || isMissingFinalAnswer(answer))) {
+        throw Object.assign(new Error('升级模型未返回完整总结'), { code: 'AGENT_SUMMARY_INCOMPLETE' });
+    }
+    if (usageRef.truncated) {
+        logger.warn({ runId, maxTokens: usageRef.maxTokens, outputTokens: usageRef.usage?.completion_tokens ?? usageRef.usage?.output_tokens ?? null,
+            observations: observations.length }, 'Agent 最终答案因输出预算耗尽被截断，请提高模型的最大输出 Token 或 AGENT_ANSWER_MIN_MAX_TOKENS');
+    }
+    return answer || '未能生成最终答案。';
 }
 
 function isMissingFinalAnswer(value) {
@@ -286,6 +294,7 @@ module.exports = {
     chatHistoryMessages,
     longTermMemoryContextMessages,
     observationMessages,
+    buildFinalAnswerPrompt,
     synthesizeFinalAnswer,
     isMissingFinalAnswer
 };

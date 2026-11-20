@@ -33,14 +33,18 @@
     }
     async function free() {
         const { engine } = await helpers.requestJson('/api/apps/presentations/master/info').catch(() => ({ engine: { enabled: false } }));
-        if (engine.enabled) return window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', profile: 'default', template: null });
+        if (engine.enabled && engine.generationReady !== false) return window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', profile: 'default', template: null });
         helpers.openCreateModal('executive-clean');
         const note = byId('presentation-create-design-note');
-        if (note) { note.textContent = '当前使用标准AI工作台，可正常创建、编辑和导出PPT。独立完整制作服务未连接或暂不可用。'; note.classList.remove('hidden'); }
+        if (note) {
+            note.textContent = '当前使用标准AI工作台，可正常创建、编辑和导出PPT。' +
+                (engine.enabled ? engine.message : '独立完整制作服务未连接或暂不可用。');
+            note.classList.remove('hidden');
+        }
     }
     async function preserve() {
         const { engine } = await helpers.requestJson('/api/apps/presentations/master/info');
-        if (engine.enabled) return window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'edit_native', profile: 'default', template: null });
+        if (engine.enabled && engine.generationReady !== false) return window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'edit_native', profile: 'default', template: null });
         return window.Pivot.moduleApi('apps.presentations.native').open();
     }
     function updateTabs(activeGroup) {
@@ -194,7 +198,9 @@
         }
         if (template.supportedEngines.includes('master')) {
             const button = action(template.ownerType === 'engine' ? '使用此制作模板' : '保留单位模板设计', () => use(template, 'master'), template.ownerType === 'engine');
-            button.disabled = !catalog.engine.enabled; if (button.disabled) button.title = catalog.engine.message; buttons.appendChild(button);
+            button.disabled = !catalog.engine.enabled || catalog.engine.generationReady === false;
+            if (button.disabled) button.title = catalog.engine.generationReady === false ? '请更新独立PPT制作镜像。' : catalog.engine.message;
+            buttons.appendChild(button);
         }
         return buttons;
     }
@@ -209,7 +215,9 @@
         preview.start();
     }
     async function use(template, engine = 'structured', blank = false) {
-        if (engine === 'master' && !catalog.engine.enabled) throw new Error(catalog.engine.message);
+        if (engine === 'master' && (!catalog.engine.enabled || catalog.engine.generationReady === false)) {
+            throw new Error(catalog.engine.generationReady === false ? '请更新独立PPT制作镜像。' : catalog.engine.message);
+        }
         if (state.dirty && !await helpers.flush()) return;
         closeCatalog();
         if (engine === 'master') {

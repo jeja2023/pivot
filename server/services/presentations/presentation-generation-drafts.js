@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 const service = require('./presentation-service');
-const { presentationError } = require('./presentation-schema');
+const { normalizePresentation, presentationError } = require('./presentation-schema');
 const { compilePresentationProposal } = require('./presentation-ai');
 
 function assertDraftId(id) {
@@ -54,30 +54,32 @@ function mergeContent(content, compiled, generation) {
     return { content: { ...content, slides: slides.map((slide, index) => ({ ...slide, index })), sources: [...sources.values()] }, pages };
 }
 
-async function compilePages(accepted, request, options) {
-    const compiled = [], warnings = [];
-    let failure;
-    for (const page of accepted) {
-        try {
-            const title = request.title || request.outline.title;
-            const outlinePosition = Number(page.id.split('_').at(-1)) - 1;
-            const raw = { ...page, layout: page.layout || page.layoutId || (outlinePosition === 0 ? 'cover' : 'content') };
-            const proposal = await compilePresentationProposal(JSON.stringify({ title, slides: [raw] }), {
-                title, templateId: request.templateId, template: request.template, aspectRatio: request.aspectRatio,
-                language: request.language, sources: request.materials, productionProfile: options.productionProfile, outlinePosition
-            });
-            const known = new Set(request.materials.map(source => source.id));
-            const content = proposal.presentation;
-            content.slides = content.slides.map((slide, index) => ({
-                ...slide, id: index === 0 ? page.id : page.id + '_part_' + (index + 1),
-                sourceRefs: (slide.sourceRefs || []).filter(ref => known.has(ref)),
-                elements: slide.elements.map(element => ({ ...element, sourceRefs: (element.sourceRefs || []).filter(ref => known.has(ref)) }))
-            }));
-            warnings.push(...(proposal.warnings || []));
-            compiled.push({ id: page.id, content });
-        } catch (error) { failure ||= error; }
+async function compileGenerationPage(page, confirmed, request, { productionProfile, signal }) {
+    const title = request.title || request.outline.title;
+    const outlinePosition = Number(page.id.split('_').at(-1)) - 1;
+    const raw = { ...page, layout: page.layout || page.layoutId || (outlinePosition === 0 ? 'cover' : 'content') };
+    const proposal = await compilePresentationProposal(JSON.stringify({ title, slides: [raw] }), {
+        title, templateId: request.templateId, template: request.template, aspectRatio: request.aspectRatio,
+        language: request.language, sources: request.materials, productionProfile, outlinePosition, signal
+    });
+    const known = new Set(request.materials.map(source => source.id));
+    const sourceRefs = item => (item.sourceRefs || []).filter(ref => known.has(ref));
+    const content = proposal.presentation;
+    const dataLayout = String(confirmed.layoutHint || confirmed.layout || '').replace(/^design-/, '');
+    const requiredType = dataLayout === 'image-focus' ? 'image' : dataLayout;
+    if (['chart', 'table', 'image'].includes(requiredType)
+        && !content.slides.some(slide => slide.elements.some(element => element.type === requiredType && element.visible && !element.locked))) {
+        throw presentationError('当前页缺少已确认的图表、表格或图片。请根据原材料补齐对应内容。', 422, 'PRESENTATION_GENERATION_REQUIRED_DATA');
     }
-    return { compiled, warnings, failure };
+    if (content.slides.some(slide => slide.elements.some(element => /^content_placeholder(?:_|$)/.test(element.id)))) {
+        throw presentationError('页面未生成有效内容，请按已确认的大纲重新提供。', 422, 'PRESENTATION_GENERATION_EMPTY_PAGE');
+    }
+    content.slides = content.slides.map((slide, index) => ({
+        ...slide, id: index === 0 ? page.id : page.id + '_part_' + (index + 1), sourceRefs: sourceRefs(slide),
+        elements: slide.elements.map(element => ({ ...element, sourceRefs: sourceRefs(element) }))
+    }));
+    const warnings = (proposal.warnings || []).map(warning => warning.replace(/^原第 1 页/, '原第 ' + (outlinePosition + 1) + ' 页'));
+    return { id: page.id, content, warnings };
 }
 
 async function saveGeneratedBatch(user, id, generation, compiled) {
@@ -119,11 +121,13 @@ async function startPlan(user, id, request, roster) {
     return row.generation_json;
 }
 
-async function saveAccepted(user, id, generation, request, accepted, options) {
-    const { compiled, warnings, failure } = await compilePages(accepted, request, options);
-    if (compiled.length) await saveGeneratedBatch(user, id, generation, compiled);
-    if (failure) throw failure;
-    return warnings;
+function assembleGeneratedProposal(roster, outcome, title) {
+    const { compiled, slides, warnings } = outcome;
+    const generation = { roster: roster.map(page => ({ id: page.outlinePageId })), pages: {} };
+    const { content } = mergeContent({ ...compiled[0].content, slides: [], sources: [] }, compiled, generation);
+    if (content.slides.length > 60) throw presentationError('保持可读字号需要超过六十页，请分成多份文稿。', 422, 'PRESENTATION_DESIGN_PAGE_LIMIT');
+    return { title, slides, warnings, presentation: normalizePresentation(content),
+        plannedPages: roster.length, generatedPages: content.slides.length };
 }
 
-module.exports = { startPlan, generationRequest, selectPending, saveAccepted, mergeContent };
+module.exports = { startPlan, generationRequest, selectPending, compileGenerationPage, saveGeneratedBatch, assembleGeneratedProposal, mergeContent };

@@ -3,6 +3,7 @@
 const crypto = require('crypto');
 const { transaction, query, queryOne, execute } = require('../db/client');
 const { estimateTokens, getStoredMessageContextTokens } = require('../llm');
+const { ACTIVE_STATUSES } = require('../services/agent-validators');
 
 function safeJsonParse(value, fallback) {
     if (typeof value !== 'string') return value || fallback;
@@ -27,7 +28,7 @@ async function latestKnowledgeScope(sessionId, userId, beforeMessageId) {
 }
 
 function decisionAudit(value = {}) {
-    const keys = ['version','action','intent','nextAction','reasonCode','failureCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','intentDecisionId','learningDecisionId','learningApplied','durationMs','modelId','modelCalls','policyVersion','structuredOutput','providerAction','contractAdjustments','providerRetries','inputContext','timing','usage','shadow','projectId'];
+    const keys = ['version','action','intent','nextAction','reasonCode','failureCode','requiredCapabilities','evidenceRefs','confidence','continuationOf','conversationTaskId','decisionId','intentDecisionId','learningDecisionId','learningApplied','durationMs','modelId','modelCalls','policyVersion','structuredOutput','providerAction','contractAdjustments','providerRetries','inputContext','failureStage','intentModelId','routingModelSource','timing','usage','shadow','projectId'];
     if (value.knowledgeScope) keys.push('knowledgeScope');
     return Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
 }
@@ -81,10 +82,13 @@ async function replayTurn(turn) {
     return turn.assistant_message_id ? queryOne('SELECT id,content FROM messages WHERE id = ? AND user_id = ? AND deleted_at IS NULL', [turn.assistant_message_id, turn.user_id]) : null;
 }
 
-async function listSessionTasks(sessionId, userId) {
+async function listSessionTasks(sessionId, userId, { activeOnly = false } = {}) {
+    const activeStates = [...ACTIVE_STATUSES];
     return query(`SELECT r.* FROM agent_runs r WHERE r.session_id = ? AND r.user_id = ? AND r.deleted_at IS NULL AND r.metadata->'chatBridge' IS NOT NULL
+        AND (NOT ?::boolean OR r.status = ANY(?::text[]))
         AND NOT EXISTS (SELECT 1 FROM agent_runs c WHERE c.parent_run_id = r.id AND c.user_id = r.user_id AND c.deleted_at IS NULL AND c.metadata->>'resumedFromRunId' = r.id)
-        ORDER BY r.created_at DESC LIMIT 12`, [sessionId, userId]);
+        ORDER BY (r.status = ANY(?::text[])) DESC, r.created_at DESC, r.id DESC LIMIT ?`,
+    [sessionId, userId, activeOnly, activeStates, activeStates, activeOnly ? null : 12]);
 }
 
 async function findTaskContinuation(runId, userId) {

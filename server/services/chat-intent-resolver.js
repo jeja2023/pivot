@@ -4,14 +4,15 @@ const crypto = require('crypto');
 const { callModelJson, recordAgentModelUsage } = require('./agent-model');
 const { classifyChatAutoExecution } = require('./chat-auto-execution');
 const { readTypedEnv } = require('../config/env-registry');
-const { recordDecision } = require('./decision-observability');
+const { createChatIntentAudit } = require('./chat-intent-audit');
+const { getChatIntentConfig, chatIntentApplies } = require('./chat-route-config');
 const { buildDecisionActionCandidate } = require('./decision-action-catalog');
 const { resolveBusinessDecision } = require('./decision-runtime');
 const { isDirectConversation } = require('./chat-capability-decision');
 const { ACTIONS, normalizeIntent } = require('./chat-intent-contract');
 const { buildChatIntentMessages } = require('./chat-intent-prompt');
 const { resolveChatRequestScope, constrainChatDecision } = require('./chat-request-scope');
-const { buildIntentFallback } = require('./chat-intent-fallback');
+const { buildIntentFallback, buildUnappliedIntent } = require('./chat-intent-fallback');
 
 const { createChatIntentBudget } = require('./chat-intent-budget');
 const { buildChatIntentContext } = require('./chat-intent-context');
@@ -31,17 +32,14 @@ async function resolveChatIntent(input, deps = {}) {
     if (requestScope.directSourceAnswer) return constrainChatDecision({ ...baseline, action: 'direct_answer', nextAction: 'direct_answer',
         delegated: false, continuation: false, continuationOf: null, requiredCapabilities: [], modelCalls: 0, reasonCode: 'provided_source_analysis',
         routing: { source: 'semantic_intent', knowledge: 'none', tools: 'none', retrievalQuery: prompt, requestedCapabilities: [], toolNames: [], allowAutomaticRead: false } }, requestScope);
-    const config = deps.config || {
-        mode: readTypedEnv('PIVOT_CHAT_INTENT_MODE'), timeoutMs: readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS'),
-        rolloutPercent: readTypedEnv('PIVOT_CHAT_INTENT_ROLLOUT_PERCENT')
-    };
+    const config = getChatIntentConfig(deps.config);
     if (['control', 'memory'].includes(baseline.action) || isDirectConversation(prompt, { history, tasks, providedSources })) return baseline;
     if (isStandaloneTextDraft(prompt, { history, tasks, providedSources })) return { ...normalizeIntent({ action: 'direct_answer', objective: prompt,
         requiredCapabilities: [], constraints: ['缺少的名称、日期与未提供的业务数值使用占位符，不编造事实。'], routing: { knowledge: 'none', tools: 'none' } },
     { baseline, tasks, history, userMessageId, prompt, requestScope, availability, requireRouting: true }), modelCalls: 0, durationMs: 0, policyVersion: INTENT_POLICY_VERSION,
     reasonCode: 'standalone_text_draft', shadow: false };
-    const bucket = crypto.createHash('sha256').update(`${user.id}:${sessionId}`).digest().readUInt32BE(0) % 100;
-    const explicitTarget = executionAllowed && config.mode === 'active' && bucket < config.rolloutPercent ? explicitContinuationTarget(prompt, tasks) : null;
+    const applied = !input.observeOnly && chatIntentApplies(config, user.id, sessionId);
+    const explicitTarget = executionAllowed && applied ? explicitContinuationTarget(prompt, tasks) : null;
     if (explicitTarget) return { ...normalizeIntent({ action: 'continue_run', objective: Object.keys(explicitTarget.continuationUpdate).length
         ? `继续原任务：${explicitTarget.goal || ''}。本轮更新以当前要求为准：${prompt}` : explicitTarget.goal || prompt, continuationOf: explicitTarget.id,
         businessScope: explicitTarget.continuationUpdate, requiredCapabilities: [], constraints: Object.keys(explicitTarget.continuationUpdate).length ? [prompt] : [],
@@ -51,6 +49,7 @@ async function resolveChatIntent(input, deps = {}) {
     let failure = '';
     const started = Date.now();
     const budget = createChatIntentBudget({ signal, timeoutMs: config.timeoutMs, deadlineAt: input.deadlineAt });
+    const audit = input.intentAudit || createChatIntentAudit({ user, sessionId, enqueueObservation: deps.recordDecision });
     const stats = { modelCalls: 0, structuredOutput: 'none' };
     let routingModel = modelCfg;
     let routingModelSource = 'current';
@@ -68,6 +67,7 @@ async function resolveChatIntent(input, deps = {}) {
     };
     if (input.intentDiagnostics) input.intentDiagnostics.snapshot = timingSnapshot;
     try {
+        if (config.mode !== 'disabled') void audit.resolveTenant().catch(() => {});
         if (config.mode !== 'disabled') {
             try {
                 const context = buildChatIntentContext({ prompt, history, tasks, preferences, providedSources, availability });
@@ -88,7 +88,7 @@ async function resolveChatIntent(input, deps = {}) {
                             const releaseQuota = await (deps.ensureModelQuota || ensureModelQuota)(user, model, quotaMessages, options.maxTokens, { signal: options.signal });
                             usageRef.admittingQuota = false;
                             try {
-                                const output = await (deps.callModelJson || callModelJson)(model, modelMessages, options);
+                                const output = await (deps.callModelJson || callModelJson)(model, modelMessages, { ...options, quotaManaged: true });
                                 if (!deps.callModelJson || deps.recordAgentModelUsage) {
                                     usageRef.recordingUsage = true;
                                     const usageStarted = Date.now();
@@ -141,18 +141,18 @@ async function resolveChatIntent(input, deps = {}) {
             }
         }
         resolved = constrainChatDecision(resolved, requestScope);
-        const applied = config.mode === 'active' && bucket < config.rolloutPercent;
-        let selected = failure || applied ? resolved : { ...baseline, action: baseline.action === 'plan_only' ? 'plan_only' : 'direct_answer', reasonCode: 'intent_shadow' };
+        let selected = applied ? resolved : buildUnappliedIntent(baseline, config.mode);
         if (!executionAllowed && ['agent_run', 'continue_run'].includes(selected.action)) selected = { ...selected, action: 'direct_answer', nextAction: 'direct_answer', delegated: false, continuation: false, continuationOf: null, conversationTaskId: null,
             constraints: [...(selected.constraints || []), '当前任务自动执行未开放，本轮只提供说明，不执行操作。'],
             routing: { ...selected.routing, tools: 'none', allowAutomaticRead: false }, reasonCode: 'execution_not_enabled' };
+        const tenantId = config.mode !== 'disabled' && !budget.signal.aborted ? await budget.run('tenant', () => audit.resolveTenant(), { optional: true, fallback: null, timeoutMs: Math.min(100, budget.remainingMs() / 6) }) : null;
         let learningDecisionId = null;
         let learningApplied = false;
         if (applied && !failure && executionAllowed && (!deps.recordDecision || deps.resolveBusinessDecision)) {
             // 已发布的路由经验只能在语义允许的集合内调整处理方式，不能凭偏好创建
             // 一个语义判断未授权的运行；模型型决策提供器不参与此处的二次推理。
             const candidates = ACTIONS.map(action => buildDecisionActionCandidate('chat.execution', action, { allowed: action === resolved.action || (resolved.delegated && ['direct_answer', 'plan_only'].includes(action)) }));
-            const learned = await budget.run('learning', learningSignal => (deps.resolveBusinessDecision || resolveBusinessDecision)({ scenario: 'chat.execution', user, userId: user.id, tenantId: user.tenant_id || null, sessionId,
+            const learned = await budget.run('learning', learningSignal => (deps.resolveBusinessDecision || resolveBusinessDecision)({ scenario: 'chat.execution', user, userId: user.id, tenantId, sessionId,
                 taskState: { hash: crypto.createHash('sha256').update(prompt).digest('hex'), constraints: resolved.constraints, toolIntent: { requestedCapabilities: resolved.requiredCapabilities } },
                 candidates, fallbackActionId: resolved.action, actionScores: { [resolved.action]: 1 }, baselineVersion: INTENT_POLICY_VERSION, signal: learningSignal }), { optional: true, fallback: null, timeoutMs: Math.min(1000, budget.remainingMs()) }).catch(error => { if (signal?.aborted) throw error; return null; });
             learningDecisionId = learned?.decisionId || null;
@@ -164,16 +164,15 @@ async function resolveChatIntent(input, deps = {}) {
                 && candidates.some(candidate => candidate.id === selected.action && candidate.allowed);
         }
         if (signal?.aborted) throw signal.reason || new Error('意图判断已取消');
-        if (budget.signal.aborted) { failure = 'intent_timeout'; selected = buildIntentFallback(baseline, failure); }
-        const decisionId = `chat_intent_${crypto.randomUUID()}`;
-        (deps.recordDecision || recordDecision)({
-            decisionId, userId: user.id, tenantId: user.tenant_id || null, sessionId,
-            context: { scenario: 'chat.execution', taskState: { hash: crypto.createHash('sha256').update(prompt).digest('hex'), constraints: resolved.constraints, toolIntent: { requestedCapabilities: resolved.requiredCapabilities } }, candidates: ACTIONS.map(action => buildDecisionActionCandidate('chat.execution', action)) },
-            selectedActionId: selected.action,
-            providerOutputs: [{ providerId: 'chat-intent', providerVersion: String(routingModel?.id || ''), selectedActionId: resolved.action, durationMs: Date.now() - started, error: failure, scores: { [resolved.action]: resolved.confidence || 0 },
-                metadata: { failureStage: stats.failureStage || '', timing: timingSnapshot().timing } }],
-            policy: { mode: applied ? 'active' : 'shadow', policyVersion: INTENT_POLICY_VERSION, selectedActionId: selected.action, suggestedActionId: resolved.action, applied, reasonCode: resolved.reasonCode }
-        });
+        if (budget.signal.aborted) {
+            failure = 'intent_timeout';
+            if (applied) selected = buildIntentFallback(baseline, failure);
+        }
+        const decisionId = audit.id;
+        audit.record({ selected, suggested: resolved, applied: applied && !failure, mode: config.mode === 'disabled' ? 'disabled' : applied ? 'active' : 'shadow',
+            failure, failureStage: stats.failureStage, durationMs: Date.now() - started, timing: timingSnapshot().timing, routingModelId: routingModel?.id,
+            policyVersion: INTENT_POLICY_VERSION, taskState: { hash: crypto.createHash('sha256').update(prompt).digest('hex'), constraints: resolved.constraints, toolIntent: { requestedCapabilities: resolved.requiredCapabilities } },
+            candidates: ACTIONS.map(action => buildDecisionActionCandidate('chat.execution', action)) });
         return { ...constrainChatDecision(selected, requestScope), decisionId: learningApplied && !failure ? learningDecisionId : decisionId, intentDecisionId: decisionId, learningDecisionId, learningApplied: learningApplied && !failure, modelCalls: stats.modelCalls, structuredOutput: stats.structuredOutput, contractFailureReason: stats.contractFailureReason || '', durationMs: Date.now() - started,
             providerAction: stats.providerAction || '', contractAdjustments: stats.contractAdjustments || [], providerRetries: stats.providerRetries || 0, contractRetries: stats.contractRetries || 0,
             usage: { inputTokens: stats.inputTokens ?? null, outputTokens: stats.outputTokens ?? null },

@@ -12,7 +12,8 @@ require.cache[modelsPath].exports = { ...models, getModelDailyUsageAsync: async 
 require(forwarderPath);
 require.cache[forwarderPath].exports = { forwardChatCompletion: async input => {
     calls++; outputLimit = input.data.max_tokens;
-    if (behavior) await behavior(input);
+    const response = behavior && await behavior(input);
+    if (response) return response;
     return { data: { choices: [{ message: { content: '受控回答' } }], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } } };
 } };
 require(runtimePath);
@@ -69,6 +70,29 @@ test('明确输出预算不被模型默认值扩大，业务与模型硬上限�
     await run(); assert.equal(outputLimit, 1200);
     await run({ maxOutputTokensCap: 500 }); assert.equal(outputLimit, 500);
     model.max_tokens = 256; await run(); assert.equal(outputLimit, 256);
+});
+
+test('请求 JSON 对象仅在端点明确拒绝时兼容回退，截断仍真实计费', async () => {
+    model.daily_token_limit = 0;
+    model.max_tokens = 8192;
+    used = 0; calls = 0;
+    const sent = [];
+    behavior = async input => {
+        sent.push(input.data.response_format);
+        if (input.data.response_format) throw Object.assign(new Error('unsupported response_format'), { response: { status: 400 } });
+        return { data: { choices: [{ finish_reason: 'length', message: { content: '{"slides":[' } }],
+            usage: { prompt_tokens: 3, completion_tokens: 12, total_tokens: 15 } } };
+    };
+    const result = await run({ jsonObject: true });
+    assert.deepEqual(sent, [{ type: 'json_object' }, undefined]);
+    assert.equal(result.finishReason, 'length');
+    assert.equal(result.truncated, true);
+    assert.equal(result.jsonObjectAccepted, false);
+    assert.equal(used, 15);
+    behavior = async () => { throw Object.assign(new Error('input invalid'), { response: { status: 400 } }); };
+    await assert.rejects(run({ jsonObject: true }), /input invalid/);
+    assert.equal(calls, 3);
+    behavior = null;
 });
 
 test('用量读取期间另一请求结算释放预留，旧快照必须重读再接纳', async () => {

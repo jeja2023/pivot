@@ -278,14 +278,20 @@ window.Pivot.legacy.exportUsers = () => {
 let userRecordsTarget = null;
 let userRecordsEventsBound = false;
 
-function scrollUserRecordsToBottom() {
+function scrollUserRecordsToBottom(isCurrent) {
     const wrapper = document.querySelector('.user-records-table-wrap');
     if (!wrapper) return;
-    const apply = () => { wrapper.scrollTop = wrapper.scrollHeight; };
+    const apply = () => { if (isCurrent()) wrapper.scrollTop = wrapper.scrollHeight; };
     apply();
     requestAnimationFrame(apply);
     setTimeout(apply, 80);
     setTimeout(apply, 240);
+}
+
+async function reloadUserRecords(page) {
+    const target = userRecordsTarget;
+    await window.Pivot.legacy.loadUserRecordSessions();
+    if (target === userRecordsTarget) await window.Pivot.legacy.loadUserRecordMessages(page);
 }
 
 function bindUserRecordsEvents() {
@@ -295,72 +301,88 @@ function bindUserRecordsEvents() {
         pageState.userRecords = 1;
         window.Pivot.legacy.loadUserRecordMessages(1);
     });
-    document.getElementById('user-record-include-deleted')?.addEventListener('change', async () => {
-        await window.Pivot.legacy.loadUserRecordSessions();
-        pageState.userRecords = 1;
-        await window.Pivot.legacy.loadUserRecordMessages(1);
+    document.getElementById('user-record-include-deleted')?.addEventListener('change', () => {
+        return reloadUserRecords(1);
     });
-    document.getElementById('user-record-refresh-btn')?.addEventListener('click', async () => {
-        await window.Pivot.legacy.loadUserRecordSessions();
-        await window.Pivot.legacy.loadUserRecordMessages(pageState.userRecords || 1);
+    document.getElementById('user-record-refresh-btn')?.addEventListener('click', () => {
+        return reloadUserRecords(pageState.userRecords || 1);
     });
+}
+
+function setUserRecordSessionOptions(select, options = '', value = '') {
+    if (!select) return;
+    PivotSafeHtml.setHtml(select, '<option value="">全部会话</option>' + options);
+    select.value = value;
 }
 
 window.Pivot.legacy.openUserRecords = async (user) => {
     if (!isSuperAdminUser()) return showToast('仅 admin 权限层级可查看用户详细记录', 'error');
-    userRecordsTarget = user;
+    userRecordsTarget = { id: user.id, sessionRequest: 0, messageRequest: 0 };
     bindUserRecordsEvents();
     document.getElementById('user-records-title').innerText = `${user.nickname || user.username}（${user.username}）`;
     const includeDeleted = document.getElementById('user-record-include-deleted');
     if (includeDeleted) includeDeleted.checked = true;
+    // 每次打开都回到“全部会话”，避免沿用上一次查看的会话或其他用户的选择。
+    setUserRecordSessionOptions(document.getElementById('user-record-session-select'));
     document.getElementById('user-records-modal').classList.remove('hidden');
-    pageState.userRecords = 1;
-    await window.Pivot.legacy.loadUserRecordSessions();
-    await window.Pivot.legacy.loadUserRecordMessages(1);
+    await Promise.all([window.Pivot.legacy.loadUserRecordSessions(), window.Pivot.legacy.loadUserRecordMessages(1)]);
 };
 
 window.Pivot.legacy.closeUserRecordsModal = () => {
     document.getElementById('user-records-modal')?.classList.add('hidden');
+    setUserRecordSessionOptions(document.getElementById('user-record-session-select'));
     const pagination = document.getElementById('pagination-userRecords');
     if (pagination) PivotSafeHtml.setHtml(pagination, '');
     userRecordsTarget = null;
 };
 
 window.Pivot.legacy.loadUserRecordSessions = async () => {
-    if (!userRecordsTarget) return;
+    const target = userRecordsTarget;
     const select = document.getElementById('user-record-session-select');
-    const includeDeleted = document.getElementById('user-record-include-deleted')?.checked === true;
-    if (!select) return;
+    if (!target || !select) return;
+    const deletedCheckbox = document.getElementById('user-record-include-deleted');
+    const includeDeleted = deletedCheckbox?.checked === true;
+    const request = ++target.sessionRequest;
+    const res = await apiFetch(`${API_BASE}/admin/users/${target.id}/sessions?includeDeleted=${includeDeleted}`, { headers: authHeaders() }).catch(() => null);
+    if (!res?.ok) return;
+    const { data } = await res.json().catch(() => null) || {};
+    if (target !== userRecordsTarget || request !== target.sessionRequest
+        || includeDeleted !== (deletedCheckbox?.checked === true) || !Array.isArray(data)) return;
     const previous = select.value;
-    const res = await apiFetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/sessions?includeDeleted=${includeDeleted}`, { headers: authHeaders() });
-    const { data = [] } = await res.json();
-    PivotSafeHtml.setHtml(select, '<option value="">全部会话</option>' + data.map(s => {
+    const options = data.map(s => {
         const title = escapeHtml(s.title || '未命名会话');
         const deleted = s.deleted_at ? '（已删除）' : '';
         const msgCount = Number(s.msg_count || 0);
         return `<option value="${escapeHtml(s.id)}">${title}${deleted} - ${msgCount} 条</option>`;
-    }).join(''));
-    if (previous && data.some(s => String(s.id) === previous)) select.value = previous;
+    }).join('');
+    setUserRecordSessionOptions(select, options, data.some(s => String(s.id) === previous) ? previous : '');
 };
 
 window.Pivot.legacy.loadUserRecordMessages = async (page = 1) => {
-    if (!userRecordsTarget) return;
-    pageState.userRecords = page;
+    const target = userRecordsTarget;
     const body = document.getElementById('user-records-body');
-    const sessionId = document.getElementById('user-record-session-select')?.value || '';
-    const includeDeleted = document.getElementById('user-record-include-deleted')?.checked === true;
-    if (!body) return;
+    if (!target || !body) return;
+    const select = document.getElementById('user-record-session-select');
+    const deletedCheckbox = document.getElementById('user-record-include-deleted');
+    const sessionId = select?.value || '';
+    const includeDeleted = deletedCheckbox?.checked === true;
+    const request = ++target.messageRequest;
+    const isCurrent = () => target === userRecordsTarget && request === target.messageRequest
+        && sessionId === (select?.value || '') && includeDeleted === (deletedCheckbox?.checked === true);
+    pageState.userRecords = page;
     renderTableMessage(body, 7, '正在加载记录...');
     const limit = pageState.limit || 15;
     const params = new URLSearchParams({ includeDeleted: String(includeDeleted), page, limit });
     if (sessionId) params.set('sessionId', sessionId);
-    const res = await apiFetch(`${API_BASE}/admin/users/${userRecordsTarget.id}/messages?${params.toString()}`, { headers: authHeaders() });
-    const { data = [], total = 0 } = await res.json();
-    if (!res.ok) {
+    const res = await apiFetch(`${API_BASE}/admin/users/${target.id}/messages?${params.toString()}`, { headers: authHeaders() }).catch(() => null);
+    const result = res?.ok ? await res.json().catch(() => null) : null;
+    if (!isCurrent()) return;
+    if (!Array.isArray(result?.data)) {
         renderTableMessage(body, 7, '记录加载失败');
         renderPagination('userRecords', 0, 1);
         return;
     }
+    const { data = [], total = 0 } = result;
     if (!data.length) {
         renderTableMessage(body, 7, '暂无输入输出记录');
         renderPagination('userRecords', total, page);
@@ -387,7 +409,7 @@ window.Pivot.legacy.loadUserRecordMessages = async (page = 1) => {
         `;
     }).join(''));
     renderPagination('userRecords', total, page);
-    if (sessionId) scrollUserRecordsToBottom();
+    if (sessionId) scrollUserRecordsToBottom(isCurrent);
 };
 
 window.Pivot.legacy.importUsers = async () => {

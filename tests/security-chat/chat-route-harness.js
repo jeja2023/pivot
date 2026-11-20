@@ -300,5 +300,6 @@ module.exports = {
     postChat,
     readSessionMessages,
     startChatRouteServer,
-    startFakeUpstream
+    startFakeUpstream,
+    writeSseChunks
 };

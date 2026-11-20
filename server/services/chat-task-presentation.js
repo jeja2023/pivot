@@ -87,7 +87,7 @@ function approvalSummary(pending) {
     if (Array.isArray(input.args)) fields.push({ label: '命令参数', value: `共 ${input.args.length} 项，完整内容可在任务详情中查看` });
     return { title: value.tool !== 'terminal.runtime' && /[\u3400-\u9fff]/.test(String(value.title || '')) ? safeTaskText(value.title, 80) : toolLabel(value.tool, input), location: executionLocation(value.tool), fields,
         requestedAt: value.requestedAt || null, expiresAt: value.expiresAt || null,
-        binding: { inputHash: String(value.inputHash || ''), key: String(value.key || ''), requestedAt: value.requestedAt || '' } };
+        binding: { inputHash: String(value.inputHash || require('./agent-approval-grants').approvalInputHash(input)), key: String(value.key || ''), requestedAt: value.requestedAt || '' } };
 }
 
 function presentTaskEvent(row) {

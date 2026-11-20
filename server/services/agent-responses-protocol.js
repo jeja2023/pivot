@@ -1,6 +1,6 @@
 'use strict';
 
-const { buildResponsesUrl } = require('./model-adapter');
+const { buildResponsesUrl, isDeepSeekApi } = require('./model-adapter');
 const { createModelToolProtocol } = require('./model-tool-protocol');
 const { toProviderInput } = require('./agent-provider-envelope');
 const reasoningByCalls = new WeakMap();
@@ -44,6 +44,7 @@ function responsesRequest(model, messages, tools, options = {}) {
     if (tools.length) data.tools = tools.map(tool => ({ type: 'function', name: protocol.name(tool.name), description: tool.description || tool.title || '', parameters: tool.input_schema || { type: 'object', properties: {} }, strict: false }));
     if (options.toolChoice) data.tool_choice = typeof options.toolChoice === 'string' ? options.toolChoice : { type: 'function', name: protocol.name(options.toolChoice.function?.name) };
     if (options.responseFormat) data.text = { format: options.responseFormat.type === 'json_schema' ? { type: 'json_schema', ...options.responseFormat.json_schema } : options.responseFormat };
+    if (options.enableThinking === false && isDeepSeekApi(model.url)) data.reasoning = { effort: 'none' };
     return { url: /\/responses\/?$/.test(new URL(model.url).pathname) ? model.url : buildResponsesUrl(model.url, { appendV1ForLocal: false }), data, protocol };
 }
 

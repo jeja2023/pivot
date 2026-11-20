@@ -20,6 +20,7 @@ async function getRunOverview(run, user, deps = {}) {
         evidence: [], transactions, workingMemoryRevisions: [], promptInvocations: [], browserActionEvidence: [], browserSessions: [],
         progress: require('./agent-round-progress').buildRunProgress(run, result.steps),
         detailLevel: 'overview', diagnosticsDeferred: true,
+        approval: run.status === 'approval_required' ? require('./chat-task-presentation').approvalSummary(metadata.pendingApproval) : null,
         taskContract: metadata.taskContract || null,
         warnings: [{ code: 'DIAGNOSTICS_DEFERRED', message: '已加载任务与最近执行记录；完整日志及诊断可按需加载。' }] };
 }

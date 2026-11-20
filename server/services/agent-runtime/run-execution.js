@@ -10,6 +10,7 @@ const { createAgentRunErrorHandler } = require('./run-error-handler');
 const { createRunPreparation } = require('./run-preparation');
 const { createRunBudgetGuard, createRemainingModelRequestMs, createRunDeadlineTimer } = require('./run-budget-guard');
 const { createRunFinalizer } = require('./run-finalizer');
+const { createFinalAnswerEscalator } = require('./model-escalation');
 const { executeAutomaticModelFailover } = require('./model-failover');
 const { recordPlannerModelEvent } = require('./planning-lifecycle');
 const { resolveApprovalKey } = require('../agent-approval-grants');
@@ -157,91 +158,7 @@ const {
         taskBudgetsBySignal.set(runController.signal, taskBudget);
         deadlineTimer = createRunDeadlineTimer({ deadline, runController });
         const dagRun = normalizeRunMode(run.run_mode) === 'dag';
-        const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
-        if (!initialModelCfg && !dagRun) throw new Error('当前智能体运行无可用的模型端点。');
-        // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
-        let modelCfg = initialModelCfg;
-        modelCfgForSummary = modelCfg;
-        const routerStrategy = normalizeRouterStrategy(run.model_router);
-        if (initialModelCfg && routerStrategy !== 'fixed') {
-            try {
-                const routed = await chooseModel({
-                    user,
-                    strategy: routerStrategy,
-                    hintModelId: run.model_id,
-                    messages: [{ role: 'user', content: run.goal || '' }],
-                    endpointStatusGetter: getModelEndpointRuntimeStatus,
-                    taskType: inferTaskType(run)
-                });
-                if (!routed?.model) {
-                    const error = new Error(routed?.reason || '没有满足当前任务能力与上下文要求的可用模型。');
-                    error.code = 'MODEL_ROUTER_NO_COMPATIBLE_MODEL';
-                    throw error;
-                }
-                if (routed && routed.model && routed.model.id !== initialModelCfg.id) {
-                    modelCfg = routed.model;
-                    modelCfgForSummary = modelCfg;
-                    await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
-                        modelCfg.id, getBeijingTimestamp(), runId
-                    ]);
-                    await insertStep(runId, (await listSteps(runId)).length + 1, {
-                        type: 'control',
-                        title: `模型路由选择：${routerStrategy}`,
-                        output: {
-                            strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
-                            reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
-                        }
-                    });
-                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
-                }
-                await recordAgentTraceSpan(runId, {
-                    type: 'routing',
-                    name: '模型路由',
-                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
-                    output: {
-                        chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
-                        reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
-                    },
-                    details: { strategy: routerStrategy, taskType: inferTaskType(run) }
-                });
-            } catch (routerErr) {
-                // “没有兼容模型”不是路由器暂时故障；继续使用原模型会把包含
-                // 图片或超长上下文的任务发送给明确不兼容的端点。
-                if (routerErr?.code === 'MODEL_ROUTER_NO_COMPATIBLE_MODEL') throw routerErr;
-                await recordAgentTraceSpan(runId, {
-                    type: 'routing',
-                    name: '模型路由',
-                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg.id },
-                    status: 'error',
-                    errorMessage: routerErr.message
-                });
-                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，已使用原始模型');
-            }
-        }
-
-        if (!dagRun && modelCfg) {
-            await updateRun(runId, { chosen_model_id: modelCfg.id });
-            run.chosen_model_id = modelCfg.id;
-            run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
-        }
-        modelCfgForSummary = modelCfg;
         let runtimeMetadata = getRunMetadata(run);
-        if (runtimeMetadata.chatBridge?.executionProfile === 'knowledge_qa') {
-            modelCfg = { ...modelCfg, max_input_tokens: Math.min(Number(modelCfg.max_input_tokens) > 0 ? Number(modelCfg.max_input_tokens) : Infinity, 24576) };
-            modelCfgForSummary = modelCfg;
-        }
-        const {
-            longTermMemoryContext,
-            recordActualMemoryUsage,
-            recordPlannerMemoryUsage
-        } = await resolveRunLongTermMemory({
-            run,
-            user,
-            modelCfg,
-            contextConfig: parseJsonObject(run.context_config) || {},
-            logger
-        });
-        runtimeMetadata = getRunMetadata(run);
         let plannerChatHistory = Array.isArray(runtimeMetadata.chatHistory) ? runtimeMetadata.chatHistory : [];
         let plannerCurrentMessage = runtimeMetadata.chatBridge?.currentMessage || null;
         if (runtimeMetadata.chatBridge && run.session_id && user?.id) {
@@ -262,6 +179,94 @@ const {
                 logger.warn({ runId, err: error.message }, '普通聊天 Agent 图片上下文转换失败，已使用文本上下文');
             }
         }
+        const initialModelCfg = await getRunnableModelForUserAsync(run.model_id, user);
+        // run.model_router 控制初始模型是固定使用、预先路由，还是后续升级。
+        let modelCfg = initialModelCfg;
+        modelCfgForSummary = modelCfg;
+        const routerStrategy = normalizeRouterStrategy(run.model_router);
+        if (routerStrategy !== 'fixed' && (initialModelCfg || !dagRun)) {
+            try {
+                const routed = await chooseModel({
+                    user,
+                    strategy: routerStrategy,
+                    hintModelId: run.model_id,
+                    messages: buildPlannerMessages(run.goal, [], [], run.run_mode, {
+                        ...preparation.buildPlannerContext({ chatBridge: runtimeMetadata.chatBridge, plannerChatHistory, plannerCurrentMessage,
+                            longTermMemoryContext: runtimeMetadata.chatBridge?.memoryContext, runtimeMetadata, taskWorkingState: runtimeMetadata.workingState }),
+                        ...parseJsonObject(run.context_config)
+                    }),
+                    endpointStatusGetter: getModelEndpointRuntimeStatus,
+                    taskType: inferTaskType(run)
+                });
+                if (!routed?.model) {
+                    const error = new Error(routed?.reason || '没有满足当前任务能力与上下文要求的可用模型。');
+                    error.code = 'MODEL_ROUTER_NO_COMPATIBLE_MODEL';
+                    throw error;
+                }
+                if (routed.model.id !== initialModelCfg?.id || initialModelCfg?.secret_error) {
+                    modelCfg = routed.model;
+                    modelCfgForSummary = modelCfg;
+                    await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
+                        modelCfg.id, getBeijingTimestamp(), runId
+                    ]);
+                    await insertStep(runId, (await listSteps(runId)).length + 1, {
+                        type: 'control',
+                        title: `模型路由选择：${routerStrategy}`,
+                        output: {
+                            strategy: routerStrategy, chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
+                            reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
+                        }
+                    });
+                    logger.info({ runId, strategy: routerStrategy, originalModelId: initialModelCfg?.id, chosenModelId: modelCfg.id, reason: routed.reason }, '智能体模型路由已选择模型');
+                }
+                await recordAgentTraceSpan(runId, {
+                    type: 'routing',
+                    name: '模型路由',
+                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg?.id },
+                    output: {
+                        chosenModelId: modelCfg.id, chosenModelName: modelCfg.name || modelCfg.model_name || '',
+                        reason: routed.reason || '', candidatesCount: routed.candidatesCount || 0, qualityProfile: routed.qualityProfile || null
+                    },
+                    details: { strategy: routerStrategy, taskType: inferTaskType(run) }
+                });
+            } catch (routerErr) {
+                // “没有兼容模型”不是路由器暂时故障；继续使用原模型会把包含
+                // 图片或超长上下文的任务发送给明确不兼容的端点。
+                if (routerErr?.code === 'MODEL_ROUTER_NO_COMPATIBLE_MODEL') throw routerErr;
+                await recordAgentTraceSpan(runId, {
+                    type: 'routing',
+                    name: '模型路由',
+                    input: { strategy: routerStrategy, requestedModelId: initialModelCfg?.id },
+                    status: 'error',
+                    errorMessage: routerErr.message
+                });
+                logger.warn({ runId, err: routerErr.message }, '智能体模型路由失败，已使用原始模型');
+            }
+        }
+
+        if (!dagRun && (!modelCfg || modelCfg.secret_error)) throw new Error(modelCfg?.secret_error || '当前智能体运行无可用的模型端点。');
+        if (!dagRun && modelCfg) {
+            await updateRun(runId, { chosen_model_id: modelCfg.id });
+            run.chosen_model_id = modelCfg.id;
+            run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
+        }
+        modelCfgForSummary = modelCfg;
+        if (runtimeMetadata.chatBridge?.executionProfile === 'knowledge_qa') {
+            modelCfg = { ...modelCfg, max_input_tokens: Math.min(Number(modelCfg.max_input_tokens) > 0 ? Number(modelCfg.max_input_tokens) : Infinity, 24576) };
+            modelCfgForSummary = modelCfg;
+        }
+        const {
+            longTermMemoryContext,
+            recordActualMemoryUsage,
+            recordPlannerMemoryUsage
+        } = await resolveRunLongTermMemory({
+            run,
+            user,
+            modelCfg,
+            contextConfig: parseJsonObject(run.context_config) || {},
+            logger
+        });
+        runtimeMetadata = getRunMetadata(run);
         const resumeContext = await require('./resume-observations').resolveResumeObservations(run, runtimeMetadata, buildAgentResumeContext);
         observations = [
             ...(Array.isArray(resumeContext.observations) ? resumeContext.observations : []),
@@ -301,6 +306,9 @@ const {
             chatBridge, plannerChatHistory, plannerCurrentMessage, longTermMemoryContext, runtimeMetadata, taskWorkingState
         });
         plannerChatContext.goalContext = await require('../agent-goal-context').resolveGoalRunContext(run, user);
+        const escalateAnswer = routerStrategy === 'auto-escalate' ? createFinalAnswerEscalator({ run, user, budget: taskBudget, signal: runController.signal,
+            assessConfidence, pickEscalationModel, endpointStatusGetter: getModelEndpointRuntimeStatus, synthesizeFinalAnswer,
+            withTimeout, remainingModelRequestMs, assertRunNotCancelled, recordAgentTraceSpan, logger, minOutputTokens: AGENT_ANSWER_MIN_MAX_TOKENS }) : null;
         const verifyOutcome = preparation.createOutcomeVerifier({
             runId, run, user, getTaskContract: () => taskContract, getObservations: () => observations, signal: runController.signal, budget: taskBudget
         });
@@ -354,7 +362,8 @@ const {
                 assertRunNotCancelled,
                 observations,
                 taskTransactionId,
-                chatContext: plannerChatContext
+                chatContext: plannerChatContext,
+                escalateAnswer
             }, streamingDeps);
             if (streamingResult?.completed) return;
             roundsUsed = Math.max(Number(streamingResult?.roundsUsed || 0), roundsUsed, 0);
@@ -545,7 +554,7 @@ const {
                     budget: taskBudget,
                     user,
                     signal,
-                    usageRef,
+                    usageRef, source: 'agent_planner',
                     minMaxTokens: AGENT_ANSWER_MIN_MAX_TOKENS,
                     enableThinking: resolveAgentPlanningThinking(modelCfg),
                     timeoutMs: modelRequestTimeoutMs
@@ -579,7 +588,7 @@ const {
                     error: plannerError,
                     user,
                     currentModel: modelCfg,
-                    messages: plannerMessages,
+                    messages: plannerMessages, budget: taskBudget,
                     endpointStatusGetter: getModelEndpointRuntimeStatus,
                     isRecoverableModelProviderFailure,
                     modelProviderFailureReason,
@@ -666,7 +675,9 @@ const {
                 await assertRunNotCancelled(runId);
                 await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
                 await updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
-                const verification = await verifyOutcome(answer, false, '', { allowed: true, remainingSteps: sliceEndStep - step });
+                const upgraded = await escalateAnswer?.({ answer, finishReason: plannedTextUsageRef?.finishReason, modelCfg, observations, context: plannerChatContext, plannedKnowledgeRevision });
+                answer = upgraded?.answer || answer;
+                const verification = await verifyOutcome(answer, false, '', { allowed: true, remainingSteps: sliceEndStep - step }, upgraded?.model);
                 answer = require('../knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
@@ -695,6 +706,7 @@ const {
                 await updateRun(runId, {
                     status: finalStatus,
                     final_answer: answer,
+                    ...(upgraded ? { chosen_model_id: upgraded.model.id } : {}),
                     error_message: verificationError,
                     ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
                     last_heartbeat_at: getBeijingTimestamp(),
@@ -926,54 +938,17 @@ const {
             });
             throw summaryError;
         }
-        // v0.0.50 自动升级逻辑会在置信度较低时用更强模型重试最终总结。
-        if (routerStrategy === 'auto-escalate') {
-            const confidence = assessConfidence({ output: answer });
-            if (!confidence.confident) {
-                try {
-                    const escalation = await pickEscalationModel({
-                        user,
-                        currentModel: modelCfg,
-                        messages: [{ role: 'user', content: run.goal || '' }],
-                        endpointStatusGetter: getModelEndpointRuntimeStatus,
-                        taskType: require('../agent-model-quality').inferTaskType(run)
-                    });
-                    if (escalation) {
-                        await insertStep(runId, (await listSteps(runId)).length + 1, {
-                            type: 'control',
-                            title: '模型自动升级：auto-escalate',
-                            output: { reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id, toModelName: escalation.name || escalation.model_name || '' }
-                        });
-                        logger.info({ runId, reason: confidence.reason, fromModelId: modelCfg.id, toModelId: escalation.id }, '智能体置信度较低，正在升级模型');
-                        modelCfg = escalation;
-                        modelCfgForSummary = modelCfg;
-                        run.chosen_model_id = modelCfg.id;
-                        run.executionModelIdentity = require('../agent-model-quality').modelQualityIdentity(modelCfg);
-                        await execute('UPDATE agent_runs SET chosen_model_id = ?, updated_at = ? WHERE id = ?', [
-                            modelCfg.id, getBeijingTimestamp(), runId
-                        ]);
-                        const escalatedSummaryTimeoutMs = remainingModelRequestMs();
-                        answer = await withTimeout(signal => synthesizeFinalAnswer(modelCfg, run.goal, observations, user, runId, {
-                            signal,
-                            budget: taskBudget,
-                            allowBudgetExceeded: true,
-                            timeoutMs: escalatedSummaryTimeoutMs,
-                            ...plannerChatContext
-                        }), escalatedSummaryTimeoutMs, 'escalated final summary', { signal: runController.signal });
-                    }
-                } catch (escErr) {
-                    logger.warn({ runId, err: escErr.message }, '自动升级失败，保留首次回答');
-                }
-            }
-        }
+        const upgraded = await escalateAnswer?.({ answer, modelCfg, observations, context: plannerChatContext, plannedKnowledgeRevision: knowledgeScopeRevision(run) });
+        answer = upgraded?.answer || answer;
         await assertRunNotCancelled(runId);
         answer = `注意：${limitMessage}\n\n${answer}`;
-        const partialVerification = await verifyOutcome(answer, true, limitMessage);
+        const partialVerification = await verifyOutcome(answer, true, limitMessage, null, upgraded?.model);
         answer = require('../knowledge-output-guard').safeFinalAnswer(answer, partialVerification);
         await require('../agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
         await updateRun(runId, {
             status: 'completed_with_errors',
             final_answer: answer,
+            ...(upgraded ? { chosen_model_id: upgraded.model.id } : {}),
             error_message: limitMessage,
             completed_at: getBeijingTimestamp(),
             last_heartbeat_at: getBeijingTimestamp(),
@@ -982,7 +957,7 @@ const {
         await createAgentNotification(user.id, runId, 'warning', '任务达到执行轮次上限', limitMessage);
     } catch (e) {
         await handleAgentRunError(e, {
-            runId, user, runForSummary, modelCfgForSummary, observations, taskBudget,
+            runId, user, runForSummary, modelCfgForSummary, observations, taskBudget, signal: runController.signal,
             markExecutionLeaseLost: () => { lostExecutionLease = true; }
         });
 

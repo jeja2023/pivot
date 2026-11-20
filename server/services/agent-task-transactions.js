@@ -163,14 +163,14 @@ function createTaskTransactionStore(deps = {}) {
         }
     }
 
-    async function createTaskTransaction({ run = {}, user = {}, taskContract = null, workspaceSnapshot = {}, effects = [] } = {}) {
+    async function createTaskTransaction({ run = {}, user = {}, taskContract = null, workspaceSnapshot = {}, effects = [] } = {}, executor = null) {
         const draft = createTaskTransactionDraft({
             runId: run.id,
             userId: user.id ?? run.user_id,
             tenantId: run.tenant_id ?? user.tenant_id ?? user.tenantId ?? 0,
             goal: run.goal || '', taskContract, workspaceSnapshot, effects
         });
-        return await runTransaction(async trx => {
+        const create = async trx => {
             const runRow = await trx.queryOne('SELECT id, user_id FROM agent_runs WHERE id = ? AND user_id = ? FOR UPDATE', [draft.runId, draft.userId]);
             if (!runRow) throw transactionNotFound();
             const timestamp = now();
@@ -191,12 +191,14 @@ function createTaskTransactionStore(deps = {}) {
             assertTransactionTransition('draft', 'planned');
             await trx.execute("UPDATE agent_task_transactions SET status = 'planned', updated_at = ? WHERE id = ?", [timestamp, draft.id]);
             return await loadTransaction(trx, draft.id, draft.userId, false);
-        });
+        };
+        return await (executor ? create(executor) : runTransaction(create));
     }
 
-    async function getTaskTransactionForUser(id, user) {
+    async function getTaskTransactionForUser(id, user, executor = null) {
         if (!id || !user?.id) return null;
-        return await runTransaction(async trx => await loadTransaction(trx, String(id), user.id, false));
+        const load = trx => loadTransaction(trx, String(id), user.id, false);
+        return await (executor ? load(executor) : runTransaction(load));
     }
 
     async function listTaskTransactionsForRun(runId, user, { limit = 20 } = {}) {
@@ -422,8 +424,8 @@ function createTaskTransactionStore(deps = {}) {
         });
     }
 
-    async function recordTaskTransactionVerification(transactionId, user, verification) {
-        return await runTransaction(async trx => {
+    async function recordTaskTransactionVerification(transactionId, user, verification, executor = null) {
+        const persistTaskVerification = async trx => {
             const current = await loadTransaction(trx, String(transactionId), user?.id, true);
             if (!current) throw transactionNotFound();
             if (!['executing', 'verifying'].includes(current.status)) {
@@ -445,13 +447,15 @@ function createTaskTransactionStore(deps = {}) {
             `, [target, JSON.stringify(report), timestamp, timestamp, target === 'awaiting_commit' ? '' : text(report.reason || `验收结果：${outcome}`, 4000), current.id]);
             if (target !== 'awaiting_commit') await releaseLeases(trx, current.id, { now: timestamp });
             return await loadTransaction(trx, current.id, user.id, false);
-        });
+        };
+        return await (executor ? persistTaskVerification(executor) : runTransaction(persistTaskVerification));
     }
 
     async function commitTaskTransaction(transactionId, user, commitEvidence = {}, options = {}) {
-        return await runTransaction(async trx => {
+        const sealTaskCommit = async trx => {
             const current = await loadTransaction(trx, String(transactionId), user?.id, true);
             if (!current) throw transactionNotFound();
+            if (current.status === 'committed' && options.requireRunAwaitingCommit === true) return current;
             await assertTaskRunAvailable(trx, current, { requireAwaitingCommit: options.requireRunAwaitingCommit === true });
             assertCommitReady({ ...current, status: current.status }, current.effects, current.verification);
             const timestamp = now();
@@ -464,7 +468,8 @@ function createTaskTransactionStore(deps = {}) {
             `, [JSON.stringify(jsonObject(commitEvidence)), timestamp, timestamp, current.id]);
             await releaseLeases(trx, current.id, { now: timestamp });
             return await loadTransaction(trx, current.id, user.id, false);
-        });
+        };
+        return await (options.executor ? sealTaskCommit(options.executor) : runTransaction(sealTaskCommit));
     }
 
     async function beginTaskCompensation(transactionId, user, reason = '') {

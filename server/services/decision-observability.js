@@ -47,7 +47,7 @@ function serializeProviderOutputs(outputs = []) {
             model: safeText(output?.metadata?.model, 128),
             configurationVersion: safeText(output?.metadata?.configurationVersion, 128),
             failureStage: safeText(output?.metadata?.failureStage, 40),
-            timing: Object.fromEntries(['modelMs', 'queueMs', 'providerMs', 'usageMs', 'learningMs'].filter(key => Number.isFinite(output?.metadata?.timing?.[key]))
+            timing: Object.fromEntries(['modelMs', 'queueMs', 'providerMs', 'usageMs', 'learningMs', 'historyMs', 'tasksMs'].filter(key => Number.isFinite(output?.metadata?.timing?.[key]))
                 .map(key => [key, Math.max(0, Math.round(output.metadata.timing[key]))]))
         }
     }));
@@ -73,11 +73,12 @@ function serializeDecision(value = {}) {
     const context = sanitizeDecisionContext(value.context || value);
     const decisionId = safeText(value.decisionId || context.decisionId, 128);
     if (!decisionId) return null;
+    const tenantId = Number(value.tenantId ?? context.tenantId);
     const now = value.createdAt || getBeijingTimestamp();
     return {
         decisionId,
         scenario: context.scenario,
-        tenantId: Number.isSafeInteger(Number(value.tenantId ?? context.tenantId)) ? Number(value.tenantId ?? context.tenantId) : null,
+        tenantId: Number.isSafeInteger(tenantId) && tenantId > 0 ? tenantId : null,
         userId: Number.isSafeInteger(Number(value.userId)) ? Number(value.userId) : null,
         sessionId: safeText(value.sessionId, 128),
         requestState: { ...context.requestState, language: context.language },

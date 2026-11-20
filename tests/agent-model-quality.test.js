@@ -43,7 +43,7 @@ test('自动模型路由同时满足视觉能力和输入窗口，不因成本�
     const candidates = [
         { id: 1, name: '文本低价', supports_vision: false, max_input_tokens: 8000, input_price_per_million: 1, output_price_per_million: 1 },
         { id: 2, name: '视觉小窗口', supports_vision: true, max_input_tokens: 1000, input_price_per_million: 2, output_price_per_million: 1 },
-        { id: 3, name: '视觉大窗口', supports_vision: true, max_input_tokens: 3000, input_price_per_million: 3, output_price_per_million: 1 }
+        { id: 3, name: '视觉大窗口', supports_vision: true, max_input_tokens: 4000, input_price_per_million: 3, output_price_per_million: 1 }
     ];
     const imageMessage = [{
         role: 'user',

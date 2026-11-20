@@ -119,8 +119,8 @@ function outboundInteractionForProvider(interaction = {}) {
     return safe;
 }
 
-async function enqueueChannelDelivery(user, input = {}) {
-    const binding = await queryOne("SELECT * FROM agent_channel_bindings WHERE id = ? AND user_id = ? AND status = 'active'", [String(input.bindingId || ''), user.id]);
+async function enqueueChannelDelivery(user, input = {}, executor = { queryOne }) {
+    const binding = await executor.queryOne("SELECT * FROM agent_channel_bindings WHERE id = ? AND user_id = ? AND status = 'active'", [String(input.bindingId || ''), user.id]);
     if (!binding) return null;
     if (input.interaction?.analysisSource) await require('./data-analysis/bi/tools').assertModelDelivery({ sender: user, runId: input.interaction.analysisSource.runId, recipientUserIds: input.interaction.analysisSource.recipientUserIds, channelType: binding.channel_type });
     const bindingConfig = parseJson(binding.config, {});
@@ -147,8 +147,8 @@ async function enqueueChannelDelivery(user, input = {}) {
         ...(input.runId ? { runId: String(input.runId).slice(0, 128) } : {}),
         ...(boundPlatform ? { platform: boundPlatform } : {})
     };
-    const row = await queryOne(`INSERT INTO agent_channel_deliveries (binding_id, user_id, tenant_id, idempotency_key, event_type, subject, body, attachments, interaction, status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?) ON CONFLICT(binding_id, idempotency_key) DO UPDATE SET updated_at = agent_channel_deliveries.updated_at RETURNING id`, [binding.id, user.id, binding.tenant_id || user.tenant_id || input.tenantId || null, key, String(input.eventType || 'agent.event').slice(0, 80), String(input.subject || '').slice(0, 255), String(input.body || '').slice(0, MAX_BODY_CHARS), JSON.stringify(attachments), JSON.stringify(interaction), now, now, now]);
-    const delivery = await queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [row?.id]);
+    const row = await executor.queryOne(`INSERT INTO agent_channel_deliveries (binding_id, user_id, tenant_id, idempotency_key, event_type, subject, body, attachments, interaction, status, attempts, next_attempt_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?) ON CONFLICT(binding_id, idempotency_key) DO UPDATE SET updated_at = agent_channel_deliveries.updated_at RETURNING id`, [binding.id, user.id, binding.tenant_id || user.tenant_id || input.tenantId || null, key, String(input.eventType || 'agent.event').slice(0, 80), String(input.subject || '').slice(0, 255), String(input.body || '').slice(0, MAX_BODY_CHARS), JSON.stringify(attachments), JSON.stringify(interaction), now, now, now]);
+    const delivery = await executor.queryOne('SELECT * FROM agent_channel_deliveries WHERE id = ?', [row?.id]);
     if (delivery) delivery.bindingPlatform = boundPlatform;
     return delivery;
 }

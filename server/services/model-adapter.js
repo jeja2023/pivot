@@ -92,7 +92,12 @@ function convertChatMessagesToResponsesInput(messages = []) {
     });
 }
 
+function isDeepSeekApi(value) {
+    try { return new URL(value).hostname === 'api.deepseek.com'; } catch (_) { return false; }
+}
+
 module.exports = {
+    isDeepSeekApi,
     buildChatCompletionsUrl,
     buildModelHeaders,
     buildResponsesUrl,

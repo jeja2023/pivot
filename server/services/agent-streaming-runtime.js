@@ -16,6 +16,7 @@ const {
     recordNativeToolCallCapability,
     shouldUseNativeToolCalls
 } = require('./model-tool-call-capabilities');
+const { answerVerificationRun } = require('./agent-runtime/model-escalation');
 const { verifyTaskOutcome, taskVerificationFailureMessage } = require('./agent-verification');
 const { recordPlannerModelEvent } = require('./agent-runtime/planning-lifecycle');
 const { observationMessages } = require('./agent-runtime/planner');
@@ -107,7 +108,7 @@ function isStreamingToolsEnabled(modelCfg = {}, env = process.env) {
 
 // 流式模式会把 Agent 工具转换成 OpenAI tools 格式，供 tool_calls 直接调用。
 // 如果流式调用没有完成整次运行，返回 { completed: false }，交给 JSON 规划器兜底。
-async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, planningDeadline = deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {} }, deps) {
+async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerToolList = toolList, toolDiscoveryState = null, plannerToolNames = null, runId, deadline, planningDeadline = deadline, assertRunWithinBudget, assertRunNotCancelled, observations, taskTransactionId = '', chatContext = {}, escalateAnswer = null }, deps) {
     let roundsUsed = 0;
     let finalizingAnswer = false;
     try {
@@ -118,9 +119,9 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
         const recordUsage = deps.recordAgentModelUsage || recordAgentModelUsage;
         const recordToolCallCapability = deps.recordNativeToolCallCapability || recordNativeToolCallCapability;
         const taskBudget = deps.taskBudget || null;
-        const verifyOutcome = async (answer, partial = false, reason = '', repairOptions = null) => {
+        const verifyOutcome = async (answer, partial = false, reason = '', repairOptions = null, answerModel = null) => {
             const verify = deps.verifyAgentOutcome || (options => verifyTaskOutcome(options));
-            const operation = () => verify({ runId, run, user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget, repairOptions });
+            const operation = () => verify({ runId, run: answerVerificationRun(run, answerModel), user, answer, observations, partial, reason, signal: deps.signal, budget: taskBudget, repairOptions });
             return taskBudget?.withFinalization ? await taskBudget.withFinalization(operation) : await operation();
         };
         const tools = buildAgentToolSchemas(plannerToolList);
@@ -338,6 +339,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 if (!sharedSnapshots.publishesLocally()) deps.publishUserEvent(user.id, 'agent.streaming', visibleSnapshot, { crossNode: false });
             };
             let result;
+            const streamingUsageRef = {};
             let usageResult = null;
             let conversationForModel = fitMessagesToContextBudget(conversation, modelCfg);
             if (conversationForModel.metadata?.unbounded) {
@@ -371,7 +373,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 });
                 result = await deps.withTimeout(
                     signal => callStreamingModel(modelCfg, conversationForModel, tools, {
-                        budget: taskBudget,
+                        budget: taskBudget, usageRef: streamingUsageRef, source: 'agent_planner_streaming',
                         temperature: 0.2,
                         enableThinking: resolveAgentPlanningThinking(modelCfg),
                         timeoutMs: modelRequestTimeoutMs,
@@ -516,6 +518,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
             if (!sharedSnapshots.publishesLocally()) deps.publishUserEvent(user.id, 'agent.streaming', completedSnapshot, { crossNode: false });
                 usageResult = await recordUsage(user, modelCfg, conversationForModel, result?.content || '', 'agent_planner_streaming', runId, {
                     budget: deps.taskBudget,
+                    usageRef: streamingUsageRef,
                     usage: result?.usage || result?.provider?.usage?.raw || null,
                     allowBudgetExceeded: true
                 });
@@ -545,7 +548,10 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                 const budgetWarning = usageResult?.budgetExceeded ? '已达到总 Token 预算，以下为当前已生成结果。' : '';
                 await assertRunNotCancelled(runId);
                 await deps.updateRun(runId, { status: 'verifying', updated_at: getBeijingTimestamp() });
-                const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning, { allowed: !budgetWarning, remainingSteps: sliceEndStep - step });
+                const upgraded = budgetWarning ? null : await escalateAnswer?.({ answer, finishReason: result?.finishReason,
+                    modelCfg, observations, context: chatContext, plannedKnowledgeRevision });
+                answer = upgraded?.answer || answer;
+                const verification = await verifyOutcome(answer, Boolean(budgetWarning), budgetWarning, { allowed: !budgetWarning, remainingSteps: sliceEndStep - step }, upgraded?.model);
                 answer = require('./knowledge-output-guard').safeFinalAnswer(answer, verification);
                 await assertRunNotCancelled(runId);
                 await require('./agent-knowledge-boundary').assertAgentKnowledgeCurrent({ run, user, observations }, deps);
@@ -578,6 +584,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
                     : taskVerificationFailureMessage(verification);
                 await deps.updateRun(runId, {
                     status: finalStatus,
+                    ...(upgraded ? { chosen_model_id: upgraded.model.id } : {}),
                     final_answer: budgetWarning ? `注意：${budgetWarning}\n\n${answer}` : answer,
                     error_message: budgetWarning || verificationError,
                     ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
@@ -826,7 +833,7 @@ async function tryRunAgentStreaming({ run, user, modelCfg, toolList, plannerTool
     } catch (streamErr) {
         // 答案生成后的验收或落库失败属于收尾故障，不能误判为原生工具不兼容再规划一遍。
         if (finalizingAnswer) throw streamErr;
-        if (require('./agent-execution-control').isExecutionControlError(streamErr)) throw streamErr;
+        if (streamErr.code === 'INSUFFICIENT_QUOTA' || require('./agent-execution-control').isExecutionControlError(streamErr)) throw streamErr;
         if (['SKILL_RESOURCE_UNAVAILABLE', 'AGENT_GOAL_CONTEXT_LIMIT', 'CONTEXT_LENGTH_EXCEEDED', 'KNOWLEDGE_SOURCE_UNAVAILABLE', 'KNOWLEDGE_SCOPE_DENIED', 'AGENT_APPROVAL_REQUIRED', 'AGENT_RUN_CANCELLED', 'AGENT_RUN_PAUSED', 'AGENT_RUN_LEASE_LOST', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_FINALIZATION_REQUIRED', 'AGENT_NO_PROGRESS', 'TOOL_DISCOVERY_NO_PROGRESS', 'AGENT_BUDGET_PERSIST_FAILED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE'].includes(streamErr.code)) throw streamErr;
         const fallback = classifyNativeToolCallError(streamErr);
         try {

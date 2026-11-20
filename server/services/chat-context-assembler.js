@@ -23,7 +23,7 @@ const { getCapabilityDecision } = require('./chat-capability-decision');
 const { isAutomaticReadTool } = require('./chat-capability-scope');
 const { resolveResponsePreferences } = require('./agent-response-preferences');
 const { detectExplicitMcpCapabilityIntent, maybeBuildMcpChatContext } = require('./chat-mcp-context');
-const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval } = require('./semantic-router');
+const { resolveRoutePlan, buildRouteMetadata, buildRouteSseEvent, requiresKnowledgeRetrieval, filterChatToolOverrides, normalizeRouteOverrides } = require('./semantic-router');
 const { retrieveWikiContext } = require('./knowledge-wiki');
 const { buildKnowledgeRetrievalPlan } = require('./knowledge-query-planner');
 const { buildKnowledgeCatalogAnswer, buildKnowledgeOverviewContext, isKnowledgeCatalogQuestion, isKnowledgeOverviewQuestion, resolveConversationKnowledgeScope } = require('./chat-knowledge-catalog');
@@ -232,7 +232,8 @@ async function assembleChatContext({
         try {
             const capabilityFiltered = await filterMcpToolsByCapability(await listCachedMcpTools(null, req.user), req.user);
             accessibleMcpTools = filterChatMcpToolsByAllowlist(capabilityFiltered, mcpToolAllowlist).filter(tool => toolAllowedByRequestScope(tool, requestScope));
-            if (capabilityDecision?.toolNames?.length) accessibleMcpTools = accessibleMcpTools.filter(tool => capabilityDecision.toolNames.includes(tool.fullName || tool.name));
+            accessibleMcpTools = filterChatToolOverrides(accessibleMcpTools, normalizeRouteOverrides(state.routeOverrides));
+            if (!requestedToolOverrides && capabilityDecision?.toolNames?.length) accessibleMcpTools = accessibleMcpTools.filter(tool => capabilityDecision.toolNames.includes(tool.fullName || tool.name));
             if (Array.isArray(state.automaticReadCapabilities)) {
                 accessibleMcpTools = accessibleMcpTools.filter(raw => {
                     return isAutomaticReadTool(raw, state.automaticReadCapabilities);

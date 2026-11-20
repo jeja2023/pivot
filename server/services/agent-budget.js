@@ -76,6 +76,8 @@ class TaskBudget {
         this.lastTool = '';
         this.tripped = null;
         this.phase = 'execution';
+        this.modelTokensReserved = 0;
+        this.modelBudgetWaiters = new Set();
         this.policy = options.policy || null;
         this.priorElapsedSeconds = Math.max(0, Number(options.priorElapsedSeconds) || 0);
         for (const key of Object.keys(this.counts)) this.counts[key] = Math.max(0, Number(options.counts?.[key]) || 0);
@@ -236,9 +238,39 @@ class TaskBudget {
     modelOutputAllowance(inputTokens, requestedTokens) {
         this.assertCanRequestModel();
         const reserve = this.phase === 'finalization' ? 0 : Math.min(this.policy?.reserveTokens || 0, Math.floor(this.limits.max_tokens_total * .1));
-        const available = this.limits.max_tokens_total - this.counts.tokens_total - Math.max(0, inputTokens) - reserve;
+        const available = this.limits.max_tokens_total - this.counts.tokens_total - this.modelTokensReserved - Math.max(0, inputTokens) - reserve;
         if (available < 1) throw Object.assign(new Error('剩余额度不足以读取上下文并生成结果。'), { code: this.phase === 'finalization' ? 'AGENT_BUDGET_EXCEEDED' : 'AGENT_FINALIZATION_REQUIRED', category: 'resource' });
         return Math.min(requestedTokens, Math.floor(available));
+    }
+
+    async reserveModelRequest(inputTokens, requestedTokens, signal) {
+        for (;;) {
+            signal?.throwIfAborted();
+            this.assertCanRequestModel();
+            const finalizing = this.phase === 'finalization';
+            const reserve = finalizing ? 0 : Math.min(this.policy?.reserveTokens || 0, Math.floor(this.limits.max_tokens_total * .1));
+            const withoutInflight = this.limits.max_tokens_total - this.counts.tokens_total - inputTokens - reserve;
+            if (this.modelTokensReserved > 0 && withoutInflight >= 1 && withoutInflight - this.modelTokensReserved < 1) {
+                await new Promise((resolve, reject) => {
+                    const ready = () => { signal?.removeEventListener('abort', abort); resolve(); };
+                    const abort = () => { this.modelBudgetWaiters.delete(ready); reject(signal.reason); };
+                    this.modelBudgetWaiters.add(ready);
+                    signal?.addEventListener('abort', abort, { once: true });
+                });
+                continue;
+            }
+            const maxTokens = this.modelOutputAllowance(inputTokens, requestedTokens);
+            const reserved = inputTokens + maxTokens;
+            this.modelTokensReserved += reserved;
+            let released = false;
+            return { maxTokens, release: () => {
+                if (released) return;
+                released = true;
+                this.modelTokensReserved -= reserved;
+                this.modelBudgetWaiters.forEach(ready => ready());
+                this.modelBudgetWaiters.clear();
+            } };
+        }
     }
 
     recordError() {

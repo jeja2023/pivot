@@ -11,7 +11,7 @@ const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const checklistError = message => error(message, 'PPT_MASTER_CHECKLIST_REQUIRED', 409);
 const labels = { direction: '沟通方向', design: '最终页面与关键数据清单', template: '模板制作方案' };
 const citationKey = ({ text, chart }) => digest([compact(text), ...(chart ? [compact(chart.series), compact(chart.category), chart.number] : [])]);
-const sourceLabel = path => path === 'instruction' ? '制作要求' : path.startsWith('user-supplement:') ? '用户补充 ' + path.split(':')[1] : path;
+const sourceLabel = path => path === 'instruction' ? '制作要求' : path.startsWith('user-supplement:') ? '用户补充 ' + path.split(':')[1] : path || '来源待核对';
 const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const sourcePath = /^inputs\/[A-Za-z0-9][A-Za-z0-9_.-]*\.md$/;
 const projectPath = /^(?!inputs(?:\/|$)|delivery(?:\/|$))[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*(?:\/[A-Za-z0-9_\p{L}][A-Za-z0-9_\p{L}-]*)*$/u;
@@ -70,6 +70,7 @@ async function normalizeStage(input, state, verifySource) {
     if (stage === 'direction') return { stage, plan: { summary } };
     const project = valueText(input.plan.project, 180, '任务项目目录');
     if (!projectPath.test(project)) throw invalid('请填写实际任务项目的相对目录。');
+    if (state.managedProject && project !== state.managedProject) throw invalid('请使用宿主已经准备的项目：' + state.managedProject);
     if (stage === 'template') return { stage, plan: { summary, project } };
 
     const { pages } = input.plan;
@@ -119,13 +120,27 @@ async function normalizeStage(input, state, verifySource) {
                 if (previous) failures.push({ ...fact, path: previous.path, excerpt: previous.excerpt, reason: '仍需为该数据项提供可核对的引用。' });
                 continue;
             }
-            const path = valueText(entry.source?.path, 140, '关键数据来源');
-            const quote = valueText(entry.source?.quote, 350, '关键数据引文', true);
-            value.source = { path, quote };
+            let path, quote;
+            try {
+                path = valueText(entry.source?.path, 140, '关键数据来源');
+                quote = valueText(entry.source?.quote, 350, '关键数据引文', true);
+            } catch (failure) {
+                if (failure.code !== 'PPT_MASTER_ACTION_INVALID') throw failure;
+            }
             if (!availablePaths.has(path)) {
-                throw invalid('关键数据引文须引用当前任务的文本材料、制作要求或已登记的用户补充。');
+                failures.push({ ...fact, path: '', reason: '请为本项提供当前任务的文本材料、制作要求或已登记的用户补充。' });
+                continue;
             }
             const source = await readSource(path);
+            if (!quote) {
+                const original = typeof entry.source?.quote === 'string' && !entry.source.quote.trim() ? originalLine(source, text) : '';
+                if (original) {
+                    value.source = { path, quote: original };
+                    verified.add(value);
+                } else failures.push({ ...fact, path, reason: '引文为空、过长或含无效字符。请提供含本项数据的连续原文。' });
+                continue;
+            }
+            value.source = { path, quote };
             const normalizedQuote = compact(quote);
             const quoteFound = containsValue(source.normalized, normalizedQuote);
             const containsText = containsValue(normalizedQuote, text);
@@ -298,7 +313,16 @@ function reviewRecoveryGuidance(state, code, message) {
         return '\n上次停在清单引文核对。结合用户补充的原文修正数据项，或按明确的修改要求重提清单。';
     }
     if (code === 'PPT_MASTER_NO_PROGRESS') {
-        return '\n上一轮已因反复读取或检查暂停。复用已有文件和回执，读取确实未读的范围，或推进当前阶段的确认、写入、导出。缺少必要事实时提交具体问题。';
+        return '\n上一轮已因反复读取或检查暂停。复用已有文件和回执，读取当前上下文缺少的具体范围，或推进当前阶段的确认、写入、导出。缺少必要事实时提交具体问题。';
+    }
+    if (code === 'PPT_MASTER_PHASE_LIMIT') {
+        return '\n当前阶段在有限轮次内未完成。请沿用已有资料、回执和批准内容，先提交本阶段产出或提出确实需要用户补充的问题。';
+    }
+    if (code === 'PPT_MASTER_TOOL_REPEATED_FAILURE') {
+        return '\n上次有连续制作工具执行失败。根据最近保存的错误回执修正对应动作。已有成功回执的同批动作无需重做。';
+    }
+    if (code === 'PPT_MASTER_DELIVERY_REEXPORT_FAILED' || code === 'PPT_MASTER_OPERATION_FAILED' && require('./delivery-recovery').isStaleExport(reason)) {
+        return '\n上次交付的导出回执已失效或复检失败。请修正失败项，按已批准清单重新校验和导出，再提交实际导出的 PPTX。';
     }
     const needsDeliveryRepair = code === 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED'
         || code === 'PPT_MASTER_OPERATION_FAILED' && /^交付(?:第 \d+ 页|页数不符)/.test(reason);

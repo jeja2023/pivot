@@ -5,7 +5,7 @@ const assert = require('node:assert/strict');
 const Zip = require('jszip');
 const { getBuiltInTemplate } = require('../server/services/presentations/presentation-templates');
 const { compileDesignPlan } = require('../server/services/presentations/presentation-design-compiler');
-const { compilePresentationProposal, buildSlidesMessages } = require('../server/services/presentations/presentation-ai');
+const { compilePresentationProposal, compileRewriteProposal, buildSlidesMessages } = require('../server/services/presentations/presentation-ai');
 const { optimizeDesignLayout } = require('../server/services/presentations/presentation-layout-optimizer');
 const { runQualityTask } = require('../server/services/presentations/presentation-quality-tasks');
 const { computePresentationDigest } = require('../server/services/presentations/presentation-schema');
@@ -13,6 +13,45 @@ const { renderPresentation } = require('../server/services/presentations/present
 const { verifyPptxExport } = require('../server/services/presentations/presentation-export-verification');
 
 const template = getBuiltInTemplate('learning-studio');
+
+test('语义改写编译当前页并保持锁定对象，拒绝占位和多页回复', async () => {
+    const existing = (await compileDesignPlan({
+        title: '数据汇报', slides: [{ title: '原始页', layout: 'content', points: ['原始正文'] }]
+    }, template, [], { aspectRatio: '4:3' })).presentation.slides[0];
+    const locked = { ...existing.elements.find(element => !element.locked && element.type === 'text'),
+        id: 'fixed_note', locked: true, content: { text: '保留固定标注' } };
+    existing.elements.push(locked);
+    const options = { templateId: template.id, template: { ...template, definition: template }, slide: existing, aspectRatio: '4:3' };
+    const page = { title: '更新后的标题', layout: 'content', points: ['保留已知事实和数据'] };
+    const { proposal, changeImpact } = await compileRewriteProposal(JSON.stringify({ title: '数据汇报', slides: [page] }), options);
+    const [slide] = proposal.presentation.slides;
+    assert.equal(proposal.presentation.aspectRatio, '4:3');
+    assert.equal(slide.id, existing.id);
+    assert.ok(slide.elements.some(element => element.content?.text.includes('保留已知事实和数据')));
+    assert.ok(slide.elements.some(element => element.id === locked.id && element.locked && element.content.text === '保留固定标注'));
+    assert.equal(slide.elements.filter(element => element.id.startsWith('pivotTemplate_')).length,
+        existing.elements.filter(element => element.id.startsWith('pivotTemplate_') && element.locked).length);
+    assert.equal(changeImpact.counts.protectedLocked > 0, true);
+    await assert.rejects(compileRewriteProposal(JSON.stringify({ slides: [page, page] }), options), { code: 'PRESENTATION_REWRITE_SINGLE_PAGE_REQUIRED' });
+    await assert.rejects(compileRewriteProposal(JSON.stringify({ slides: [{ elements: [] }] }), options), { code: 'PRESENTATION_REWRITE_EMPTY' });
+});
+
+test('设计模板和旧模板的可见表格可导出含中文换行的 PDF', async () => {
+    const row = { title: '经营数据', layout: 'table', table: {
+        columns: ['汇报口径', '数据说明'], rows: [['收入', '本季度\n120 万元'], ['成本', '80 万元']]
+    } };
+    const data = (await compileDesignPlan({ title: '经营数据', slides: [row] }, template)).presentation;
+    const { PDFDocument } = require('pdf-lib');
+    for (const selected of [template, getBuiltInTemplate('business-blue')]) {
+        const source = globalThis.structuredClone(data);
+        source.template = { id: selected.id, version: selected.version, snapshotDigest: selected.snapshotDigest };
+        source.theme = selected.theme;
+        if (selected.id === 'business-blue') source.slides[0].layoutId = 'title-content';
+        const rendered = await renderPresentation(source, 'pdf');
+        assert.equal(rendered.mimeType, 'application/pdf');
+        assert.equal((await PDFDocument.load(rendered.buffer)).getPageCount(), 1);
+    }
+});
 async function sample() { return (await compileDesignPlan({ title: '培训说明', slides: [{ title: '课程目标', layout: 'content', points: ['先核对来源与事实', '再形成具体行动'] }, { title: '工作步骤', layout: 'process', points: ['完整读取材料', '逐页核对内容'] }] }, template)).presentation; }
 
 test('新主题由语义计划生成页面，正文过密时保留全部要点拆页，数字与来源不丢失', async () => {

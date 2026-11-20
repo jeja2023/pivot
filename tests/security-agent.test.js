@@ -1007,7 +1007,7 @@ test('agent DAG editor exposes LLM as an optional ordinary workflow node', () =>
     assert.match(tools, /\['prompt', 'model'\]/);
     assert.match(tools, /async function executeAgentLlmNode/);
     assert.match(tools, /fitMessagesToContextBudget\(messages, modelCfg/);
-    assert.match(tools, /recordAgentModelUsage\(user, modelCfg, modelMessages, content, 'agent_llm_node'/);
+    assert.match(tools, /source = 'agent_llm_node'/);
     assert.doesNotMatch(dagRunConfig, /inferDagLlmRuntimeSettings|primaryLlmNodeId/);
     assert.match(runtime, /assertWorkflowLlmNodesConfigured\(runMetadata\.dagSpec\)/);
     assert.match(runtime, /if \(!modelCfg && normalizedRunMode !== 'dag'\)/);

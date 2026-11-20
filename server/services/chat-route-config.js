@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { readTypedEnv } = require('../config/env-registry');
 
 function getChatAutoRouteConfig(env = process.env) {
@@ -24,4 +25,20 @@ function getChatAutoRouteConfig(env = process.env) {
     };
 }
 
-module.exports = { getChatAutoRouteConfig };
+function getChatIntentConfig(overrides = {}) {
+    return {
+        mode: readTypedEnv('PIVOT_CHAT_INTENT_MODE'),
+        timeoutMs: readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS'),
+        rolloutPercent: readTypedEnv('PIVOT_CHAT_INTENT_ROLLOUT_PERCENT'),
+        ...overrides
+    };
+}
+
+function chatIntentApplies(config, userId, sessionId) {
+    if (config.mode !== 'active') return false;
+    const key = `${userId}:${sessionId}`;
+    const bucket = crypto.createHash('sha256').update(key).digest().readUInt32BE(0) % 100;
+    return bucket < config.rolloutPercent;
+}
+
+module.exports = { getChatAutoRouteConfig, getChatIntentConfig, chatIntentApplies };

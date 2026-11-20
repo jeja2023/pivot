@@ -170,7 +170,7 @@ window.Pivot.legacy.approveAgentRun = async function(runId, approve = true, opti
         const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ approve, rememberForRun })
+            body: JSON.stringify({ approve, rememberForRun, ...options.binding })
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) throw new Error(data.error || '审批处理失败');
@@ -179,6 +179,18 @@ window.Pivot.legacy.approveAgentRun = async function(runId, approve = true, opti
         await window.Pivot.legacy.openAgentRun(runId);
     }, '审批处理失败');
 };
+
+async function refreshAgentRunApproval(runId, binding) {
+    await runAgentActionOnce('approval-refresh:' + runId, runId, '[data-agent-refresh-approval]', async () => {
+        const res = await apiFetch(`${API_BASE}/agents/runs/${encodeURIComponent(runId)}/approval/refresh`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(binding || {})
+        });
+        const data = await res.json().catch(() => ({}));
+        await window.Pivot.legacy.openAgentRun(runId);
+        if (!res.ok) throw new Error(data.error || '更新授权请求失败');
+        showToast('授权请求已更新，请重新核对后决定。', 'success');
+    }, '更新授权请求失败');
+}
 
 window.Pivot.legacy.revokeAgentApproval = async function(runId, approvalKey) {
     await runAgentActionOnce(`approval-revoke:${runId}:${approvalKey}`, runId, '[data-agent-revoke-approval]', async () => {
@@ -453,6 +465,7 @@ async function delegateBatchFromAgentRun(runId) {
 }
 
 window.Pivot?.exposeModule?.('agent.runActions', {
+    refreshAgentRunApproval,
     delegateBatchFromAgentRun,
     learnFromAgentRun,
     createScheduleFromAgentRun,

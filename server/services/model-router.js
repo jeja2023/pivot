@@ -19,6 +19,7 @@
 
 const { getUserRunnableModelsAsync, getRunnableModelForUserAsync, messagesContainVisionInput, modelSupportsVision } = require('./models');
 const { getModelEndpointRuntimeStatus, normalizeEndpointKey } = require('./model-runtime');
+const { estimateMessagesTokens, getModelContextBudget, fitMessagesToContextBudget } = require('./context-budget');
 
 const STRATEGIES = new Set(['fixed', 'auto-vision', 'auto-context', 'auto-cost', 'auto-load', 'auto-quality', 'auto-escalate']);
 const DEFAULT_STRATEGY = 'fixed';
@@ -40,28 +41,29 @@ function listStrategies() {
     ];
 }
 
-// 输入 Token 粗估：中文 2、其他 0.5；与 server/llm.js 中 estimateTokens 行为一致
-function estimateMessageTokens(messages = []) {
-    if (!Array.isArray(messages)) return 0;
-    let total = 0;
-    for (const message of messages) {
-        const content = message?.content;
-        const text = typeof content === 'string'
-            ? content
-            : Array.isArray(content)
-                ? content.map(part => (part && typeof part === 'object' && typeof part.text === 'string') ? part.text : '').join(' ')
-                : '';
-        const chinese = (text.match(/[一-龥]/g) || []).length;
-        const other = text.length - chinese;
-        total += Math.ceil(chinese * 2 + other * 0.5);
-    }
-    return total;
+function modelBudgetOptions(model, options = {}) {
+    if (!options.minOutputTokens) return options;
+    return { ...options, maxOutputTokens: require('./agent-model').resolveAgentMaxTokens(model, { minMaxTokens: options.minOutputTokens }) };
 }
 
-function hasUsableInputWindow(model, estimatedInputTokens) {
-    const limit = Number(model.max_input_tokens) || 0;
-    if (limit <= 0) return true;
-    return estimatedInputTokens <= limit;
+function hasUsableInputWindow(model, messages, budgetOptions) {
+    try {
+        fitMessagesToContextBudget(messages, model, modelBudgetOptions(model, budgetOptions));
+        return true;
+    } catch (error) {
+        if (error.code !== 'CONTEXT_LENGTH_EXCEEDED') throw error;
+        return false;
+    }
+}
+
+function inputWindow(model, budgetOptions) {
+    const budget = getModelContextBudget(model, modelBudgetOptions(model, budgetOptions));
+    return budget.unbounded ? Number.MAX_SAFE_INTEGER : budget.inputBudget;
+}
+
+async function listModelCandidates(user, candidateModels) {
+    const models = Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user, { forExecution: true });
+    return models.filter(model => !model.secret_error && (!model.status || model.status === 'active'));
 }
 
 function modelTotalPrice(model) {
@@ -70,24 +72,12 @@ function modelTotalPrice(model) {
     return input + output;
 }
 
-function findVisionCandidate(candidates, estimatedInputTokens = 0) {
-    return pickAutoContext(candidates.filter(modelSupportsVision), estimatedInputTokens);
+function pickAutoContext(candidates, budgetOptions) {
+    return candidates.slice().sort((a, b) => inputWindow(a, budgetOptions) - inputWindow(b, budgetOptions))[0] || null;
 }
 
-function pickAutoContext(candidates, estimatedInputTokens) {
-    const fit = candidates.filter(m => hasUsableInputWindow(m, estimatedInputTokens));
-    if (fit.length === 0) return null;
-    return fit.slice().sort((a, b) => {
-        const aLimit = Number(a.max_input_tokens) || Number.MAX_SAFE_INTEGER;
-        const bLimit = Number(b.max_input_tokens) || Number.MAX_SAFE_INTEGER;
-        return aLimit - bLimit;
-    })[0];
-}
-
-function pickAutoCost(candidates, estimatedInputTokens) {
-    const fit = candidates.filter(m => hasUsableInputWindow(m, estimatedInputTokens));
-    if (fit.length === 0) return null;
-    return fit.slice().sort((a, b) => modelTotalPrice(a) - modelTotalPrice(b))[0];
+function pickAutoCost(candidates) {
+    return candidates.slice().sort((a, b) => modelTotalPrice(a) - modelTotalPrice(b))[0] || null;
 }
 
 function readEndpointStatus(endpointStatusGetter) {
@@ -108,12 +98,11 @@ function endpointAvailable(model, runtimeStatus) {
     return !(Number(endpoint?.circuitOpenMs) > 0 || endpoint?.concurrency?.rejectingNewRequests === true);
 }
 
-function pickAutoLoad(candidates, estimatedInputTokens, runtimeStatus) {
-    const fit = candidates.filter(model => hasUsableInputWindow(model, estimatedInputTokens) && endpointAvailable(model, runtimeStatus));
-    if (fit.length === 0) return null;
+function pickAutoLoad(candidates, runtimeStatus, budgetOptions) {
+    if (!candidates.length) return null;
     if (!runtimeStatus.length) {
         // 没有运行时数据时回退到上下文匹配
-        return pickAutoContext(fit, estimatedInputTokens);
+        return pickAutoContext(candidates, budgetOptions);
     }
     const loadFor = (model) => {
         const entry = endpointForModel(model, runtimeStatus);
@@ -122,13 +111,12 @@ function pickAutoLoad(candidates, estimatedInputTokens, runtimeStatus) {
         const max = Math.max(1, Number(entry.concurrency?.max) || Number(entry.configuredMaxConcurrent) || 1);
         return active / max;
     };
-    return fit.slice().sort((a, b) => loadFor(a) - loadFor(b))[0];
+    return candidates.slice().sort((a, b) => loadFor(a) - loadFor(b))[0];
 }
 
-function pickAutoQuality(candidates, profiles = [], estimatedInputTokens) {
-    const eligible = candidates.filter(model => hasUsableInputWindow(model, estimatedInputTokens));
+function pickAutoQuality(candidates, profiles = []) {
     const profileByModel = new Map((profiles || []).filter(profile => profile?.eligible).map(profile => [Number(profile.modelId), profile]));
-    const qualified = eligible.filter(model => profileByModel.has(Number(model.id)));
+    const qualified = candidates.filter(model => profileByModel.has(Number(model.id)));
     if (!qualified.length) return null;
     return qualified.slice().sort((left, right) => {
         const leftProfile = profileByModel.get(Number(left.id));
@@ -181,27 +169,25 @@ function modelProviderFailureReason(error = {}) {
 
 function isRecoverableModelProviderFailure(error = {}) {
     const code = String(error?.code || '').toUpperCase();
-    if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_USER_REVOKED'].includes(code)) return false;
+    if (['AGENT_RUN_CANCELLED', 'AGENT_TIMEOUT', 'AGENT_BUDGET_EXCEEDED', 'AGENT_USER_REVOKED', 'INSUFFICIENT_QUOTA'].includes(code)) return false;
     if (isStructuredOutputIncompatibility(error)) return true;
     if (['AI_ENDPOINT_CIRCUIT_OPEN', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT', 'AGENT_MODEL_STREAM_IDLE', 'ECONNABORTED', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EAI_AGAIN', 'ENOTFOUND'].includes(code)) return true;
     const status = Number(error?.response?.status || error?.status || error?.statusCode || 0);
     return status === 429 || status >= 500;
 }
 
-async function pickFailoverModel({ user, currentModel, messages = [], candidateModels = null, endpointStatusGetter, error = null } = {}) {
+async function pickFailoverModel({ user, currentModel, messages = [], candidateModels = null, endpointStatusGetter, error = null, budgetOptions } = {}) {
     if (!user || !currentModel) return null;
-    const estimatedTokens = estimateMessageTokens(messages);
     const visionRequired = messagesContainVisionInput(messages);
     const runtimeStatus = readEndpointStatus(endpointStatusGetter);
     const excludeFailedEndpoint = error && isRecoverableModelProviderFailure(error) && !isStructuredOutputIncompatibility(error);
-    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
-        .filter(model => model.status !== 'usage_only' && Number(model.id) !== Number(currentModel.id))
+    const candidates = (await listModelCandidates(user, candidateModels))
+        .filter(model => Number(model.id) !== Number(currentModel.id))
         .filter(model => !visionRequired || modelSupportsVision(model))
         .filter(model => endpointAvailable(model, runtimeStatus)
             && (!excludeFailedEndpoint || normalizeEndpointKey(model) !== normalizeEndpointKey(currentModel)))
-        .filter(model => hasUsableInputWindow(model, estimatedTokens));
-    if (!candidates.length) return null;
-    return pickAutoLoad(candidates, estimatedTokens, runtimeStatus);
+        .filter(model => hasUsableInputWindow(model, messages, budgetOptions));
+    return pickAutoLoad(candidates, runtimeStatus, budgetOptions);
 }
 
 /**
@@ -214,26 +200,26 @@ async function pickFailoverModel({ user, currentModel, messages = [], candidateM
  * @param {function} [params.endpointStatusGetter] - 注入式：返回 getModelEndpointRuntimeStatus()，便于测试
  * @returns {{ model: object, strategy: string, reason: string, candidatesCount: number }|null}
  */
-async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter, qualityProfiles = null, taskType = 'general', candidateModels = null }) {
+async function chooseModel({ user, strategy, hintModelId, messages = [], endpointStatusGetter, qualityProfiles = null, taskType = 'general', candidateModels = null, budgetOptions }) {
     if (!user) return null;
-    const normalized = normalizeStrategy(strategy);
+    let normalized = normalizeStrategy(strategy);
 
     // fixed 策略：直接返回指定模型，不进行候选筛选
     if (normalized === 'fixed') {
         const fixed = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
         if (fixed) return { model: fixed, strategy: 'fixed', reason: '固定模型', candidatesCount: 1 };
-        // 没有指定模型时也按 auto-context 兜底
+        normalized = 'auto-context';
     }
 
     const runtimeStatus = readEndpointStatus(endpointStatusGetter);
-    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
-        .filter(model => model.status !== 'usage_only');
+    const candidates = await listModelCandidates(user, candidateModels);
     if (candidates.length === 0) {
         const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
-        return fallback && endpointAvailable(fallback, runtimeStatus) ? { model: fallback, strategy: 'fixed', reason: '无可用模型候选，回退到原模型', candidatesCount: 0 } : null;
+        return fallback && !fallback.secret_error && endpointAvailable(fallback, runtimeStatus) && hasUsableInputWindow(fallback, messages, budgetOptions)
+            && (!messagesContainVisionInput(messages) || modelSupportsVision(fallback)) ? { model: fallback, strategy: 'fixed', reason: '无可用模型候选，回退到原模型', candidatesCount: 0 } : null;
     }
 
-    const estimatedTokens = estimateMessageTokens(messages);
+    const estimatedTokens = estimateMessagesTokens(messages);
     const hasVision = messagesContainVisionInput(messages);
     // 自动策略不能把含图片的请求路由到不支持视觉的模型。固定模型保留调用
     // 方原语义，由既有预检给出明确错误；自动选择则必须从能力兼容池中选。
@@ -243,27 +229,24 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
     if (!eligibleCandidates.length) {
         return { model: null, strategy: normalized, reason: '没有支持视觉输入的可用模型', candidatesCount: candidates.length };
     }
+    const fitting = eligibleCandidates.filter(model => hasUsableInputWindow(model, messages, budgetOptions));
+    const fullContext = fitting.filter(model => estimatedTokens <= inputWindow(model, budgetOptions));
+    const compatible = fullContext.length ? fullContext : fitting;
     let chosen = null;
     let reason = '';
     let qualityProfile = null;
 
     if (normalized === 'auto-vision') {
-        if (hasVision) {
-            chosen = findVisionCandidate(eligibleCandidates, estimatedTokens);
-            reason = chosen ? '输入含图片，选用支持视觉的模型' : '';
-        }
-        if (!chosen) {
-            chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
-            reason = reason || '无视觉模型可用，按上下文匹配';
-        }
+        chosen = pickAutoContext(compatible, budgetOptions);
+        reason = hasVision ? '输入含图片，选用支持视觉的模型' : '按上下文匹配';
     } else if (normalized === 'auto-context') {
-        chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
+        chosen = pickAutoContext(compatible, budgetOptions);
         reason = chosen ? `按上下文匹配（估算 ${estimatedTokens} tokens）` : '';
     } else if (normalized === 'auto-cost') {
-        chosen = pickAutoCost(eligibleCandidates, estimatedTokens);
+        chosen = pickAutoCost(compatible);
         reason = chosen ? '按成本最低（输入+输出单价之和）' : '';
     } else if (normalized === 'auto-load') {
-        chosen = pickAutoLoad(eligibleCandidates, estimatedTokens, runtimeStatus);
+        chosen = pickAutoLoad(compatible, runtimeStatus, budgetOptions);
         reason = chosen ? '按端点负载最低' : '';
     } else if (normalized === 'auto-quality') {
         let profiles = Array.isArray(qualityProfiles) ? qualityProfiles : [];
@@ -275,23 +258,23 @@ async function chooseModel({ user, strategy, hintModelId, messages = [], endpoin
                 profiles = [];
             }
         }
-        chosen = pickAutoQuality(eligibleCandidates, profiles, estimatedTokens);
+        chosen = pickAutoQuality(compatible, profiles);
         qualityProfile = chosen ? (profiles || []).find(profile => Number(profile?.modelId) === Number(chosen.id) && profile?.eligible) || null : null;
         reason = chosen ? '按同类已验收任务质量优先' : '';
         if (!chosen) {
-            chosen = pickAutoContext(eligibleCandidates, estimatedTokens);
+            chosen = pickAutoContext(compatible, budgetOptions);
             reason = '质量样本不足，按上下文匹配回退';
         }
     } else if (normalized === 'auto-escalate') {
         // 第一轮：与 auto-cost 等同，挑最便宜的能用模型；调用方负责后续判断置信度并调用 pickEscalationModel
-        chosen = pickAutoCost(eligibleCandidates, estimatedTokens);
+        chosen = pickAutoCost(compatible);
         reason = chosen ? '先用成本最低模型尝试（auto-escalate 第一轮）' : '';
     }
 
     if (!chosen) {
         // 任何策略选不出时降级到 hint 指定模型
         const fallback = hintModelId ? await getRunnableModelForUserAsync(hintModelId, user) : null;
-        if (fallback && endpointAvailable(fallback, runtimeStatus) && hasUsableInputWindow(fallback, estimatedTokens) && (!hasVision || modelSupportsVision(fallback))) {
+        if (fallback && !fallback.secret_error && endpointAvailable(fallback, runtimeStatus) && hasUsableInputWindow(fallback, messages, budgetOptions) && (!hasVision || modelSupportsVision(fallback))) {
             return { model: fallback, strategy: 'fixed', reason: '路由未命中，回退到原模型', candidatesCount: candidates.length };
         }
         // 没有模型能同时满足自动策略、输入窗口与视觉能力时，宁可由调用方
@@ -322,14 +305,13 @@ function assessConfidence({ output = '', finishReason = '', minOutputChars = 20 
 }
 
 // 升级优先采用同类任务的有效质量证据；没有证据时仅允许扩大上下文容量。
-async function pickEscalationModel({ user, currentModel, messages = [], candidateModels = null, qualityProfiles = null, taskType = 'general', endpointStatusGetter }) {
+async function pickEscalationModel({ user, currentModel, messages = [], candidateModels = null, qualityProfiles = null, taskType = 'general', endpointStatusGetter, budgetOptions }) {
     if (!user || !currentModel) return null;
     const needsVision = messagesContainVisionInput(messages);
-    const estimatedTokens = estimateMessageTokens(messages);
     const runtimeStatus = readEndpointStatus(endpointStatusGetter);
-    const candidates = (Array.isArray(candidateModels) ? candidateModels : await getUserRunnableModelsAsync(user))
-        .filter(model => model.status !== 'usage_only' && Number(model.id) !== Number(currentModel.id) && (!needsVision || modelSupportsVision(model))
-            && endpointAvailable(model, runtimeStatus) && hasUsableInputWindow(model, estimatedTokens));
+    const candidates = (await listModelCandidates(user, candidateModels))
+        .filter(model => Number(model.id) !== Number(currentModel.id) && (!needsVision || modelSupportsVision(model))
+            && endpointAvailable(model, runtimeStatus) && hasUsableInputWindow(model, messages, budgetOptions));
     if (!candidates.length) return null;
     let profiles = qualityProfiles;
     if (!Array.isArray(profiles)) {
@@ -337,12 +319,11 @@ async function pickEscalationModel({ user, currentModel, messages = [], candidat
     }
     const current = profiles.find(profile => profile.modelId === Number(currentModel.id) && profile.eligible);
     const better = profiles.filter(profile => profile.eligible && (!current || profile.verifiedRateLowerBound > current.verifiedRateLowerBound));
-    const proven = pickAutoQuality(candidates, better, estimatedTokens);
+    const proven = pickAutoQuality(candidates, better);
     if (proven) return proven;
-    const currentWindow = Number(currentModel.max_input_tokens) || 0;
-    if (!currentWindow) return null;
-    return candidates.filter(model => Number(model.max_input_tokens) > currentWindow)
-        .sort((left, right) => Number(right.max_input_tokens) - Number(left.max_input_tokens) || modelTotalPrice(left) - modelTotalPrice(right))[0] || null;
+    const currentWindow = inputWindow(currentModel, budgetOptions);
+    return candidates.filter(model => inputWindow(model, budgetOptions) > currentWindow)
+        .sort((left, right) => inputWindow(right, budgetOptions) - inputWindow(left, budgetOptions) || modelTotalPrice(left) - modelTotalPrice(right))[0] || null;
 }
 
 module.exports = {
@@ -350,7 +331,7 @@ module.exports = {
     DEFAULT_STRATEGY,
     normalizeStrategy,
     listStrategies,
-    estimateMessageTokens,
+    estimateMessageTokens: estimateMessagesTokens,
     hasUsableInputWindow,
     modelTotalPrice,
     pickAutoQuality,

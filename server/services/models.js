@@ -165,7 +165,7 @@ const getAccessibleModel = getAccessibleModelAsync;
 // getUserRunnableModels — PostgreSQL 异步
 // ──────────────────────────────────────────────────────────────────────────
 
-async function getUserRunnableModelsAsync(user) {
+async function getUserRunnableModelsAsync(user, { forExecution = false } = {}) {
     if (!user?.id) return [];
     const rows = await query(`
         SELECT *
@@ -175,7 +175,7 @@ async function getUserRunnableModelsAsync(user) {
         ORDER BY is_default DESC, id ASC
     `, [user.id]);
 
-    return rows.filter(model => {
+    const visible = rows.filter(model => {
         if (model.user_id === user.id) return true;
         if (model.user_id) return false;
         if (!model.allowed_units) return true;
@@ -183,6 +183,7 @@ async function getUserRunnableModelsAsync(user) {
         const userUnit = (user.unit || '').trim();
         return Boolean(userUnit && units.includes(userUnit));
     });
+    return forExecution ? visible.map(_decryptApiKey).filter(model => !model.secret_error) : visible;
 }
 
 const getUserRunnableModels = getUserRunnableModelsAsync;

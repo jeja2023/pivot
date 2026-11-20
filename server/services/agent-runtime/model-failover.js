@@ -77,7 +77,7 @@ async function executeAutomaticModelFailover(options = {}) {
         const usageRef = {};
         const timeoutMs = remainingModelRequestMs();
         const plannedText = await withTimeout(abortSignal => callModelText(fallback, plannerMessages, {
-            user, signal: abortSignal, usageRef, minMaxTokens,
+            user, signal: abortSignal, usageRef, minMaxTokens, budget: options.budget, source: 'agent_planner',
             enableThinking: resolveAgentPlanningThinking(fallback), timeoutMs
         }), timeoutMs, '智能体规划降级', { signal });
         await recordAgentEvent({

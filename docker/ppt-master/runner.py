@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import errno
 import io
 import json
 import os
@@ -269,10 +270,46 @@ def capture_progress(request):
     return result
 
 
+def build_project_archive(request: dict, delivery: Path, *, include_exports=False):
+    maximum = 120 * 1024 * 1024
+    limit = request.get("sourceBundleLimit", maximum)
+    if type(limit) is not int or not 1024 <= limit <= maximum:
+        raise ValueError("项目源包交付上限无效。")
+    target = delivery / "project.zip"
+    entries = inventory()
+    with tempfile.NamedTemporaryFile(dir=delivery, delete=False) as stream:
+        temporary = Path(stream.name)
+    try:
+        with zipfile.ZipFile(temporary, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
+            for entry in entries:
+                relative = entry.relative_to(WORKSPACE)
+                if relative.parts[0] in {"delivery", ".pivot"} or not include_exports and "exports" in relative.parts:
+                    continue
+                archive.write(entry, relative.as_posix())
+                if archive.fp.tell() > limit:
+                    target.unlink(missing_ok=True)
+                    return None
+        size = temporary.stat().st_size
+        if size > limit:
+            target.unlink(missing_ok=True)
+            return None
+        with temporary.open("rb") as source:
+            digest = hashlib.file_digest(source, "sha256").hexdigest()
+        temporary.replace(target)
+        return digest, size
+    except OSError as failure:
+        if failure.errno != errno.EFBIG:
+            raise
+        target.unlink(missing_ok=True)
+        return None
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def deliver_presentation(request: dict) -> dict:
     try:
         file, data, content_hash, receipt = registered_export(request.get("path"), current=True)
-    except ValueError as error:
+    except (FileNotFoundError, ValueError) as error:
         raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。") from error
     if receipt.get("sourceFingerprint") != source_fingerprint():
         raise ValueError("最终文件与最近成功的上游导出或当前源稿不一致，请重新校验并导出。")
@@ -336,17 +373,12 @@ def deliver_presentation(request: dict) -> dict:
     report["currentExportSha256"] = content_hash
     delivery = WORKSPACE / "delivery"
     delivery.mkdir(exist_ok=True)
+    bundle = build_project_archive(request, delivery)
     (delivery / "presentation.pptx").write_bytes(data)
-    with zipfile.ZipFile(delivery / "project.zip", "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
-        for entry in inventory():
-            relative = entry.relative_to(WORKSPACE)
-            if relative.parts[0] != "delivery" and relative.as_posix() not in {REVIEW_DRAFT, PREVIOUS_REVIEW_DRAFT}:
-                archive.write(entry, relative.as_posix())
-    with (delivery / "project.zip").open("rb") as project_file:
-        project_digest = hashlib.file_digest(project_file, "sha256").hexdigest()
     if preservation is not None:
         report["preservation"] = {"sha256": repair["sha256"], "pages": sorted(preservation[1])}
-    return {"path": "delivery/presentation.pptx", "projectPath": "delivery/project.zip", "sha256": content_hash, "projectSha256": project_digest, "byteSize": len(data), "packageCheck": report}
+    source = {"projectPath": "delivery/project.zip", "projectSha256": bundle[0]} if bundle else {"sourcePackageUnavailable": True}
+    return {"path": "delivery/presentation.pptx", **source, "sha256": content_hash, "byteSize": len(data), "packageCheck": report}
 
 
 def main(request: dict) -> dict:
@@ -367,7 +399,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action == "inspect_export":
         return inspect_export(request)
@@ -488,13 +520,10 @@ def main(request: dict) -> dict:
             raise ValueError("上游模板校验未通过：" + check["stderr"][:1500])
         delivery = WORKSPACE / "delivery"
         delivery.mkdir(exist_ok=True)
-        with zipfile.ZipFile(delivery / "project.zip", "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as archive:
-            for entry in inventory():
-                relative = entry.relative_to(WORKSPACE)
-                if relative.parts[0] not in {"delivery", ".pivot"}:
-                    archive.write(entry, relative.as_posix())
-        data = (delivery / "project.zip").read_bytes()
-        return {"projectPath": "delivery/project.zip", "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data), "packageCheck": {"status": "passed", "kind": kind, "upstreamValidation": check["stdout"], "officeVisual": "not_checked"}, "templateOnly": True}
+        bundle = build_project_archive(request, delivery, include_exports=True)
+        if not bundle:
+            raise ValueError("模板源包超过交付上限，请减少非必要素材后重新校验。")
+        return {"projectPath": "delivery/project.zip", "sha256": bundle[0], "byteSize": bundle[1], "packageCheck": {"status": "passed", "kind": kind, "upstreamValidation": check["stdout"], "officeVisual": "not_checked"}, "templateOnly": True}
     if action == "deliver":
         return deliver_presentation(request)
     raise ValueError("执行动作未登记。")

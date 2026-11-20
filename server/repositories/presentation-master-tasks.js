@@ -3,6 +3,10 @@
 const { query, queryOne, execute, transaction } = require('../db/client');
 const TOOL = 'presentation.master';
 const json = value => value && typeof value === 'object' ? value : JSON.parse(value || '{}');
+// 单次连续执行最多八小时。人工确认或续跑开始新的执行段。
+const activeRunDeadline = "COALESCE((result_json->>'_runDeadline')::numeric,extract(epoch from NOW()+INTERVAL '8 hours'))";
+const extendActiveExpiry = `LEAST(CASE WHEN expires_at < NOW()+INTERVAL '30 minutes' THEN NOW()+INTERVAL '1 hour'
+    ELSE expires_at END, to_timestamp(${activeRunDeadline}::double precision))`;
 
 async function read(user, id) {
     const row = await queryOne('SELECT *, updated_at::text AS review_revision FROM tool_tasks WHERE id=? AND user_id=? AND tool_name=?', [id, user.id, TOOL]);
@@ -58,18 +62,26 @@ async function updateProgressRetention(executor, objectId) {
         WHERE id=? AND kind='ppt_master_progress'`, [objectId]);
 }
 async function claim(user, id, leaseId) {
-    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object('_lease',?::text, '_leaseUntil', extract(epoch from NOW())+180),updated_at=NOW()
+    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object(
+        '_lease',?::text, '_leaseUntil', extract(epoch from NOW())+180,
+        '_runDeadline', ${activeRunDeadline}),updated_at=NOW()
         WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW()
           AND (COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()) OR result_json->>'_lease'=?) RETURNING id`, [leaseId, id, user.id, TOOL, leaseId]);
 }
 async function save(user, id, leaseId, state, progress) {
-    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||?::jsonb||jsonb_build_object('_leaseUntil', extract(epoch from NOW())+180),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW() AND result_json->>'_lease'=? RETURNING id`,
+    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||?::jsonb||jsonb_build_object(
+        '_leaseUntil', extract(epoch from NOW())+180, '_runDeadline', ${activeRunDeadline}),
+        expires_at=${extendActiveExpiry},updated_at=NOW()
+        WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW() AND result_json->>'_lease'=?
+          AND (result_json->>'_leaseUntil')::numeric>extract(epoch from NOW()) RETURNING id`,
     [JSON.stringify({ state, progress }), id, user.id, TOOL, leaseId]);
 }
 async function renew(user, id, leaseId) {
-    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object('_leaseUntil',extract(epoch from NOW())+180),updated_at=NOW()
-        WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW() AND result_json->>'_lease'=? RETURNING id`, [id, user.id, TOOL, leaseId]);
+    return queryOne(`UPDATE tool_tasks SET result_json=COALESCE(result_json,'{}'::jsonb)||jsonb_build_object(
+        '_leaseUntil',extract(epoch from NOW())+180, '_runDeadline', ${activeRunDeadline}),
+        expires_at=${extendActiveExpiry},updated_at=NOW()
+        WHERE id=? AND user_id=? AND tool_name=? AND status='working' AND expires_at>NOW() AND result_json->>'_lease'=?
+          AND (result_json->>'_leaseUntil')::numeric>extract(epoch from NOW()) RETURNING id`, [id, user.id, TOOL, leaseId]);
 }
 async function release(user, id, leaseId) {
     await execute("UPDATE tool_tasks SET result_json=result_json-'_lease'-'_leaseUntil' WHERE id=? AND user_id=? AND tool_name=? AND result_json->>'_lease'=?", [id, user.id, TOOL, leaseId]);
@@ -80,13 +92,13 @@ async function parentActive(runId, user) {
     return Boolean(run && !['completed', 'completed_with_errors', 'partial', 'cancelled', 'deleted', 'failed', 'error', 'needs_input'].includes(run.status));
 }
 async function acceptResponse(user, id, state) {
-    return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
+    return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil'-'_runDeadline')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
         WHERE id=? AND user_id=? AND tool_name=? AND result_json->'state'->>'steps' IS NOT DISTINCT FROM ?::text AND COALESCE(result_json->'state'->>'response','')=''
           AND (status='input_required' AND expires_at>NOW() OR status IN ('expired','failed') AND result_json->'state'->>'pendingKind' IN ('confirmation','clarification')) RETURNING id`, [JSON.stringify(state), id, user.id, TOOL, state.steps == null ? null : String(state.steps)]);
 }
 async function resume(user, id, state, expectedDraft = null) {
     return queryOne(`UPDATE tool_tasks SET status='working',error_code='',error_message='',expires_at=NOW()+INTERVAL '1 hour',
-        result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
+        result_json=(COALESCE(result_json,'{}'::jsonb)-'_lease'-'_leaseUntil'-'_runDeadline')||jsonb_build_object('state',?::jsonb),updated_at=NOW()
         WHERE id=? AND user_id=? AND tool_name=? AND (?::text IS NULL OR (status IN ('failed','expired') AND result_json->'state'->'reviewDraft'->>'sha256'=?))
           AND (COALESCE(result_json->'state'->>'pendingKind','')='' OR COALESCE(result_json->'state'->>'response','')<>'') AND (status IN ('failed','expired') OR (status='working' AND COALESCE((result_json->>'_leaseUntil')::numeric,0)<extract(epoch from NOW()))) RETURNING id`,
     [JSON.stringify(state), id, user.id, TOOL, expectedDraft, expectedDraft]);

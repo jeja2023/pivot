@@ -362,7 +362,7 @@ function renderAgentFeedbackBlock(run) {
 }
 const appendAgentWorkflowRelations = (container, relations) => window.Pivot?.moduleApi?.('agent.runInvocations')?.appendAgentWorkflowRunRelations?.(container, relations);
 
-function bindAgentRunDetailDomEvents(container, run, isPreview) {
+function bindAgentRunDetailDomEvents(container, run, isPreview, approval) {
     if (!container) return;
     container.querySelectorAll('[data-agent-cancel]').forEach(btn => {
         btn.addEventListener('click', () => {
@@ -370,12 +370,7 @@ function bindAgentRunDetailDomEvents(container, run, isPreview) {
             return window.Pivot.legacy.cancelAgentRun(run.id);
         });
     });
-    container.querySelectorAll('[data-agent-approve]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, true));
-    });
-    container.querySelectorAll('[data-agent-reject]').forEach(btn => {
-        btn.addEventListener('click', () => window.Pivot.legacy.approveAgentRun(run.id, false));
-    });
+    bindAgentPendingApproval(container, run, approval);
     container.querySelectorAll('[data-agent-revoke-approval]').forEach(button => {
         button.addEventListener('click', () => window.Pivot.legacy.revokeAgentApproval(run.id, button.dataset.agentRevokeApproval || ''));
     });
@@ -597,6 +592,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         return null;
     }
     const run = data.run;
+    const approval = data.approval;
     currentRunDetailRecord = run;
     currentRunDetailData = data;
     if (currentContainer) currentContainer.dataset.detailRunId = String(runId);
@@ -762,7 +758,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
             const activeApprovalGrants = Array.isArray(run.metadata?.approvalGrants)
                 ? run.metadata.approvalGrants.filter(item => item?.key && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())) : [];
             if (run.status === 'approval_required') {
-                approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>待人工授权执行</h4><p>智能体请求调用受保护的系统操作，请审核并决定是否允许执行。</p><label style="display:flex;align-items:center;gap:6px;margin:8px 0;font-size:0.8rem;color:var(--text-secondary);cursor:pointer;"><input type="checkbox" id="agent-approval-remember-check"> <span>在本次任务中信任该工具后续同类操作（免密继续）</span></label><div class="agent-run-approval-actions"><button type="button" class="btn-primary btn-xs" data-agent-approve>同意放行</button><button type="button" class="btn-danger-outline btn-xs" data-agent-reject>拒绝执行</button></div></div>`;
+                approvalsHtml += renderAgentPendingApproval(approval);
             }
             if (run.status === 'queued' && activeApprovalGrants.length) {
                 approvalsHtml += `<div class="agent-approval-card agent-run-approval-card"><h4>已批准、尚未执行</h4><p>任务仍在队列中。撤销后将停止领取并要求重新审批。</p><div class="agent-run-approval-actions">${activeApprovalGrants.map(item => `<button type="button" class="btn-danger-outline btn-xs" data-agent-revoke-approval="${agentEscapeAttr(item.key)}">撤销 ${agentEscape(item.tool || '工具')} 授权</button>`).join('')}</div></div>`;
@@ -789,7 +785,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
 
         switchAgentRunSubtab(currentActiveRunSubtab || 'overview');
         restoreAgentRunDisclosureState(workbenchDetailContainer, run.id);
-        bindAgentRunDetailDomEvents(workbenchDetailContainer, run, isPreview);
+        bindAgentRunDetailDomEvents(workbenchDetailContainer, run, isPreview, approval);
     }
 
     // --- 2. 渲染独立弹窗 (Modal Fallback) ---
@@ -900,7 +896,7 @@ window.Pivot.legacy.openAgentRun = async function (runId, options = {}) {
         personalContext.appendCollaboratorGroup?.(detail, run);
         if (showDagNodeDetails) appendAgentWorkflowRelations(detail, { invocations, iterationItems });
         restoreAgentRunDisclosureState(detail, run.id);
-        bindAgentRunDetailDomEvents(detail, run, isPreview);
+        bindAgentRunDetailDomEvents(detail, run, isPreview, approval);
     }
 
     window.Pivot.moduleApi('agent.detailLoader').offerFull(currentContainer, runId, data, options);

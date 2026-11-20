@@ -71,12 +71,14 @@ function buildChatRequestState(req) {
     };
 }
 
-async function validateChatPreflight({ state, user, req, logAction }) {
+async function validateChatPreflight({ state, user, req, logAction, taskControl = false }) {
     const { sessionId, userId, modelId, modelContent } = state;
     const session = await sessionsRepository.getSessionById(sessionId, userId);
     if (!session) {
         return { error: { error: '无权访问或会话不存在', code: 'FORBIDDEN' } };
     }
+
+    if (taskControl) return { session, modelCfg: { id: null, name: '任务控制' } };
 
     const modelCfg = await getAccessibleModelAsync(modelId, user);
     if (!modelCfg) {

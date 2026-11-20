@@ -59,11 +59,11 @@ async function ensureResourceLedger(trx, run) {
     return await trx.queryOne('SELECT * FROM agent_run_resources WHERE run_id = ? FOR UPDATE', [run.id]);
 }
 
-async function reserveChildRunResources({ parentRunId, userId, requestedTokenBudget = 0, forkHistory = 'none' } = {}) {
+async function reserveChildRunResources({ parentRunId, userId, requestedTokenBudget = 0, forkHistory = 'none' } = {}, executor = null) {
     if (!parentRunId) return { tokenBudget: normalizePositiveBudget(requestedTokenBudget), reservation: null, forkHistory: normalizeForkHistory(forkHistory) };
     const requested = normalizePositiveBudget(requestedTokenBudget);
     const mode = normalizeForkHistory(forkHistory);
-    return await transaction(async trx => {
+    const reserve = async trx => {
         const parent = await trx.queryOne(`
             SELECT id, user_id, parent_run_id, max_token_budget, budget_config, usage_stats, metadata
             FROM agent_runs
@@ -131,14 +131,15 @@ async function reserveChildRunResources({ parentRunId, userId, requestedTokenBud
                 forkHistory: mode
             }
         };
-    });
+    };
+    return await (executor ? reserve(executor) : transaction(reserve));
 }
 
-async function initializeAgentRunResources({ runId, userId, parentRunId = null, tokenBudget = 0, forkHistory = 'none', maxChildren = null } = {}) {
+async function initializeAgentRunResources({ runId, userId, parentRunId = null, tokenBudget = 0, forkHistory = 'none', maxChildren = null } = {}, executor = { queryOne }) {
     if (!runId || !userId) return null;
     const mode = normalizeForkHistory(forkHistory);
     const safeBudget = normalizePositiveBudget(tokenBudget);
-    const result = await queryOne(`
+    const result = await executor.queryOne(`
         INSERT INTO agent_run_resources (
             run_id, user_id, parent_run_id, token_budget, max_children,
             fork_history_mode, fork_history_turns, created_at, updated_at
@@ -174,26 +175,6 @@ async function releaseChildRunReservation(runId) {
     });
 }
 
-async function cancelChildRunReservation({ parentRunId, userId, tokenBudget = 0 } = {}) {
-    if (!parentRunId || !userId) return false;
-    return await transaction(async trx => {
-        const parent = await trx.queryOne(`
-            SELECT run_id FROM agent_run_resources
-            WHERE run_id = ? AND user_id = ?
-            FOR UPDATE
-        `, [parentRunId, userId]);
-        if (!parent) return false;
-        const now = getBeijingTimestamp();
-        const changed = await trx.execute(`
-            UPDATE agent_run_resources
-            SET active_children = GREATEST(active_children - 1, 0),
-                tokens_reserved = GREATEST(tokens_reserved - ?, 0), updated_at = ?
-            WHERE run_id = ?
-        `, [normalizePositiveBudget(tokenBudget), now, parentRunId]);
-        return changed > 0;
-    });
-}
-
 async function recordAgentRunResourceUsage(runId, totalTokens = 0) {
     const amount = Math.max(Number(totalTokens) || 0, 0);
     if (!runId || amount <= 0) return null;
@@ -209,10 +190,10 @@ async function getAgentRunResources(runId, userId) {
     return await queryOne(`SELECT * FROM agent_run_resources WHERE run_id = ? AND user_id = ?`, [runId, userId]);
 }
 
-async function buildForkHistory(runId, userId, strategy = 'none') {
+async function buildForkHistory(runId, userId, strategy = 'none', executor = { query }) {
     const mode = normalizeForkHistory(strategy);
     if (mode.mode === 'none') return { mode: 'none', turns: 0, items: [] };
-    const rows = await query(`
+    const rows = await executor.query(`
         SELECT step_index, type, title, tool_name, input, output, status, error_message, created_at
         FROM agent_steps
         WHERE run_id = ?
@@ -236,7 +217,6 @@ async function buildForkHistory(runId, userId, strategy = 'none') {
 module.exports = {
     DEFAULT_CHILD_LIMIT,
     buildForkHistory,
-    cancelChildRunReservation,
     getAgentRunResources,
     initializeAgentRunResources,
     normalizeChildLimit,

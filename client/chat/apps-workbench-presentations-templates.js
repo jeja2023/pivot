@@ -157,7 +157,8 @@
 
     async function importTemplatePackage(file, state, { renderTemplatePanel, renderLibrary, toast } = {}) {
         if (!file) return;
-        const importMode = await window.Pivot.legacy.showConfirm?.('PPTX 模板导入方式', '确定后锁定可转换的母版装饰以优先保持外观；取消则保留简单装饰为可编辑对象。') === true ? 'fidelity' : 'editable';
+        const importMode = await window.Pivot.legacy.showConfirm?.('PPTX 模板导入方式',
+            'PPTX 文件最大 20 MiB，解包后总量最大 12 MiB。确定后锁定可转换的母版装饰以优先保持外观，取消则保留简单装饰为可编辑对象。') === true ? 'fidelity' : 'editable';
         const form = new FormData();
         form.append('file', file);
         form.append('importMode', importMode);

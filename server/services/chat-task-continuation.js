@@ -12,8 +12,8 @@ const { prepareContinuationKnowledgeScope, applyContinuationKnowledgeScope } = r
 
 const parseConversationRunMetadata = value => typeof value === 'string' ? JSON.parse(value) : value || {};
 
-async function getConversationTasks(sessionId, userId) {
-    return (await turns.listSessionTasks(sessionId, userId)).map(run => {
+async function getConversationTasks(sessionId, userId, { activeOnly = false } = {}) {
+    return (await turns.listSessionTasks(sessionId, userId, { activeOnly })).map(run => {
         const metadata = parseConversationRunMetadata(run.metadata);
         return { id: run.id, status: run.status, goal: String(run.goal).slice(0, 1600), conversationTaskId: metadata.conversationTaskId || run.id, active: ACTIVE_STATUSES.has(run.status),
             requestScope: { excludeKnowledge: metadata.capabilityConstraints?.excludeKnowledge === true, excludeWeb: metadata.capabilityConstraints?.excludeWeb === true, excludeData: metadata.capabilityConstraints?.excludeData === true, sourceOnly: metadata.capabilityConstraints?.sourceOnly === true },
@@ -82,8 +82,11 @@ async function continueConversationTask({ decision, user, sessionId, userMessage
         : { names: [], tools: [], origins: [], ports: [] };
     const reviseScope = revisedSelection || excluded;
     const idempotencyKey = `chat:${sessionId}:${userMessageId}`;
+    const newFormats = require('./task-display-title').requestedDeliveryFormats(instruction);
+    const previousFormats = metadata.taskContract?.acceptance?.requiredFormats || [];
+    const requiredFormats = newFormats.length ? [...new Set([...previousFormats, ...newFormats])] : previousFormats;
     const taskContractPatch = { goal: decision.objective || run.goal, constraints: decision.constraints || [], businessScope: decision.businessScope || metadata.taskContract?.businessScope || {}, deliverables: decision.deliverables || [],
-        acceptance: { ...decision.acceptance, requireSemanticVerification: true,
+        acceptance: { ...decision.acceptance, ...(requiredFormats.length ? { requiredFormats } : {}), requireSemanticVerification: true,
             requireCompleteSource: metadata.taskContract?.acceptance?.requireCompleteSource === true || sourceContent.length > 12000 }, authorizationRef: `user_message:${userMessageId}` };
     const updatedMetadata = await (deps.updateMetadata || updateAgentRunMetadataWithRetry)(run.id, current => {
         if (reviseScope && Number(current.chatToolScope?.sourceMessageId || 0) > Number(userMessageId)) throw new Error('工具范围已由更新的消息修改，请重新确认当前任务。');

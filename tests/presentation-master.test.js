@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { createHash } = require('node:crypto');
 const { normalize } = require('../server/services/presentations/master/contract');
 const { drive } = require('../server/services/presentations/master/driver');
 const tasks = require('../server/services/presentations/master/tasks');
@@ -16,6 +17,7 @@ function driverFixture(turns) {
         calls.push(action);
         if (action.action === 'health') return { status: 'ready', contentDigest: runtime.lock.contentDigest };
         if (action.action === 'read_runtime') return { text: '上游权威指引', nextOffset: null };
+        if (action.action === 'write') return { path: action.path, sha256: createHash('sha256').update(action.text).digest('hex') };
         if (action.action === 'deliver') return { sha256: 'final', packageCheck: { status: 'passed', slideCount: 2 } };
         return { exitCode: 0, stdout: '已完成' };
     };
@@ -274,8 +276,115 @@ test('检测到重复读取后自动调整，用新分页和已有成果继续�
     };
     const completed = await drive({ id: 1 }, 'id', current, fixture.hooks, fixture.deps);
     assert.equal(completed.receipt.sha256, 'final');
-    assert.equal(current.inspectionRepairAttempts, 1);
+    assert.equal(current.inspectionRepairAttempts, undefined);
     assert.deepEqual(fixture.calls.slice(-2).map(action => action.action), ['write', 'deliver']);
+});
+
+test('旧停滞检查点先核对未变清单，再回读已归档的指引并写入', async t => {
+    const repo = require('../server/repositories/presentation-master-tasks');
+    const taskStore = require('../server/services/tool-tasks');
+    const { archiveOlderObservations } = require('../server/services/presentations/master/history');
+    const list = { action: 'list' }, page = { action: 'read_runtime', path: 'references/guide.md', offset: 0 };
+    const listing = { files: [{ path: 'inputs/material-1.md', bytes: 1 }] };
+    const guide = { path: page.path, offset: 0, text: '制作指南'.repeat(500), nextOffset: null };
+    const messages = [{ role: 'system', content: '宿主制作规则' }, ...[[page, guide], [list, listing]].flatMap(([action, result]) => [
+        { role: 'assistant', content: JSON.stringify({ actions: [action] }) },
+        { role: 'user', content: JSON.stringify([{ action: action.action, result }]) }
+    ])];
+    const checkpoint = state({ bootstrapped: true, runtimeImage: '测试镜像', messages, steps: 32, usedTokens: 1022271,
+        inspectionRepairAttempts: 2, inspectionRepairPending: true, focusModelHistory: true });
+    checkpoint.request.profile = 'default';
+    checkpoint.review = { version: 1, approvals: { direction: { plan: { summary: '沿用已批准的沟通方向' } } } };
+    await archiveOlderObservations(checkpoint, { force: true, recentTurns: 1 });
+    const row = { status: 'failed', error_code: 'PPT_MASTER_NO_PROGRESS', result_json: { state: checkpoint } };
+    t.mock.method(runtime, 'identity', async () => checkpoint.runtimeImage);
+    t.mock.method(repo, 'read', async (_user, id) => ({ id, ...row }));
+    t.mock.method(repo, 'admit', async (_user, accept) => accept());
+    t.mock.method(repo, 'resume', async (_user, id, saved) => {
+        row.status = 'working'; row.result_json.state = JSON.parse(JSON.stringify(saved));
+        return { id };
+    });
+    t.mock.method(repo, 'claim', async () => null);
+    t.mock.method(taskStore, 'getForUser', async (_id, _user) => ({ status: row.status }));
+    await tasks.resume({ id: 1 }, 'resume-stall');
+    await new Promise(setImmediate);
+    const resumed = row.result_json.state;
+    assert.equal(resumed.steps, 32);
+    assert.equal(resumed.usedTokens, 1022271);
+    assert.equal(resumed.inspectionRepairAttempts, 0);
+    assert.equal(resumed.inspectionRepairPending, undefined);
+    assert.equal(resumed.focusModelHistory, undefined);
+    assert.match(resumed.messages.at(-1).content, /从已保存的动作回执推进当前阶段/);
+
+    const fixture = driverFixture([]);
+    let calls = 0;
+    const design = { requestInput: { kind: 'confirmation', stage: 'design', question: '请确认最终清单', plan: {
+        summary: '最终设计', project: 'project', pages: [{ title: '经营概况', values: [] }, { title: '后续建议', values: [] }]
+    } } };
+    fixture.deps.callModel = async (_model, modelMessages) => {
+        assert.doesNotMatch(modelMessages[0].content, /正在从重复检查中恢复/);
+        calls++;
+        if (calls === 3) assert.ok(modelMessages.some(message => message.content.includes(guide.text)));
+        return [{ actions: [list] }, { actions: [page] }, design][calls - 1];
+    };
+    const execute = fixture.deps.execute;
+    fixture.deps.execute = async (user, id, action) => action.action === 'list' ? listing : action.action === 'read_runtime' ? guide : execute(user, id, action);
+    const result = await drive({ id: 1 }, 'resume-stall', resumed, fixture.hooks, fixture.deps);
+    assert.equal(result.pending.question, '请确认最终清单');
+    assert.equal(calls, 3);
+    assert.equal(resumed.historyArchives.length, 1);
+    const { pendingInput, parseDecision } = require('../server/services/presentations/master/confirmation');
+    const approved = pendingInput('resume-stall', resumed);
+    resumed.response = parseDecision({ decision: 'approve', promptId: approved.promptId }, approved);
+    resumed.inspectionRepairAttempts = 2;
+    const authoring = driverFixture([
+        { actions: [{ action: 'write', path: 'project/design_spec.md', text: '已批准的制作规范' }] },
+        { requestInput: { kind: 'clarification', question: '请补充一项事实。' } }
+    ]);
+    await drive({ id: 1 }, 'resume-stall', resumed, authoring.hooks, authoring.deps);
+    assert.ok(resumed.review.approvals.design);
+    assert.equal(resumed.inspectionRepairAttempts, undefined);
+    assert.ok(authoring.calls.some(action => action.path === 'project/design_spec.md'));
+});
+
+test('工具失败保留脱敏诊断并使用独立的连续失败上限', async () => {
+    const { actionSummary } = require('../server/services/presentations/master/observations');
+    const action = { action: 'run', tool: 'text_measure', args: ['calibrate', 'private-project', '--outline'] };
+    const fixture = driverFixture(Array.from({ length: 3 }, () => ({ actions: [action] })));
+    const execute = fixture.deps.execute, current = state();
+    fixture.deps.execute = async (user, id, next) => {
+        if (next.action === 'run') throw runtime.error('内部路径及原始参数保留在检查点中。', 'PPT_MASTER_OPERATION_FAILED', 422);
+        return execute(user, id, next);
+    };
+    await assert.rejects(drive({ id: 1 }, 'tool-failures', current, fixture.hooks, fixture.deps), { code: 'PPT_MASTER_TOOL_REPEATED_FAILURE' });
+    assert.equal(current.steps, 3);
+    assert.equal(current.inspectionRepairAttempts, undefined);
+    assert.equal(current.actionRetries, undefined);
+    assert.equal(current.focusModelHistory, undefined);
+    const summary = actionSummary(current.messages);
+    assert.deepEqual(summary.lastFailure, { action: 'run', tool: 'text_measure', errorCode: 'PPT_MASTER_OPERATION_FAILED' });
+    assert.doesNotMatch(JSON.stringify(summary), /private-project|内部路径/);
+});
+
+test('大窗口单页获取 24000 字符，小窗口六项同批读取仍能安排下一轮', async () => {
+    for (const [window, count] of [[256000, 1], [32000, 6]]) {
+        const current = state({ bootstrapped: true, messages: [{ role: 'system', content: '制作规则' }] });
+        const actions = Array.from({ length: count }, (_, index) => ({ action: 'read_runtime', path: `references/${index}.md`, offset: 1, length: 60000 }));
+        const fixture = driverFixture([{ actions }, { complete: { path: 'project/exports/final.pptx' } }]);
+        const execute = fixture.deps.execute, pages = [];
+        fixture.deps.resolveModel = async () => ({ context_window_tokens: window, max_tokens: 8000 });
+        fixture.deps.execute = async (user, id, action) => {
+            if (action.action !== 'read_runtime') return execute(user, id, action);
+            pages.push(action.length);
+            return { path: action.path, text: '文'.repeat(action.length), offset: 1, nextOffset: action.length + 1, totalChars: 60001 };
+        };
+        await drive({ id: 1 }, 'read-batch', current, fixture.hooks, fixture.deps);
+        assert.equal(pages.length, count);
+        assert.equal(current.usageDiagnostics.length, 2);
+        assert.equal(JSON.parse(current.messages[2].content)[0].result.nextOffset, pages[0] + 1);
+        if (count === 1) assert.equal(pages[0], 24000);
+        else assert.ok(pages.every(length => length > 0 && length < 12000));
+    }
 });
 
 test('图片重建传递真实图片给视觉模型，检查点不保存图片编码，拒绝纯文本模型', async () => {

@@ -18,9 +18,7 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
     }));
     router.post('/apps/presentations/master/model-preflight', authMiddleware, asyncHandler(async (req, res) => {
         const available = await runtime.availability();
-        if (!available.enabled || (available.transport === 'service' && !available.checklistReady)) {
-            throw runtime.error(available.enabled ? '请更新独立PPT制作镜像以启用交付清单核验。' : available.message, 'PPT_MASTER_UNAVAILABLE', 503);
-        }
+        runtime.requireReady(available, req.body?.operation || 'generate');
         res.set('Cache-Control', 'no-store');
         res.json({ compatibility: await checkModel(req.user, req.body || {}, { visionRequired: req.body?.visionRequired === true }) });
     }));

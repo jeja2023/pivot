@@ -1,5 +1,6 @@
 'use strict';
 
+const { answerVerificationRun } = require('./model-escalation');
 const { prepareProgressiveToolDiscovery } = require('./progressive-tool-discovery');
 const { filterRunToolCatalog } = require('../agent-tool-discovery-scope');
 
@@ -24,8 +25,8 @@ function createRunPreparation(deps = {}) {
             : { longTermMemoryContext, agentProfileContext: runtimeMetadata.agentProfileContext || '', feedbackSignals: runtimeMetadata.feedbackSignals || null, skillTitle: runtimeMetadata.skillTitle || '', skillInstructions: runtimeMetadata.skillInstructions || '', projectContextPack: runtimeMetadata.projectContextPack || null, taskWorkingState };
     }
     function createOutcomeVerifier({ runId, run, user, getTaskContract, getObservations, signal, budget }) {
-        return async (answer, partial = false, reason = '', repairOptions = null) => await budget.withFinalization(() => verifyAgentOutcome({
-            runId, run, user, taskContract: getTaskContract(), answer,
+        return async (answer, partial = false, reason = '', repairOptions = null, answerModel = null) => await budget.withFinalization(() => verifyAgentOutcome({
+            runId, run: answerVerificationRun(run, answerModel), user, taskContract: getTaskContract(), answer,
             observations: getObservations(), partial, reason, signal, budget, repairOptions
         }));
     }

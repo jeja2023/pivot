@@ -63,6 +63,16 @@ function normalizeRouteOverrides(value = {}) {
     };
 }
 
+function filterChatToolOverrides(tools, overrides) {
+    if (overrides.excludeTools) return [];
+    const selected = new Set(overrides.tools);
+    const excluded = new Set(overrides.excludedTools);
+    return tools.filter(tool => {
+        const name = String(tool?.fullName || tool?.name || '');
+        return !excluded.has(name) && (!selected.size || selected.has(name));
+    });
+}
+
 function routePromptHash(prompt = '') {
     return `sha256:${crypto.createHash('sha256').update(String(prompt || '')).digest('hex')}`;
 }
@@ -204,7 +214,7 @@ function buildLegacyExecution(state, tools = [], { ragRequested = false, ragScop
             queryVector: null
         },
         tools: {
-            shouldPlan: Boolean(state.mcpEnabled),
+            shouldPlan: Boolean(state.mcpEnabled && tools.length),
             candidates: tools
         }
     };
@@ -396,7 +406,7 @@ function createSemanticRouter(deps = {}) {
         const scoreMap = (items, selected) => Object.fromEntries(items.map(item => [item.id, item.id === selected ? 0.98 : 0.02]));
         let resolvedTenantId = user?.tenant_id ?? null;
         if (!resolvedTenantId && user?.id) {
-            try { resolvedTenantId = await getPrimaryTenantId(user.id); } catch (_) {}
+            try { resolvedTenantId = await (state.getDecisionTenantId ? state.getDecisionTenantId() : getPrimaryTenantId(user.id)); } catch (_) {}
         }
         const shared = { taskState, tenantId: resolvedTenantId, userId: user?.id ?? null, user, modelCfg, sessionId: state.sessionId || '', env, signal };
         const [ragDecision, toolDecision, nextStepDecision] = await Promise.all([
@@ -421,6 +431,7 @@ function createSemanticRouter(deps = {}) {
         if (state.intentDecision) state = { ...state, intentDecision: constrainChatDecision(state.intentDecision, requestScope) };
         availableMcpTools = availableMcpTools.filter(tool => toolAllowedByRequestScope(tool, requestScope));
         const config = getConfig(env);
+        state = { ...state, routeConfig: config };
         const structuredTaskState = taskState && typeof taskState === 'object'
             ? taskState
             : state.taskState && typeof state.taskState === 'object' ? state.taskState : null;
@@ -431,7 +442,7 @@ function createSemanticRouter(deps = {}) {
         });
         const cleanPrompt = admission.cleanPrompt;
         const overrides = admission.overrides;
-        const legacyTools = Array.isArray(availableMcpTools) ? availableMcpTools : [];
+        const legacyTools = filterChatToolOverrides(availableMcpTools, overrides);
         const routeEnabled = admission.routeEnabled;
         if (admission.tier === 'direct') {
             const plan = buildDirectChatRoutePlan({ prompt: cleanPrompt, taskState: structuredTaskState, state, admission, startedAt });
@@ -584,6 +595,8 @@ function createSemanticRouter(deps = {}) {
         };
         if (overrides.excludeTools) {
             tools.reasonCode = 'explicit_tool_excluded';
+        } else if (overrides.tools.length && !legacyTools.length) {
+            tools.reasonCode = 'explicit_tool_unavailable';
         } else if (!state.mcpEnabled && (!routeEnabled || !config.autoToolDiscoveryEnabled)) {
             tools.action = explicitToolIntent || overrides.tools.length ? 'candidate_only' : 'skip';
             tools.reasonCode = tools.action === 'candidate_only' ? 'mcp_consent_required' : 'mcp_disabled';
@@ -594,19 +607,13 @@ function createSemanticRouter(deps = {}) {
         } else if (!needAutoTools) {
             tools.reasonCode = isConversationOnlyPrompt(cleanPrompt) ? 'conversation_only' : 'tool_not_requested';
         } else {
-            const excluded = new Set(overrides.excludedTools);
-            let permitted = legacyTools.filter(tool => !excluded.has(String(tool?.fullName || '')));
-            if (overrides.tools.length) {
-                const requested = new Set(overrides.tools);
-                permitted = permitted.filter(tool => requested.has(String(tool?.fullName || '')));
-                tools.reasonCode = permitted.length ? 'explicit_tool_override' : 'explicit_tool_unavailable';
-            }
-            if (!permitted.length) {
+            if (overrides.tools.length) tools.reasonCode = 'explicit_tool_override';
+            if (!legacyTools.length) {
                 tools.reasonCode = tools.reasonCode || 'no_authorized_tool';
             } else {
                 try {
                     const embeddingConfig = await getEmbedding(user?.id || null);
-                    const entries = await toolIndex.getEntries(permitted, { embeddingConfig, userId: user?.id || null });
+                    const entries = await toolIndex.getEntries(legacyTools, { embeddingConfig, userId: user?.id || null });
                     const scored = entries
                         .map(entry => ({ entry, ...scoreTool(entry, cleanPrompt, queryVector || [], overrides) }))
                         .sort((left, right) => right.score - left.score || right.rule - left.rule)
@@ -617,7 +624,7 @@ function createSemanticRouter(deps = {}) {
                     // 泛泛提及“数据库表”“工具库”可能只是概念问答；若先弹授权、
                     // 授权后规划器又返回 none，会形成误导性的两阶段矛盾。
                     const needsMcpConsent = !state.mcpEnabled;
-                    const qualified = forced || best.score >= config.toolThreshold;
+                    const qualified = forced || (best && best.score >= config.toolThreshold);
                     const consentWarranted = !needsMcpConsent || explicitToolIntent || overrides.tools.length > 0;
                     if (best && qualified && consentWarranted) {
                         tools.action = state.mcpEnabled ? 'propose' : 'candidate_only';
@@ -733,7 +740,7 @@ function createSemanticRouter(deps = {}) {
                     queryVector: rag.queryVector
                 },
                 tools: {
-                    shouldPlan: nextStep.action !== 'clarify' && state.mcpEnabled && tools.action === 'propose',
+                    shouldPlan: nextStep.action !== 'clarify' && state.mcpEnabled && tools.action === 'propose' && tools.candidateTools.length > 0,
                     candidates: tools.candidateTools
                 },
                 nextStep: { action: nextStep.action }
@@ -763,6 +770,7 @@ const defaultRouter = createSemanticRouter();
 
 module.exports = {
     ...defaultRouter,
+    filterChatToolOverrides,
     buildRouteMetadata,
     buildRouteSseEvent,
     createSemanticRouter,

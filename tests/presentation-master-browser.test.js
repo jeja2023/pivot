@@ -37,9 +37,11 @@ async function fixture() {
     app.use((error, _req, res, _next) => res.status(error.status || 500).json({ error: error.message }));
     const server = await new Promise(resolve => { const instance = app.listen(0, '127.0.0.1', () => resolve(instance)); });
     const browser = await chromium.launch({ headless: true });
-    return { browser, directory, requests, url: `http://127.0.0.1:${server.address().port}`, async close() {
-        await browser.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true });
-    } };
+    return {
+        browser, directory, requests, url: `http://127.0.0.1:${server.address().port}`, async close() {
+            await browser.close(); await new Promise(resolve => server.close(resolve)); await fs.rm(directory, { recursive: true, force: true });
+        }
+    };
 }
 async function pageFor(context, viewport = { width: 1366, height: 768 }, colorScheme = 'light', openForm = true) {
     const page = await context.browser.newPage({ viewport, colorScheme, locale: 'en-US' });
@@ -50,14 +52,18 @@ async function pageFor(context, viewport = { width: 1366, height: 768 }, colorSc
         const modules = {};
         window.fixtureState = { active: null };
         window.fixtureTaskResponses = [];
-        window.Pivot = { legacy: { currentUser: { id: 1 }, loadSelectableModels: async () => ({ models: [{ id: 1, name: '制作模型' }], defaultModelId: 1 }) },
-            exposeModule: (name, value) => modules[name] = value, moduleApi: name => modules[name] };
-        window.fixtureHelpers = { requestJson: async (url, options = {}) => {
-            const response = await fetch(url, { ...options, headers: { ...options.headers, 'x-fixture-user': '1' } });
-            const data = await response.json();
-            window.fixtureTaskResponses.push(url);
-            if (!response.ok) throw new Error(data.error); return data;
-        } };
+        window.Pivot = {
+            legacy: { currentUser: { id: 1 }, loadSelectableModels: async () => ({ models: [{ id: 1, name: '制作模型' }], defaultModelId: 1 }) },
+            exposeModule: (name, value) => modules[name] = value, moduleApi: name => modules[name]
+        };
+        window.fixtureHelpers = {
+            requestJson: async (url, options = {}) => {
+                const response = await fetch(url, { ...options, headers: { ...options.headers, 'x-fixture-user': '1' } });
+                const data = await response.json();
+                window.fixtureTaskResponses.push(url);
+                if (!response.ok) throw new Error(data.error); return data;
+            }
+        };
     });
     for (const file of ['apps-model-selector.js', 'apps-workbench-presentation-goals.js', 'apps-workbench-presentation-master-form.js', 'apps-workbench-presentation-master-page-review.js', 'apps-workbench-presentation-master.js']) await page.addScriptTag({ path: path.join(root, 'client/chat', file) });
     await page.evaluate(template => {
@@ -81,10 +87,14 @@ test('待核验草稿在失败面板可单独下载，保留继续制作入口',
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
         await page.evaluate(() => { window.Pivot.api = { fetch: (...args) => fetch(...args) }; });
-        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
-            id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, request: { title: '经营回顾', maxSteps: 80 },
-            error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '交付第 1 页缺少已确认的可见标题。' }
-        } } }));
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, request: { title: '经营回顾', maxSteps: 80 },
+                    error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '交付第 1 页缺少已确认的可见标题。' }
+                }
+            }
+        }));
         await page.route('**/master/tasks/fixture-task/review-draft', route => route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', body: 'fixture draft' }));
         await page.locator('#presentation-master-start').click();
         await expect(panel.getByRole('button', { name: '从检查点继续' })).toBeVisible();
@@ -101,16 +111,26 @@ test('旧制作记录可放大单页并保存，通过历史入口重新打开',
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
         const name = number => 'review-' + 'a'.repeat(64) + '-' + number + '.png';
-        const preview = { pages: [{ page: 1, title: '第一页', file: name(1) }, { page: 3, title: '第三页', file: name(3) }],
-            failedPages: [{ page: 2 }], exportRevision: 'a'.repeat(64) };
+        const preview = {
+            pages: [{ page: 1, title: '第一页', file: name(1) }, { page: 3, title: '第三页', file: name(3) }],
+            failedPages: [{ page: 2 }], exportRevision: 'a'.repeat(64)
+        };
         let saved = false;
-        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
-            id: 'fixture-task', status: 'failed', canPreviewExport: !saved, hasSavedReviewPages: saved,
-            request: { title: '旧经营回顾' }, error: { code: 'PPT_MASTER_OPERATION_FAILED', message: '第 2 页需要修复。' }
-        } } }));
-        await page.route('**/master/tasks/recent', route => route.fulfill({ json: { tasks: [
-            { id: 'fixture-task', status: 'failed', title: '旧经营回顾', hasSavedReviewPages: saved }
-        ] } }));
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'fixture-task', status: 'failed', canPreviewExport: !saved, hasSavedReviewPages: saved,
+                    request: { title: '旧经营回顾' }, error: { code: 'PPT_MASTER_OPERATION_FAILED', message: '第 2 页需要修复。' }
+                }
+            }
+        }));
+        await page.route('**/master/tasks/recent', route => route.fulfill({
+            json: {
+                tasks: [
+                    { id: 'fixture-task', status: 'failed', title: '旧经营回顾', hasSavedReviewPages: saved }
+                ]
+            }
+        }));
         await page.route('**/master/tasks/fixture-task/review-pages', route => {
             assert.equal(route.request().method(), saved ? 'GET' : 'POST');
             return route.fulfill({ json: preview });
@@ -157,16 +177,28 @@ test('PPT 制作记录可打开旧草稿并将副本交给原稿编辑器', asyn
             window.Pivot.api = { fetch: (...args) => fetch(...args) };
             window.Pivot.exposeModule('apps.presentations.native', { open: async source => { window.fixtureNativeSource = source; } });
         });
-        await page.route('**/master/tasks/recent', route => route.fulfill({ json: { tasks: [
-            { id: 'old-draft', title: '旧经营回顾', status: 'failed', createdAt: '2026-11-18T06:17:50.000Z' },
-            { id: 'old-empty', title: '未生成稿件', status: 'completed', createdAt: '2026-11-18T05:08:53.000Z' }
-        ] } }));
-        await page.route('**/master/tasks/old-draft', route => route.fulfill({ json: { task: {
-            id: 'old-draft', status: 'failed', hasReviewDraft: true, request: { title: '旧经营回顾' }, error: { message: '有页面未通过。' }
-        } } }));
-        await page.route('**/master/tasks/old-empty', route => route.fulfill({ json: { task: {
-            id: 'old-empty', status: 'failed', request: { title: '未生成稿件' }, error: { message: '材料读取失败。' }
-        } } }));
+        await page.route('**/master/tasks/recent', route => route.fulfill({
+            json: {
+                tasks: [
+                    { id: 'old-draft', title: '旧经营回顾', status: 'failed', createdAt: '2026-11-18T06:17:50.000Z' },
+                    { id: 'old-empty', title: '未生成稿件', status: 'completed', createdAt: '2026-11-18T05:08:53.000Z' }
+                ]
+            }
+        }));
+        await page.route('**/master/tasks/old-draft', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'old-draft', status: 'failed', hasReviewDraft: true, request: { title: '旧经营回顾' }, error: { message: '有页面未通过。' }
+                }
+            }
+        }));
+        await page.route('**/master/tasks/old-empty', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'old-empty', status: 'failed', request: { title: '未生成稿件' }, error: { message: '材料读取失败。' }
+                }
+            }
+        }));
         await page.route('**/master/tasks/old-draft/review-draft', route => route.fulfill({ contentType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', body: 'test draft' }));
         await page.route('**/apps/presentations/assets', route => {
             assert.match(route.request().postData(), /test draft/);
@@ -217,13 +249,19 @@ test('逐页核验显示应有数据，提交时只修复勾选页', async () =>
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
         const revision = 'b'.repeat(64);
-        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
-            id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, canRepairPages: true, canRegenerate: true, draftRevision: revision,
-            request: { title: '经营回顾', maxSteps: 80 }, pageReview: { passedPages: [1], failedPages: [
-                { page: 2, title: '营收', items: [{ index: 1, text: '收入120万元' }] },
-                { page: 3, title: '成本', items: [{ index: 1, text: '成本80万元' }] }
-            ] }, error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '第 2 页关键数据待核验。' }
-        } } }));
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'fixture-task', status: 'failed', hasReviewDraft: true, recoverable: true, canRepairPages: true, canRegenerate: true, draftRevision: revision,
+                    request: { title: '经营回顾', maxSteps: 80 }, pageReview: {
+                        passedPages: [1], failedPages: [
+                            { page: 2, title: '营收', items: [{ index: 1, text: '收入120万元' }] },
+                            { page: 3, title: '成本', items: [{ index: 1, text: '成本80万元' }] }
+                        ]
+                    }, error: { code: 'PPT_MASTER_DELIVERY_REVIEW_REQUIRED', message: '第 2 页关键数据待核验。' }
+                }
+            }
+        }));
         let submitted;
         await page.route('**/master/tasks/fixture-task/resume', route => {
             submitted = route.request().postDataJSON();
@@ -248,17 +286,25 @@ test('整份重新生成需经确认，新任务可以返回查看原草稿', as
     try {
         const page = await pageFor(context), panel = page.locator('#presentation-master-status');
         await page.evaluate(() => { window.Pivot.legacy.showConfirm = async () => window.fixtureRegenerateApproved === true; });
-        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
-            id: 'fixture-task', status: 'failed', canRegenerate: true, hasReviewDraft: true, request: { title: '原稿' }, error: { message: '需要修改。' }
-        } } }));
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'fixture-task', status: 'failed', canRegenerate: true, hasReviewDraft: true, request: { title: '原稿' }, error: { message: '需要修改。' }
+                }
+            }
+        }));
         let calls = 0;
         await page.route('**/master/tasks/fixture-task/regenerate', route => {
             calls++;
             return route.fulfill({ json: { task: { id: 'new-task' } } });
         });
-        await page.route('**/master/tasks/new-task', route => route.fulfill({ json: { task: {
-            id: 'new-task', status: 'completed', regeneratedFrom: 'fixture-task', request: { title: '重生成的新稿' }
-        } } }));
+        await page.route('**/master/tasks/new-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'new-task', status: 'completed', regeneratedFrom: 'fixture-task', request: { title: '重生成的新稿' }
+                }
+            }
+        }));
         await page.locator('#presentation-master-start').click();
         const regenerate = panel.getByRole('button', { name: '重新生成整份' });
         await regenerate.click();
@@ -280,8 +326,14 @@ test('工作中轮询保留用量展开与停止操作，短暂失败后自动�
         await page.route('**/master/tasks/fixture-task', async route => {
             calls++;
             if (calls === 2) return route.fulfill({ status: 503, json: { error: '临时故障' } });
-            return route.fulfill({ json: { task: { id: 'fixture-task', status: 'working', request: { presentationId: '', tokenBudget: 1000000 },
-                usageDiagnostics: [{ call: 1, step: 1, inputTokens: 10, outputTokens: 2, cumulativeTokens: 12 }] } } });
+            return route.fulfill({
+                json: {
+                    task: {
+                        id: 'fixture-task', status: 'working', request: { presentationId: '', tokenBudget: 1000000 },
+                        usageDiagnostics: [{ call: 1, step: 1, inputTokens: 10, outputTokens: 2, cumulativeTokens: 12 }]
+                    }
+                }
+            });
         });
         await page.locator('#presentation-master-start').click();
         await panel.getByRole('button', { name: /查看每轮模型用量/ }).click();
@@ -369,8 +421,10 @@ test('重新打开不查询旧任务并按默认不限新建，旧预算仅主�
     const context = await fixture();
     try {
         const page = await pageFor(context);
-        const earlier = { id: 'earlier-task', status: 'failed', recoverable: true,
-            request: { presentationId: '', tokenBudget: 1000000 }, error: { code: 'PPT_MASTER_BUDGET_EXHAUSTED', message: '剩余模型预算不足。' } };
+        const earlier = {
+            id: 'earlier-task', status: 'failed', recoverable: true,
+            request: { presentationId: '', tokenBudget: 1000000 }, error: { code: 'PPT_MASTER_BUDGET_EXHAUSTED', message: '剩余模型预算不足。' }
+        };
         let latestRequests = 0;
         await page.route('**/master/tasks/latest?**', route => { latestRequests++; return route.fulfill({ json: { task: earlier } }); });
         await page.route('**/master/tasks/earlier-task', route => route.fulfill({ json: { task: earlier } }));
@@ -406,8 +460,14 @@ test('新建任务可在桌面和窄屏选择不限累计预算，并显示超�
         const page = await pageFor(context);
         const dialog = page.getByRole('dialog'), budget = dialog.getByRole('spinbutton', { name: '累计模型预算（令牌，0 为不限）' });
         await dialog.locator('.presentation-master-advanced summary').click();
-        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: { id: 'fixture-task', status: 'completed',
-            request: { tokenBudget: 0 }, steps: 20, usedTokens: 1200000 } } }));
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+            json: {
+                task: {
+                    id: 'fixture-task', status: 'completed',
+                    request: { tokenBudget: 0 }, steps: 20, usedTokens: 1200000
+                }
+            }
+        }));
         for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
             await page.setViewportSize(viewport);
             await expect(budget).toBeVisible();
@@ -433,14 +493,18 @@ test('切换模板保留未提交内容，关闭后清空旧任务问题、进�
         const engineState = page.locator('#presentation-master-engine-state');
         const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
         const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
-        await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => {} }));
+        await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => { } }));
         await page.getByRole('button', { name: '更换模板' }).click();
         await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-title')).toHaveValue('测试演示');
         await expect(page.locator('#presentation-master-instruction')).toHaveValue('按材料制作汇报，保留原始数字和来源。');
         await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
-        let recent = { id: 'fixture-task', status: 'completed', result: { message: '旧任务已交付',
-            files: [{ format: 'pptx', renditionId: 'old', filename: '旧任务.pptx' }] } };
+        let recent = {
+            id: 'fixture-task', status: 'completed', result: {
+                message: '旧任务已交付',
+                files: [{ format: 'pptx', renditionId: 'old', filename: '旧任务.pptx' }]
+            }
+        };
         await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task: recent } }));
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: recent } }));
         await page.locator('#entry').click();
@@ -481,8 +545,10 @@ test('关闭后迟到的续跑成功响应无法重新查询旧任务或填回�
         const engineState = page.locator('#presentation-master-engine-state');
         const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
         const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
-        const task = { id: 'fixture-task', status: 'failed', recoverable: true, request: { presentationId: '', modelId: '1' },
-            error: { code: 'PPT_MASTER_STEP_LIMIT', message: '旧任务已达到轮次上限。' } };
+        const task = {
+            id: 'fixture-task', status: 'failed', recoverable: true, request: { presentationId: '', modelId: '1' },
+            error: { code: 'PPT_MASTER_STEP_LIMIT', message: '旧任务已达到轮次上限。' }
+        };
         let statusRequests = 0, release, entered;
         const gate = new Promise(resolve => { release = resolve; });
         const pending = new Promise(resolve => { entered = resolve; });
@@ -563,15 +629,128 @@ test('关闭后迟到的旧原稿详情不能覆盖重开后已选择的新原�
     } finally { await context.close(); }
 });
 
+test('停滞详情显示重复动作的归档坐标，连续工具失败显示脱敏操作摘要', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context);
+        let failed = {
+            id: 'fixture-task', status: 'failed', recoverable: true, steps: 11, usedTokens: 100000,
+            request: { presentationId: '', tokenBudget: 0, maxSteps: 80 },
+            error: { code: 'PPT_MASTER_NO_PROGRESS', message: '多轮读取未取得新结果。' },
+            actionRetries: 3, lastActionCorrection: 'PPT_MASTER_ACTION_INVALID',
+            actionSummary: { writes: 0, lastActions: [{ action: 'read_history', failed: false }] },
+            inspectionDiagnostic: { action: 'read_history', archive: 2, index: 18, offset: 12000 },
+            usageDiagnostics: [
+                {
+                    call: 1, step: 1, inputTokens: 20785, outputTokens: 45, cumulativeTokens: 20830, inputEstimate: 45011, originalEstimate: 44217, compactedWrites: 0,
+                    outcome: 'retry', errorCode: 'PPT_MASTER_ACTION_INVALID'
+                },
+                {
+                    call: 2, step: 1, inputTokens: 21763, outputTokens: 38, cumulativeTokens: 42631, inputEstimate: 47641, originalEstimate: 46847, compactedWrites: 0,
+                    outcome: 'productive', actions: [{ action: 'read_runtime', path: 'workflows/generate-pptx.md', offset: 0, nextOffset: 24000 }, { action: 'write', path: 'svg_output/slide_01.svg', confirmed: true }]
+                },
+                {
+                    call: 3, step: 2, inputTokens: 24515, outputTokens: 39, cumulativeTokens: 67185, inputEstimate: 53857, originalEstimate: 53063, compactedWrites: 1,
+                    outcome: 'tool_failed', skippedActions: 1, actions: [{ action: 'run', tool: 'text_measure', subcommand: 'calibrate', failed: true, exitCode: 2 }]
+                }
+            ]
+        };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: failed } }));
+        await page.route('**/master/tasks/fixture-task/resume', route => {
+            failed = {
+                ...failed, error: { code: 'PPT_MASTER_TOOL_REPEATED_FAILURE', message: '制作工具连续执行失败。' },
+                actionSummary: { writes: 0, lastActions: [{ action: 'run', failed: true }], lastFailure: { action: 'run', tool: 'text_measure', exitCode: 2 } }
+            };
+            return route.fulfill({ json: { task: failed } });
+        });
+        await page.locator('#presentation-master-start').click();
+        const panel = page.locator('#presentation-master-status');
+        await expect(panel).toContainText('已修正模型动作 3 次。最近原因：动作格式、参数或阶段不符。');
+        await expect(panel).toContainText('重复检查：回读历史 · 归档 2，消息 18 · 偏移 12000');
+        await expect(panel).toContainText('本步工作（第 2 步）：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）（其余 1 项因前序失败未执行）。');
+        await expect(panel).toContainText('轮次异常记录（共 2 轮，最近在第 3 轮 / 步骤 2）：工具动作未通过：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）；同批后续 1 项动作已停止。');
+        await panel.getByRole('button', { name: /查看每轮模型用量/ }).click();
+        const usageDialog = page.getByRole('dialog', { name: '每轮模型用量明细' });
+        await expect(usageDialog).toContainText('动作修正重试');
+        await expect(usageDialog).toContainText('异常诊断：动作格式、参数或阶段不符，宿主已自动要求模型修正重试。');
+        await expect(usageDialog).toContainText('本轮工作：读取指引 · 默认生成流程指引 · 偏移 0→24000；写入文件 · 第 1 页矢量稿 · 已确认写入');
+        await expect(usageDialog).toContainText('异常诊断：工具动作未通过：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）；同批后续 1 项动作已停止。');
+        await usageDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await page.getByRole('button', { name: '从检查点继续' }).click();
+        await expect(panel).toContainText('最近失败：执行工具 · text_measure · 退出码 2');
+    } finally { await context.close(); }
+});
+
+test('失败检查点可查看材料读取范围和已保存提纲，也能区分尚未形成方案', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context);
+        let failed = {
+            id: 'fixture-task', status: 'failed', recoverable: true, steps: 9, usedTokens: 100000,
+            request: { presentationId: '', tokenBudget: 0, maxSteps: 80 },
+            error: { code: 'PPT_MASTER_PHASE_LIMIT', message: '本阶段尚未提交方案。' },
+            checkpointProgress: {
+                requirementsLoaded: true, materials: [
+                    { title: '情况报告.docx', saved: true, reads: 1, failedReads: 0, totalChars: 12000, contiguous: 6000, complete: false }
+                ], plans: []
+            }
+        };
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: failed } }));
+        await page.route('**/master/tasks/fixture-task/resume', route => {
+            failed = {
+                ...failed, checkpointProgress: {
+                    ...failed.checkpointProgress, plans: [
+                        { stage: 'direction', status: 'approved', summary: '按经营结果组织汇报', pages: [] },
+                        {
+                            stage: 'design', status: 'citation_review', summary: '两页草稿', pages: [
+                                { title: '经营概况', values: ['已核对事项 3 项'] }, { title: '后续安排', values: [] }
+                            ]
+                        }
+                    ]
+                }
+            };
+            return route.fulfill({ json: { task: failed } });
+        });
+        await page.locator('#presentation-master-start').click();
+        const panel = page.locator('#presentation-master-status');
+        await panel.getByRole('button', { name: /查看材料与提纲/ }).click();
+        const checkpointDialog = page.getByRole('dialog', { name: '材料与提纲' });
+        await expect(checkpointDialog).toBeVisible();
+        const dialogBox = await checkpointDialog.boundingBox();
+        const viewport = page.viewportSize();
+        assert(dialogBox.y >= 0 && dialogBox.y + dialogBox.height <= viewport.height, JSON.stringify({ viewport, dialogBox }));
+        await expect(checkpointDialog).toContainText('情况报告.docx');
+        await expect(checkpointDialog).toContainText('从开头已连续读取 6,000 / 12,000 字符');
+        await expect(checkpointDialog.getByText('检查点中还没有已保存的方案或逐页提纲。')).toBeVisible();
+        await expect(panel.getByText('从开头已连续读取 6,000 / 12,000 字符')).toHaveCount(0);
+        await checkpointDialog.getByRole('button', { name: '关闭', exact: true }).click();
+        await expect(checkpointDialog).toBeHidden();
+        await panel.getByRole('button', { name: '从检查点继续' }).click();
+        await expect(panel.getByRole('button', { name: /有已保存方案/ })).toBeVisible();
+        await panel.getByRole('button', { name: /查看材料与提纲/ }).click();
+        await expect(checkpointDialog).toBeVisible();
+        await expect(checkpointDialog).toContainText('沟通方向');
+        await expect(checkpointDialog).toContainText('已确认');
+        await expect(checkpointDialog).toContainText('逐页提纲');
+        await expect(checkpointDialog).toContainText('引文待核对');
+        await expect(checkpointDialog).toContainText('共 2 页');
+        await expect(checkpointDialog).toContainText('第 2 页');
+        await expect(checkpointDialog).toContainText('后续安排');
+        await checkpointDialog.getByRole('button', { name: '关闭', exact: true }).click();
+    } finally { await context.close(); }
+});
+
 test('累计预算不足时展示原预算，续跑可提高上限或改为不限', async () => {
     const context = await fixture();
     try {
         const page = await pageFor(context), submitted = [];
-        const failed = { id: 'fixture-task', status: 'failed', recoverable: true, steps: 11, usedTokens: 299001,
+        const failed = {
+            id: 'fixture-task', status: 'failed', recoverable: true, steps: 11, usedTokens: 299001,
             request: { presentationId: '', tokenBudget: 400000, maxSteps: 80 }, error: { code: 'PPT_MASTER_BUDGET_EXHAUSTED', message: '剩余模型预算不足。' },
             actionSummary: { writes: 2, lastWrittenPath: 'project/spec_lock.md', failedWrites: 1, lastActions: [{ action: 'write', failed: true }] },
             modelRequest: { contextWindow: 256000, configuredInputLimit: 220000, inputEstimate: 1300, outputLimit: 12000, timeoutSeconds: 300 },
-            usageDiagnostics: [{ step: 11, inputTokens: 1200, outputTokens: 200, inputEstimated: false, outputEstimated: true, inputEstimate: 1300, originalEstimate: 2000, compactedWrites: 1, cumulativeTokens: 299001, breakdown: { initial: 500, history: 700, toolResults: 100, images: 0 } }] };
+            usageDiagnostics: [{ step: 11, inputTokens: 1200, outputTokens: 200, inputEstimated: false, outputEstimated: true, inputEstimate: 1300, originalEstimate: 2000, compactedWrites: 1, cumulativeTokens: 299001, breakdown: { initial: 500, history: 700, toolResults: 100, images: 0 } }]
+        };
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: failed } }));
         await page.route('**/master/tasks/fixture-task/resume', async route => {
             const input = route.request().postDataJSON();
@@ -655,10 +834,14 @@ test('方案确认可直接继续，补充问题要求实际答复，失败保�
     const context = await fixture();
     try {
         const page = await pageFor(context), submitted = [];
-        let task = { id: 'fixture-task', status: 'input_required', steps: 3, usedTokens: 59211,
+        let task = {
+            id: 'fixture-task', status: 'input_required', steps: 3, usedTokens: 59211,
             request: { presentationId: '', tokenBudget: 400000, maxSteps: 80 },
-            progress: { message: '是否按方案制作？' }, inputRequest: { kind: 'confirmation', stage: 'design', question: '是否按方案制作？', context: '八页汇报方案。',
-                plan: { pages: [{ title: '1. 离线机房 AI 运行环境搭建', values: [{ text: '搭建现代化 AI 运行环境', source: { path: 'inputs/material-1.md', quote: '通过这套流程搭建出 RTX 2080 Ti 加速环境' } }] }] }, promptId: 'a'.repeat(64) } };
+            progress: { message: '是否按方案制作？' }, inputRequest: {
+                kind: 'confirmation', stage: 'design', question: '是否按方案制作？', context: '八页汇报方案。',
+                plan: { pages: [{ title: '1. 离线机房 AI 运行环境搭建', values: [{ text: '搭建现代化 AI 运行环境', source: { path: 'inputs/material-1.md', quote: '通过这套流程搭建出 RTX 2080 Ti 加速环境' } }] }] }, promptId: 'a'.repeat(64)
+            }
+        };
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
         let fail = true;
         await page.route('**/master/tasks/fixture-task/respond', async route => {
@@ -763,7 +946,7 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
         await expect.poll(async () => (await fs.readdir(context.directory)).length).toBe(0);
         let release, entered;
         const gate = new Promise(resolve => release = resolve), started = new Promise(resolve => entered = resolve);
-        await page.route('**/materials/extract', async route => { entered(); await gate; await route.fulfill({ json: { material: { text: '迟到的材料' } } }).catch(() => {}); });
+        await page.route('**/materials/extract', async route => { entered(); await gate; await route.fulfill({ json: { material: { text: '迟到的材料' } } }).catch(() => { }); });
         await upload.setInputFiles(await word('等待解析.docx', '等待解析'));
         await page.locator('#presentation-master-start').click(); await started;
         await processDialog.getByRole('button', { name: '关闭', exact: true }).click();
@@ -807,12 +990,16 @@ test('模板制作弹窗在桌面、笔记本和窄屏保持底部按钮可见�
             await page.locator('.presentation-master-advanced summary').click();
             await page.locator('.workspace-modal-body').evaluate(element => element.scrollTop = 0);
             await page.screenshot({ path: path.join(output, `${colorScheme}-${viewport.width}.png`) });
-            await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: {
-                id: 'fixture-task', status: 'working', steps: 6, usedTokens: 155395,
-                request: { presentationId: '', tokenBudget: 160000, title: '测试演示' },
-                progress: { message: '已归档较早的工具结果，正在继续制作。' },
-                usageDiagnostics: [{ call: 1, step: 6, inputTokens: 80679, outputTokens: 2100, cumulativeTokens: 155395, inputEstimate: 80679, originalEstimate: 92000, compactedWrites: 2 }]
-            } } }));
+            await page.route('**/master/tasks/fixture-task', route => route.fulfill({
+                json: {
+                    task: {
+                        id: 'fixture-task', status: 'working', steps: 6, usedTokens: 155395,
+                        request: { presentationId: '', tokenBudget: 160000, title: '测试演示' },
+                        progress: { message: '已归档较早的工具结果，正在继续制作。' },
+                        usageDiagnostics: [{ call: 1, step: 6, inputTokens: 80679, outputTokens: 2100, cumulativeTokens: 155395, inputEstimate: 80679, originalEstimate: 92000, compactedWrites: 2 }]
+                    }
+                }
+            }));
             await page.locator('#presentation-master-start').click();
             const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
             await expect(processDialog).toBeVisible();

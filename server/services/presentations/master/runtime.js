@@ -21,9 +21,11 @@ async function availability() {
         if (await remote.configured()) {
             const health = await remote.info({ force: true });
             if (!health) return { enabled: false, transport: 'service', message: '完整制作服务已停用，标准PPT功能继续可用。' };
+            const generationReady = health.deliveryChecklist === 1 && health.currentExport === 1;
             return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId,
                 checklistReady: health.deliveryChecklist === 1, currentExportReady: health.currentExport === 1, pageRepairReady: health.pageRepair === 1,
-                progressSnapshotsReady: health.progressSnapshots === 1, message: '独立PPT制作服务可用。' };
+                generationReady, templateReady: health.deliveryChecklist === 1, progressSnapshotsReady: health.progressSnapshots === 1,
+                message: generationReady ? '独立PPT制作服务可用。' : '独立服务已连接，生成或编辑 PPTX 需要更新镜像以启用完整导出核验。' };
         }
     } catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }
     if (!deployment.accepting()) return { enabled: false, message: 'PPT制作引擎正在更新，请稍后重新提交。' };
@@ -33,6 +35,12 @@ async function availability() {
     try { worker.verifyWorkerSignature(worker.normalizeDefinition(definition), { env: deployment.workerEnv() }); }
     catch (_) { return { enabled: false, message: '完整制作镜像尚未通过当前部署的签名信任检查。' }; }
     return { enabled: true, message: '完整制作引擎已登记，任务启动时还将核对完整运行包。' };
+}
+function requireReady(available, operation) {
+    if (!available.enabled) throw error(available.message, 'PPT_MASTER_UNAVAILABLE', 503);
+    if (available.transport === 'service' && (!available.checklistReady || operation !== 'create_template' && !available.currentExportReady)) {
+        throw error('请更新独立PPT制作镜像，以启用交付清单与本次导出核验。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 503);
+    }
 }
 function taskDirectory(user, id) {
     if (!Number.isSafeInteger(Number(user?.id)) || Number(user.id) <= 0 || !/^tooltask_[A-Za-z0-9_-]{24,80}$/.test(String(id))) throw error('制作任务标识无效。');
@@ -87,7 +95,8 @@ async function readOutput(user, id, name, maxBytes = 60 * 1024 * 1024) {
         : review ? path.join(root, '.pivot', 'review-preview', name) : name.startsWith('preview-') ? path.join(root, 'native-preview', name.replace('preview-', 'slide-'))
         : path.join(root, name === 'review-draft.pptx' ? '.pivot' : 'delivery', name);
     const stat = await fs.lstat(file);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > maxBytes || !comparable(await fs.realpath(file)).startsWith(comparable(root) + path.sep)) throw error('交付文件不存在或越过当前任务范围。', 'PPT_MASTER_OUTPUT_INVALID', 422);
+    if (!stat.isFile() || stat.isSymbolicLink() || !comparable(await fs.realpath(file)).startsWith(comparable(root) + path.sep)) throw error('交付文件不存在或越过当前任务范围。', 'PPT_MASTER_OUTPUT_INVALID', 422);
+    if (stat.size > maxBytes) throw error('交付文件超过允许大小。', 'PPT_MASTER_OUTPUT_TOO_LARGE', 413);
     return fs.readFile(file);
 }
 function isReviewImage(name) { return typeof name === 'string' && /^review-[a-f0-9]{64}-(?:[1-9]|[1-9]\d|100)\.png$/.test(name); }
@@ -109,4 +118,4 @@ async function inputBuffer(user, id, name, maximum) {
     if (!stat.isFile() || stat.isSymbolicLink() || comparable(await fs.realpath(file)) !== comparable(file) || stat.size > maximum) throw error('输入快照不存在、已变化或超过大小限制。');
     return fs.readFile(file);
 }
-module.exports = { lock, error, config, availability, workspace, execute, inputFile, readOutput, isReviewImage, cleanupWorkspace, identity, inputBuffer };
+module.exports = { lock, error, config, availability, requireReady, workspace, execute, inputFile, readOutput, isReviewImage, cleanupWorkspace, identity, inputBuffer };

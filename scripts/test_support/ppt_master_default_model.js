@@ -112,8 +112,12 @@ function turn(request, messages, assistant) {
         ] };
         return plan('direction', '是否同意按经营结果和执行安排组织汇报？', { summary: '从实际经营材料提取三项确认口径，供复核团队逐项核对。' });
     }
-    if (!didRun('project')) return { actions: [{ action: 'run', tool: 'project', args: ['init', 'master_default_e2e', '--dir', '.'] }, { action: 'list' }] };
-    const project = observations.flatMap(item => item.result?.files || []).find(item => item.path.includes('/validation/workflow.log'))?.path.split('/')[0];
+    const managed = messages.flatMap(item => {
+        if (item.role !== 'user') return [];
+        try { return [JSON.parse(item.content)?.managedProject]; } catch (_) { return []; }
+    }).find(Boolean);
+    if (!managed && !didRun('project')) return { actions: [{ action: 'run', tool: 'project', args: ['init', 'master_default_e2e', '--dir', '.'] }, { action: 'list' }] };
+    const project = managed || observations.flatMap(item => item.result?.files || []).find(item => item.path.includes('/validation/workflow.log'))?.path.split('/')[0];
     if (!project) return { actions: [{ action: 'list' }] };
     const selected = messages.flatMap(message => {
         if (message.role !== 'user') return [];
@@ -136,16 +140,16 @@ function turn(request, messages, assistant) {
         ...images.map(item => ({ action: 'copy', source: item.path, path: project + '/images/' + item.path.split('/').at(-1) })),
         { action: 'run', tool: 'analyze_images', args: [project + '/images'] }
     ] };
+    if (!approved('design')) return plan('design', '是否批准三页的标题、页序及关键数字？', {
+        summary: '使用白底深色文字，标题和正文左对齐。每页单独核对一项事实。',
+        project, ...(templateUse ? { templateUse } : {}), pages: roster.map(page => ({ title: page.title, values: [{ text: page.fact, source: { path: materialPath, quote: page.fact } }] }))
+    });
     const authored = assistant.some(item => item.actions?.some(action => action.path === project + '/spec_lock.md'));
     if (!authored) return { actions: [
         { action: 'write', path: project + '/design_spec.md', text: spec(roster, templateUse) },
         { action: 'write', path: project + '/spec_lock.md', text: lock() },
         { action: 'run', tool: 'project', args: ['validate', project] }
     ] };
-    if (!approved('design')) return plan('design', '是否批准三页的标题、页序及关键数字？', {
-        summary: '使用白底深色文字，标题和正文左对齐。每页单独核对一项事实。',
-        project, ...(templateUse ? { templateUse } : {}), pages: roster.map(page => ({ title: page.title, values: [{ text: page.fact, source: { path: materialPath, quote: page.fact } }] }))
-    });
     if (!didRun('export')) return { actions: [
         ...roster.map((page, index) => ({ action: 'write', path: project + `/svg_output/slide_0${index + 1}.svg`, text: slide(page) })),
         { action: 'run', tool: 'check_svg', args: [project, '--canonical-authoring', '--stage', 'final', '--json'] },

@@ -425,6 +425,7 @@ async function runAgentGoalNow(goal, user, options = {}) {
                 resultRetentionDays: auth.resultRetentionDays || 30,
                 expiresAt: auth.expiresAt || null
             },
+            goalDeliveryPending: (auth.deliveryBindingIds || []).length > 0,
             goalDelivery: {
                 bindingIds: auth.deliveryBindingIds || [],
                 timezone: auth.timezone || 'Asia/Shanghai',
@@ -446,38 +447,50 @@ async function runAgentGoalNow(goal, user, options = {}) {
 }
 
 async function deliverGoalRunResult(runId, status = '') {
-    const run = await queryOne('SELECT id, user_id, tenant_id, title, final_answer, error_message, metadata FROM agent_runs WHERE id = ?', [String(runId || '')]);
-    const metadata = parseJson(run?.metadata, {});
-    if (!run || metadata.source !== 'goal') return [];
-    const goal = await queryOne('SELECT id, goal_kind, last_result_digest FROM agent_goals WHERE id = ? AND user_id = ?', [metadata.goalId, run.user_id]);
-    const goalKind = GOAL_KINDS.includes(String(goal?.goal_kind || metadata.goalKind || ''))
-        ? String(goal?.goal_kind || metadata.goalKind)
-        : 'scheduled_job';
-    const body = String(run.final_answer || '').trim() || (String(status) === 'cancelled'
-        ? '持续目标本次运行已停止。'
-        : `持续目标运行失败：${String(run.error_message || '未生成可用结果。').slice(0, 1600)}`);
-    if (goalKind === 'monitor' && goal?.id) {
-        const digest = crypto.createHash('sha256').update(`${String(status || '')}\n${body}`).digest('hex');
-        const changed = await execute(`
-            UPDATE agent_goals
-            SET last_result_digest = ?, updated_at = ?
-            WHERE id = ? AND COALESCE(last_result_digest, '') <> ?
-        `, [digest, getBeijingTimestamp(), goal.id, digest]);
-        if (!changed) return [];
+    return await transaction(async trx => {
+        const run = await trx.queryOne('SELECT id, user_id, tenant_id, title, final_answer, error_message, status, metadata FROM agent_runs WHERE id = ? AND deleted_at IS NULL FOR UPDATE', [String(runId || '')]);
+        const metadata = parseJson(run?.metadata, {});
+        if (!run || metadata.source !== 'goal' || metadata.goalDeliveryPending === false) return [];
+        const finalStatus = status || run.status;
+        const goal = await trx.queryOne('SELECT id, goal_kind, last_result_digest FROM agent_goals WHERE id = ? AND user_id = ? FOR UPDATE', [metadata.goalId, run.user_id]);
+        if (!goal) {
+            await trx.execute(`UPDATE agent_runs SET metadata = metadata || '{"goalDeliveryPending":false}'::jsonb WHERE id = ?`, [run.id]);
+            return [];
+        }
+        const monitor = goal.goal_kind === 'monitor';
+        const body = String(run.final_answer || '').trim() || (finalStatus === 'cancelled'
+            ? '持续目标本次运行已停止。'
+            : '持续目标运行失败：' + String(run.error_message || '未生成可用结果。').slice(0, 1600));
+        const digest = monitor ? crypto.createHash('sha256').update(finalStatus + '\n' + body).digest('hex') : '';
+        const deliveries = [];
+        if (!monitor || String(goal.last_result_digest || '').trim() !== digest) {
+            const user = { id: run.user_id, tenant_id: run.tenant_id || null };
+            for (const bindingId of normalizeStringList(metadata.goalDelivery?.bindingIds, 10, 128)) {
+                const delivery = await enqueueChannelDelivery(user, {
+                    bindingId, eventType: 'goal.result', runId: run.id, sourceId: run.id,
+                    idempotencyKey: 'goal-run:' + run.id + ':' + bindingId,
+                    subject: String(run.title || '持续目标结果').slice(0, 255), body,
+                    interaction: { source: 'agent_goal', runStatus: finalStatus }
+                }, trx);
+                if (delivery) deliveries.push(delivery);
+            }
+            if (monitor && deliveries.length) {
+                await trx.execute('UPDATE agent_goals SET last_result_digest = ?, updated_at = ? WHERE id = ?', [digest, getBeijingTimestamp(), goal.id]);
+            }
+        }
+        await trx.execute(`UPDATE agent_runs SET metadata = metadata || '{"goalDeliveryPending":false}'::jsonb WHERE id = ?`, [run.id]);
+        return deliveries;
+    });
+}
+
+async function recoverGoalRunDeliveries(limit = 20) {
+    const terminal = [...require('./agent-runtime/state-machine').TERMINAL_STATUSES].filter(status => status !== 'deleted');
+    const pending = await query(`SELECT id, status FROM agent_runs WHERE deleted_at IS NULL AND status = ANY(?::text[])
+        AND metadata->>'source' = 'goal' AND metadata->>'goalDeliveryPending' = 'true' ORDER BY updated_at, id LIMIT ?`, [terminal, limit]);
+    for (const run of pending) {
+        try { await deliverGoalRunResult(run.id, run.status); }
+        catch (error) { require('../logger').logger.warn({ runId: run.id, code: error.code }, '持续目标交付仍待补发'); }
     }
-    const bindingIds = normalizeStringList(metadata.goalDelivery?.bindingIds, 10, 128);
-    if (!bindingIds.length) return [];
-    const user = { id: run.user_id, tenant_id: run.tenant_id || null };
-    return await Promise.all(bindingIds.map(bindingId => enqueueChannelDelivery(user, {
-        bindingId,
-        eventType: 'goal.result',
-        runId: run.id,
-        sourceId: run.id,
-        idempotencyKey: `goal-run:${run.id}:${bindingId}`,
-        subject: String(run.title || '持续目标结果').slice(0, 255),
-        body,
-        interaction: { source: 'agent_goal', runStatus: String(status || '') }
-    })));
 }
 
 /**
@@ -677,6 +690,7 @@ module.exports = {
     configureAgentGoals,
     createAgentGoal,
     deliverGoalRunResult,
+    recoverGoalRunDeliveries,
     dispatchAgentGoalWebhook,
     generateGoalToken,
     getAgentGoal,

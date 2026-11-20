@@ -13,6 +13,12 @@ function buildIntentFallback(baseline = {}, failureCode = 'intent_provider_unava
         reasonCode, failureCode, capabilityDecisionUnavailable: true, textOnlyFallback: true };
 }
 
+function buildUnappliedIntent(baseline, mode) {
+    const action = baseline.action === 'plan_only' ? 'plan_only' : 'direct_answer';
+    return { ...baseline, action, nextAction: action, delegated: false, continuation: false, continuationOf: null,
+        requiredCapabilities: [], reasonCode: mode === 'disabled' ? 'intent_disabled' : 'intent_shadow', shadow: true };
+}
+
 function restrictIntentFallbackState(state) {
     if (!state.intentDecision?.textOnlyFallback) return state;
     state.mcpEnabled = false;
@@ -22,4 +28,4 @@ function restrictIntentFallbackState(state) {
     return state;
 }
 
-module.exports = { TEXT_ONLY_FALLBACK_INSTRUCTIONS, buildIntentFallback, restrictIntentFallbackState };
+module.exports = { TEXT_ONLY_FALLBACK_INSTRUCTIONS, buildIntentFallback, buildUnappliedIntent, restrictIntentFallbackState };

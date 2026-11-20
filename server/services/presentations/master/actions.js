@@ -6,6 +6,7 @@ const { imageCoverage, selectImagePage } = require('./model-input');
 const { getSupplement } = require('./user-supplements');
 const { patchCitationDraft } = require('./citation-repair');
 const { requireChecks } = require('./tool-checks');
+const { HISTORY_PAGE_CHARS } = require('./observations');
 
 const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
@@ -38,10 +39,14 @@ function validateAction(action, state) {
     if (action.action === 'write' && (typeof action.text !== 'string' || Buffer.byteLength(action.text, 'utf8') > 180000 || /^(?:inputs|delivery)(?:\/|$)/.test(action.path))) {
         throw invalid('写入须提供受限文本，长度不超过180000字节，且不能覆盖输入或交付目录。');
     }
+    if (state.managedProject && ['write', 'copy'].includes(action.action) && /\/svg_output\/[^/]+\.svg$/i.test(action.path)) {
+        if (!state.review.approvals.design) throw invalid('请先取得最终页面清单批准，再写入 SVG 页面。');
+        if (!action.path.startsWith(state.managedProject + '/svg_output/')) throw invalid('页面须写入当前批准项目的 svg_output 目录。');
+    }
     if (['copy', 'copy_template'].includes(action.action) && !presentationPath(action.source)) throw invalid('复制须提供安全的任务内来源路径。');
     if (action.action === 'validate_template' && !['brand', 'style', 'layout', 'deck'].includes(action.kind)) throw invalid('请选择有效的模板校验类型。');
     if (['read', 'read_runtime', 'read_history'].includes(action.action)) {
-        const maxLength = action.action === 'read_history' ? 12000 : 60000;
+        const maxLength = action.action === 'read_history' ? HISTORY_PAGE_CHARS : 60000;
         if (action.offset !== undefined && (!Number.isSafeInteger(action.offset) || action.offset < 0)
             || action.length !== undefined && (!Number.isSafeInteger(action.length) || action.length < 1 || action.length > maxLength)) {
             throw invalid('请填写当前文件范围内的有效分页参数。');
@@ -54,6 +59,9 @@ function validateAction(action, state) {
             || action.args.some(arg => typeof arg !== 'string' || !arg || arg.length > 500)
             || Array.isArray(state.engine?.tools) && !state.engine.tools.includes(action.tool)) {
             throw invalid('请选择已登记的制作工具并提供有效的参数数组。');
+        }
+        if (state.managedProject && action.tool === 'project' && action.args[0] === 'init') {
+            throw invalid('宿主已创建当前任务项目，请使用 ' + state.managedProject + ' 继续。');
         }
         if (action.tool === 'export') exportReview(state, action.args[0]);
         if (action.tool === 'export' && state.request.operation === 'generate' && ['default', 'beautify'].includes(state.request.profile)

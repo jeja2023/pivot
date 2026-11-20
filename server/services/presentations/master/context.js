@@ -6,15 +6,16 @@ const { confirmedWrite } = require('./observations');
 const MIN_OUTPUT_TOKENS = 2000;
 const MAX_OUTPUT_TOKENS = 18000;
 const WINDOW_MARGIN = 256;
-const HISTORY_REVIEW_TOKENS = 80000;
+const UNKNOWN_WINDOW_REVIEW_TOKENS = 80000;
+const MAX_HISTORY_REVIEW_TOKENS = 160000;
 
 function requestLimits(model) {
     const budget = getModelContextBudget(model, { maxOutputTokens: MIN_OUTPUT_TOKENS });
     const configuredOutput = Number(model?.max_tokens);
     const outputLimit = configuredOutput > 0 ? Math.min(configuredOutput, MAX_OUTPUT_TOKENS) : MAX_OUTPUT_TOKENS;
     // 大窗口仍需尽早整理旧工具结果，避免长输入拖慢每一轮模型请求。
-    const archiveAt = budget.unbounded ? HISTORY_REVIEW_TOKENS
-        : Math.min(HISTORY_REVIEW_TOKENS, budget.inputBudget, Math.floor(budget.contextWindow * 0.6));
+    const archiveAt = budget.unbounded ? UNKNOWN_WINDOW_REVIEW_TOKENS
+        : Math.min(MAX_HISTORY_REVIEW_TOKENS, budget.inputBudget, Math.floor(budget.contextWindow * 0.6));
     const fullOutputInputBudget = budget.unbounded ? Infinity : Math.min(budget.inputBudget, budget.contextWindow - outputLimit - WINDOW_MARGIN);
     return { ...budget, outputLimit, archiveAt, fullOutputInputBudget };
 }

@@ -36,6 +36,7 @@ function templateForAi(body = {}) {
             version: Number(supplied.version || 1),
             snapshotDigest: String(supplied.snapshotDigest || ''),
             theme: definition.theme,
+            masters: definition.masters,
             layouts: definition.layouts
         };
     }
@@ -120,12 +121,13 @@ function buildSlidesMessages(body = {}) {
                 materials ? `材料：\n${materials}` : '材料：未提供。',
                 '',
                 '为大纲中的每一页生成结构化页面。返回格式：',
-                semantic ? '{"title":"...","slides":[{"title":"页面核心信息","layout":"cover|content|agenda|section|executive-summary|two-column|comparison|three-card|key-metrics|chart|table|timeline|process|roadmap|risk-actions|quote|summary","points":["完整要点"],"left":[],"right":[],"metrics":[{"value":"真实数值与单位","label":"指标含义"}],"chart":{"type":"bar|line|area|pie","columns":[],"rows":[]},"table":{"columns":[],"rows":[]},"speakerNotes":"详细说明"}],"warnings":[],"assumptions":[]}'
-                    : `{"title":"...","slides":[{"id":"slide_1","type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
+                semantic ? '{"title":"...","slides":[{' + (body.enforcePageIds ? '"outlinePageId":"复制本批对应大纲页标识",' : '') + '"title":"页面核心信息","layout":"cover|content|agenda|section|executive-summary|two-column|comparison|three-card|key-metrics|chart|table|image-focus|timeline|process|roadmap|risk-actions|quote|summary","points":["完整要点"],"left":[],"right":[],"metrics":[{"value":"真实数值与单位","label":"指标含义"}],"chart":{"type":"bar|line|area|pie","columns":[],"rows":[]},"table":{"columns":[],"rows":[]},"speakerNotes":"详细说明"}],"warnings":[],"assumptions":[]}'
+                    : `{"title":"...","slides":[{${body.enforcePageIds ? '"outlinePageId":"复制本批对应大纲页标识"' : '"id":"slide_1"'},"type":"cover","layoutId":"${coverLayoutId}","elements":[{"id":"title","type":"text","x":100,"y":180,"width":1080,"height":100,"content":{"text":"..."},"style":{"fontSize":40,"fontWeight":700,"color":"#1F2937","align":"center"}}],"speakerNotes":"...","sourceRefs":[]}],"assumptions":[],"warnings":[]}`,
                 semantic ? '使用语义页面，不输出 elements、坐标或字号。layout从可用布局中选择并去除design-前缀；每页最多8条要点，每条不超过280字。双栏使用left/right，指标用metrics，图表或表格只填真实数据；无关字段省略。版式引擎负责字号、几何与溢出拆页，禁止静默省略关键事实。详细内容保留speakerNotes，不超过4000字。'
                     : '使用 text、shape、table、chart 元素，每页最多 16 个元素（含标题）；每个 text 不超过 240 字，speakerNotes 不超过 1600 字。优先使用允许布局中的槽位 role 作为元素 id，由模板确定几何。坐标基于 1280x720。正文通常不低于24px（导出18pt），文字过密时拆页或将细节移入备注。禁止任意外部URL。表格必须有 columns，rows 列数一致；图表必须至少有两个 data.columns 字段及真实数值行。',
                 '逐页提供实际使用的sourceRefs，不得把全部材料机械关联到每一页。使用intent记录purpose、takeaway、bridgeToNext（与下一页的衔接）、stage(opening/context/problem/evidence/proposal/decision/action/closing/content)、relation(none/comparison/sequence/hierarchy/causal/composition/timeline/decision)、durationSeconds。关键事实可用claims登记：{id,text,type:fact|calculation|assumption|recommendation,sourceRefs,evidence:[{sourceId,quote,locator}]}；quote必须逐字来自材料，不能编造。计算型论点另提供calculation:{operation:sum|difference|ratio|percent_change|average,values:[原始数值],result:计算结果,unit:单位}，并保留输入证据。假设与建议必须明确区分，来源标签本身不代表事实已核实。',
-                compact ? semantic ? '紧凑输出模式：只输出必要语义字段，完整保留所有页面、关键事实及数据，不输出坐标和空字段；先完成全部slides数组再闭合JSON。' : '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : ''
+                compact ? semantic ? '紧凑输出模式：只输出必要语义字段，完整保留所有页面、关键事实及数据，不输出坐标和空字段；先完成全部slides数组再闭合JSON。' : '紧凑输出模式：每页使用 2 至 3 个元素（含标题），每个 text 的文字不超过 180 个字符，speakerNotes 必须为空；除非大纲明确要求且材料有可核实数值，否则不要生成 table 或 chart。务必先完成全部 slides 数组，再闭合 JSON 对象。' : '',
+                body.pageFeedback?.length ? '请修正本批对应页面的问题，并保留大纲要求、真实数据与出处：' + JSON.stringify(body.pageFeedback) : ''
             ].join('\n')
         }
     ];
@@ -159,7 +161,8 @@ function buildRewriteMessages(body = {}) {
     const slide = body.slide && typeof body.slide === 'object' ? body.slide : {};
     const title = body.title || slide.title || '当前页面';
     const outline = { title, slides: [{ title, purpose: body.instruction || '根据用户要求重写当前页面', layoutHint: slide.layoutId || 'title-content', keyPoints: (slide.elements || []).filter(item => item.type === 'text').map(item => item.content && item.content.text || '').filter(Boolean), sourceRefs: slide.sourceRefs || [] }] };
-    return buildSlidesMessages({ ...body, title, topic: body.topic || title, outline, instruction: body.instruction || '重写当前页面，保留事实和来源引用。' });
+    return buildSlidesMessages({ ...body, title, topic: body.topic || title, outline,
+        instruction: '只改写当前一页，保留事实和来源引用。' + (body.instruction || '') });
 }
 
 function buildValidationMessages(body = {}) {
@@ -576,4 +579,26 @@ async function compilePresentationProposal(content, options = {}) {
     return { ...raw, ...compiled, warnings: [...(Array.isArray(raw.warnings) ? raw.warnings.map(String) : []), ...compiled.warnings] };
 }
 
-module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parseAiJsonObject, parsePresentationProposal, compilePresentationProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };
+async function compileRewriteProposal(content, options) {
+    const raw = parseAiJsonObject(content, 'AI 返回的改写 JSON 无效。', 'PRESENTATION_AI_JSON_INVALID');
+    if (raw.slides?.length !== 1 || !Array.isArray(raw.slides)) {
+        throw presentationError('AI 改写须返回当前一页，请缩小改写范围后重试。', 422, 'PRESENTATION_REWRITE_SINGLE_PAGE_REQUIRED');
+    }
+    const { slide, ...compileOptions } = options;
+    const proposal = await compilePresentationProposal(content, {
+        ...compileOptions, allowSplit: false, outlinePosition: slide.index || 0
+    });
+    const [proposed] = proposal.presentation.slides;
+    if (!proposed.elements.some(element => !element.locked && !/^content_placeholder(?:_|$)/.test(element.id))) {
+        throw presentationError('AI 未返回可应用的页面内容，请调整改写要求后重试。', 422, 'PRESENTATION_REWRITE_EMPTY');
+    }
+    const { mergeLockedElements, buildSlideChangeImpact } = require('./presentation-change-impact');
+    const merged = mergeLockedElements(slide, {
+        ...proposed, background: slide.background || proposed.background,
+        elements: proposed.elements.filter(element => !element.id.startsWith('pivotTemplate_'))
+    });
+    proposal.presentation = normalizePresentation({ ...proposal.presentation, slides: [merged] });
+    return { proposal, changeImpact: buildSlideChangeImpact(slide, merged) };
+}
+
+module.exports = { buildOutlineMessages, buildSlidesMessages, buildContinueMessages, buildRewriteMessages, buildValidationMessages, buildLayoutVariantsMessages, filterOutlineSourceRefs, parseAiJsonObject, parsePresentationProposal, compilePresentationProposal, compileRewriteProposal, parseValidationProposal, parseLayoutVariantsProposal, repairAiPresentationProposal };

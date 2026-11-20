@@ -304,8 +304,9 @@
     {
       "file": "server/repositories/chat-conversation-turns.js",
       "count": 19,
-      "rationale": "2026-11-03：沿用会话消息幂等与执行范围读取，新增按所属用户、会话、未删除来源消息和本轮之前的消息ID读取最后一次明确知识选择；仅返回专题/标签ID，不读取其他用户资料。全部参数绑定，不接受动态排序或表名。",
-      "verification": "tests/knowledge-chain-postgres.test.js验证选择持久化和跨用户隔离；tests/chat-conversation-product.test.js验证消息幂等、续接、删除来源与运行中撤权。"
+      "rationale": "2026-11-03：沿用会话消息幂等与执行范围读取，新增按所属用户、会话、未删除来源消息和本轮之前的消息ID读取最后一次明确知识选择；仅返回专题/标签ID，不读取其他用户资料。全部参数绑定，不接受动态排序或表名。 活动任务控制共用归属查询并在数据库按状态过滤，消除历史页容量影响。",
+      "verification": "tests/knowledge-chain-postgres.test.js验证选择持久化和跨用户隔离；tests/chat-conversation-product.test.js验证消息幂等、续接、删除来源与运行中撤权。 tests/chat-routing-remediation.test.js验证停用模型、额度耗尽、多任务选中与较早活动任务。",
+      "reviewedAt": "2026-11-20"
     },
     {
       "file": "server/repositories/agent-learning-evaluation.js",
@@ -428,8 +429,10 @@
     },
     {
       "file": "server/services/agent-runtime/run-execution.js",
-      "count": 3,
-      "rationale": "运行错误恢复重试读取必须与运行状态机保持同一持久化边界；模型切换状态更新已复用 updateRun 仓储接口，不再新增执行器 SQL。"
+      "count": 2,
+      "rationale": "运行错误恢复重试读取必须与运行状态机保持同一持久化边界；模型切换状态更新已复用 updateRun 仓储接口，不再新增执行器 SQL。 正常交付和升级模型归因由最终状态更新一并提交。",
+      "verification": "tests/agent-execution-chain-regressions.test.js覆盖 JSON 与流式成本升级及失败归因。",
+      "reviewedAt": "2026-11-20"
     },
     {
       "file": "server/services/agent-runtime/run-lifecycle.js",
@@ -812,10 +815,10 @@
     },
     {
       "file": "server/services/agent-goals.js",
-      "count": 36,
-      "rationale": "文件扫描使用有界可回绕游标，游标只在目标仍活动、修订未变且 claim_token 相同条件下参数化推进；数据库水位线继续在创建幂等任务后提交。没有拼接请求输入为 SQL。",
-      "verification": "batch-2：游标、水位线、既有自动化与安全回归 178 项通过。",
-      "reviewedAt": "2026-11-10"
+      "count": 39,
+      "rationale": "文件扫描使用有界可回绕游标，游标只在目标仍活动、修订未变且 claim_token 相同条件下参数化推进；数据库水位线继续在创建幂等任务后提交。没有拼接请求输入为 SQL。 锁定所属运行与目标，投递和摘要同事务登记；有界查询待补发终态，按已存投递键恢复。",
+      "verification": "tests/agent-execution-remediation.test.js 使用隔离 PostgreSQL 验证事务并发、暂停或断连恢复。",
+      "reviewedAt": "2026-11-20"
     },
     {
       "file": "server/repositories/agent-projects.js",
@@ -875,6 +878,20 @@
       "rationale": "日消费账本定点读取及关键写入幂等恢复，仅使用参数化查询。",
       "verification": "tests/model-consumption-ledger.test.js、tests/critical-write-journal.test.js",
       "reviewedAt": "2026-11-17"
+    },
+    {
+      "file": "server/services/agent-verification.js",
+      "count": 5,
+      "rationale": "锁定所属运行核对核验阶段及租约，事务内登记报告、提交结果和 DAG 终态。",
+      "verification": "tests/agent-execution-remediation.test.js 使用隔离 PostgreSQL 验证事务并发、暂停或断连恢复。",
+      "reviewedAt": "2026-11-20"
+    },
+    {
+      "file": "server/services/agent-runtime/index.js",
+      "count": 9,
+      "rationale": "仅按同运行、同账号及已绑定事务查已提交回执，有限批量补齐等待提交的运行。",
+      "verification": "tests/agent-execution-remediation.test.js 使用隔离 PostgreSQL 验证事务并发、暂停或断连恢复。",
+      "reviewedAt": "2026-11-20"
     }
   ]
 }

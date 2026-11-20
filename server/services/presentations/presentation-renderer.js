@@ -359,7 +359,11 @@ async function renderPdf(presentation, options = {}) {
                     const fill = hexToRgb(header ? element.style.headerFill : element.style.cellFill);
                     const stroke = hexToRgb(element.style.borderColor);
                     page.drawRectangle({ x: (element.x + colIndex * colWidth) * 0.75, y: height - (element.y + (rowIndex + 1) * rowHeight) * 0.75, width: colWidth * 0.75, height: rowHeight * 0.75, color: rgb(fill.r, fill.g, fill.b), borderColor: rgb(stroke.r, stroke.g, stroke.b), borderWidth: 0.5 });
-                    drawPdfText(page, fonts.body || fonts.fallback, String(cell), { ...element, x: element.x + colIndex * colWidth, y: element.y + rowIndex * rowHeight, width: colWidth, height: rowHeight, style: { ...element.style, color: header ? element.style.headerColor : element.style.cellColor } }, height);
+                    drawPdfText(page, fonts.body || fonts.fallback, String(cell), {
+                        ...element, x: element.x + colIndex * colWidth, y: element.y + rowIndex * rowHeight,
+                        width: colWidth, height: rowHeight, style: { ...element.style, padding: 6, lineHeight: 1.2,
+                            color: header ? element.style.headerColor : element.style.cellColor }
+                    }, height);
                 }));
                 continue;
             }

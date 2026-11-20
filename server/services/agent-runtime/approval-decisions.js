@@ -13,6 +13,10 @@ function createApprovalDecision({ getRunForUser, getRunMetadata, getBeijingTimes
         if (run.status !== 'approval_required') return run;
         const metadata = getRunMetadata(run);
         const pending = metadata.pendingApproval || {};
+        if (!expected || typeof expected.inputHash !== 'string' || !expected.inputHash || typeof expected.key !== 'string'
+            || typeof expected.requestedAt !== 'string') {
+            throw Object.assign(new Error('请刷新任务后核对本次审批请求。'), { status: 409, code: 'AGENT_APPROVAL_STALE' });
+        }
         assertApprovalBinding(pending, expected, approve);
         const now = getBeijingTimestamp();
         if (!approve) {

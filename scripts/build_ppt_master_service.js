@@ -45,8 +45,8 @@ async function main(args = process.argv.slice(2)) {
             throw new Error('镜像的上游运行包与当前源码锁定信息不一致。');
         }
         if (health.serviceProtocol !== 1 || !/^sha256:[a-f0-9]{64}$/.test(health.runtimeId || '')
-            || ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots'].some(key => health[key] !== 1)) {
-            throw new Error('镜像缺少当前协议、交付核验、修页或快照能力，请使用当前源码重新构建。');
+            || ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle'].some(key => health[key] !== 1)) {
+            throw new Error('镜像缺少当前执行器的项目准备、交付核验、源包限额或快照能力，请使用当前源码重新构建。');
         }
     } finally { await run('docker', ['rm', '-f', '-v', name]).catch(() => {}); }
     const api = (await run('docker', ['version', '--format', '{{.Server.APIVersion}}'])).stdout.trim().split('.').map(Number);

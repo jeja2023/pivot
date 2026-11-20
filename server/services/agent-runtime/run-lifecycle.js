@@ -52,7 +52,7 @@ async function cancelAgentRun(runId, user) {
         throw error;
     }
     const now = getBeijingTimestamp();
-    const changed = await updateRunCas(runId, [run.status], {
+    const changed = await updateRunCas(runId, [...ACTIVE_STATUSES].filter(status => status !== 'awaiting_commit'), {
         status: 'cancelled',
         error_message: '智能体运行已被用户主动取消。',
         cancelled_at: now,
@@ -144,6 +144,7 @@ async function createChildRunFromExisting(run, user) {
         user,
         goal: run.goal,
         modelId: run.model_id,
+        modelRouter: run.model_router,
         sessionId: run.session_id,
         title: run.title,
         maxSteps: run.max_steps,
@@ -293,6 +294,7 @@ async function rerunAgentDagFromNode(runId, user, nodeId = '') {
         user,
         goal: run.goal,
         modelId: run.model_id,
+        modelRouter: run.model_router,
         sessionId: run.session_id,
         title: `重跑节点：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,
@@ -362,6 +364,7 @@ async function resumeAgentRun(runId, user) {
         user,
         goal: run.goal,
         modelId: run.model_id,
+        modelRouter: run.model_router,
         sessionId: run.session_id,
         title: `断点续跑：${getAgentRunTitle(run)}`.slice(0, 80),
         maxSteps: run.max_steps,

@@ -43,9 +43,9 @@ const { collectDagKnowledgeObservations, assertKnowledgeNodeOutput, assertDagKno
 const { restoreDagStates } = require('./agent-dag-state');
 const { inheritDagEvidence, packKnowledgeOutput, unpackKnowledgeOutput } = require('./knowledge-evidence-lineage');
 
-async function upsertDagNode(runId, node, patch = {}) {
+async function upsertDagNode(runId, node, patch = {}, executor = { queryOne, execute }) {
     const nodeKey = String(patch.nodeKey || node.nodeKey || node.id || '').trim();
-    const existing = await queryOne('SELECT id, output, started_at FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
+    const existing = await executor.queryOne('SELECT id, output, started_at FROM agent_dag_nodes WHERE run_id = ? AND node_key = ?', [runId, nodeKey]);
     const now = getBeijingTimestamp();
     const row = {
         title: patch.title ?? node.title,
@@ -81,7 +81,7 @@ async function upsertDagNode(runId, node, patch = {}) {
     if (refChanged && nextOutputRef) await incrementRefCount(nextOutputRef, 1);
     if (existing) {
         try {
-            await execute(`
+            await executor.execute(`
             UPDATE agent_dag_nodes
             SET title = ?, tool_name = ?, input = ?, input_schema = ?, output_schema = ?, depends_on = ?, condition = ?, status = ?,
                 output = ?, error_message = ?, error_info = ?, contract_status = ?, contract_issues = ?,
@@ -117,7 +117,7 @@ async function upsertDagNode(runId, node, patch = {}) {
     }
     let inserted;
     try {
-        inserted = await queryOne(`
+        inserted = await executor.queryOne(`
         INSERT INTO agent_dag_nodes (
             run_id, node_key, title, tool_name, input, input_schema, output_schema, depends_on, condition, status,
             output, reused_from_run_id, error_message, error_info, contract_status, contract_issues, attempt_count, duration_ms, started_at, completed_at, created_at
@@ -927,39 +927,33 @@ async function runAgentDag({ run, user, modelCfg, toolList, deadline, assertRunW
         || `工作流执行完成，共 ${dagSpec.nodes.length} 个节点。`;
     // 路由未命中跳过属于预期控制流，不能将成功路由的工作流判定为部分完成结果。
     const partial = failedNodes.length > 0 || incompleteResultNodes.length > 0;
+    await deps.assertRunNotCancelled(run.id);
     await deps.updateRun(run.id, { status: 'verifying', updated_at: getBeijingTimestamp() });
-    const verification = await (deps.verifyAgentOutcome || (options => verifyTaskOutcome(options)))({
-        runId: run.id,
-        run,
-        user,
-        answer,
-        observations,
-        partial,
-        reason: partial ? '工作流存在失败、未完整或跳过节点。' : ''
+    const buildFinalState = report => {
+        const status = report.taskTransaction?.status === 'awaiting_commit' ? 'awaiting_commit'
+            : report.outcomeStatus === 'verified' ? 'completed' : report.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
+        const verificationError = status === 'completed' ? '' : status === 'awaiting_commit' ? '任务结果已验证，仍有外部副作用等待提交。'
+            : '任务验收未通过：' + (report.hardFailures.join('、') || report.outcomeStatus);
+        return { status, final_answer: answer,
+            error_message: failedNodes.length ? 'DAG 失败节点数：' + failedNodes.length
+                : incompleteResultNodes.length ? 'DAG 未完整处理节点数：' + incompleteResultNodes.length : verificationError,
+            ...(['needs_input', 'awaiting_commit'].includes(status) ? {} : { completed_at: getBeijingTimestamp() }) };
+    };
+    const verify = () => (deps.verifyAgentOutcome || (options => verifyTaskOutcome(options)))({
+        runId: run.id, run, user, answer, observations, partial, signal: deps.signal, budget: deps.taskBudget,
+        reason: partial ? '工作流存在失败、未完整或跳过节点。' : '',
+        ...(deps.onDagVerificationFinalized ? { buildFinalState, beforeFinalize: () => assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps) } : {})
     });
-    await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
-    const awaitingCommit = verification.taskTransaction?.status === 'awaiting_commit';
-    const finalStatus = awaitingCommit
-        ? 'awaiting_commit'
-        : verification.outcomeStatus === 'verified'
-            ? 'completed'
-        : verification.outcomeStatus === 'partial' ? 'partial' : 'needs_input';
+    const verification = deps.taskBudget?.withFinalization ? await deps.taskBudget.withFinalization(verify) : await verify();
+    const finalStatus = verification.finalizedStatus || buildFinalState(verification).status;
+    if (verification.finalizedStatus) await deps.onDagVerificationFinalized(run, finalStatus);
+    else {
+        await deps.assertRunNotCancelled(run.id);
+        await assertDagKnowledgeCurrent(dagSpec.nodes, states, user, run, deps);
+        await deps.updateRun(run.id, { ...buildFinalState(verification), last_heartbeat_at: getBeijingTimestamp(), updated_at: getBeijingTimestamp() });
+    }
     const verified = finalStatus === 'completed';
-    const verificationError = verified
-        ? ''
-        : awaitingCommit
-            ? '任务结果已验证，仍有外部副作用等待提交。'
-            : `任务验收未通过：${verification.hardFailures.join('、') || verification.outcomeStatus}`;
-    await deps.updateRun(run.id, {
-        status: finalStatus,
-        final_answer: answer,
-        error_message: failedNodes.length
-            ? `DAG 失败节点数：${failedNodes.length}`
-            : (incompleteResultNodes.length ? `DAG 未完整处理节点数：${incompleteResultNodes.length}` : verificationError),
-        ...(['needs_input', 'awaiting_commit'].includes(finalStatus) ? {} : { completed_at: getBeijingTimestamp() }),
-        last_heartbeat_at: getBeijingTimestamp(),
-        updated_at: getBeijingTimestamp()
-    });
+    const awaitingCommit = finalStatus === 'awaiting_commit';
     await deps.createAgentNotification(
         user.id,
         run.id,

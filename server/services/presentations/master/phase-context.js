@@ -3,6 +3,8 @@
 const crypto = require('node:crypto');
 const { confirmedWrite } = require('./observations');
 const GENERATE_DIGEST = 'ab30c3c0ff8b4351d31d99f5fad77285e37d6830ab185da82f38475347c2203f';
+const ROUTING_DIGEST = '4a7495e3e0d8951b52970920f2a22a0a4fccc7ae5c77426c40b0b097690c8d3f';
+const SPEC_PRESERVING_TOOLS = new Set(['text_measure', 'check_svg', 'analyze_images', 'icon_sync']);
 
 // 只有真实确认及同一项目的两份文件写入和上游校验均有回执，才能收起已完成的前置章节。
 function validatedProject(state) {
@@ -30,7 +32,8 @@ function validatedProject(state) {
             } else if (action.action === 'run') {
                 const args = action.args || [];
                 const project = action.tool === 'project' && args[0] === 'validate' && typeof args[1] === 'string' ? args[1] : '';
-                validated = project && result.result?.exitCode === 0 && files.get(project)?.size === 2 ? project : '';
+                if (project && result.result?.exitCode === 0 && files.get(project)?.size === 2) validated = project;
+                else if (!SPEC_PRESERVING_TOOLS.has(action.tool) || result.result?.exitCode !== 0) validated = '';
             } else if (['copy', 'copy_template', 'validate_template'].includes(action.action)) validated = '';
         });
     }
@@ -44,12 +47,15 @@ function phaseMessages(messages, state) {
         if (message.role !== 'user' || typeof message.content !== 'string') return message;
         let item;
         try { item = JSON.parse(message.content); } catch (_) { return message; }
-        if (item.runtimeDocument !== 'workflows/generate-pptx.md' || typeof item.text !== 'string' || item.nextOffset != null
-            || crypto.createHash('sha256').update(item.text).digest('hex') !== GENERATE_DIGEST) return message;
-        const start = item.text.indexOf('### Step 1: Source Content Processing'), end = item.text.indexOf('### Step 4: Strategist Phase');
+        if (typeof item?.text !== 'string' || item.nextOffset != null) return message;
+        const routing = item.runtimeDocument === 'workflows/routing.md';
+        if (!routing && item.runtimeDocument !== 'workflows/generate-pptx.md') return message;
+        if (crypto.createHash('sha256').update(item.text).digest('hex') !== (routing ? ROUTING_DIGEST : GENERATE_DIGEST)) return message;
+        const start = item.text.indexOf(routing ? '## 2. Top-Level Route Matrix' : '### Step 1: Source Content Processing');
+        const end = item.text.indexOf(routing ? '## 3. Generate PPTX Profiles and Stages' : '### Step 4: Strategist Phase');
         if (start < 0 || end <= start) return message;
         return { ...message, content: JSON.stringify({ ...item, text: item.text.slice(0, start)
-            + `\n[已取得两次用户确认和当前项目校验回执，暂收起步骤1至3；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。项目：${project}]\n\n` + item.text.slice(end),
+            + `\n[已取得两次用户确认和当前项目校验回执，暂收起${routing ? '已完成的流程选路表' : '步骤1至3'}；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。项目：${project}]\n\n` + item.text.slice(end),
         phase: 'validated_project', fullTextAvailable: true }) };
     });
     return { messages: result, phase: 'validated_project' };

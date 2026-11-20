@@ -1,5 +1,5 @@
 // 拆自 agent-runtime/index.js：智能体任务创建与参数校验工厂
-const { queryOne, execute } = require('../../db/client');
+const { queryOne, transaction } = require('../../db/client');
 const { getBeijingTimestamp } = require('../../time');
 const { skillInstructionsForRuntime } = require('../agent-skill-import-provenance');
 const { getRunnableModelForUserAsync } = require('../models');
@@ -55,7 +55,6 @@ const SKILL_METADATA_KEYS = Object.freeze([
 const { normalizeModelTaskBudget } = require('../agent-token-policy');
 const {
     buildForkHistory,
-    cancelChildRunReservation,
     initializeAgentRunResources,
     normalizeForkHistory,
     reserveChildRunResources
@@ -182,7 +181,6 @@ function createAgentRunFactory(deps = {}) {
             // 新库迁移尚未完成时仍允许创建任务，运行时按旧上下文继续。
         }
         const normalizedForkHistory = normalizeForkHistory(forkHistory || runMetadata.forkHistory || runMetadata.fork_history || 'none');
-        let resourceReservation = null;
         let inheritedRiskBudget = null;
         let effectiveChildTokenBudget = normalizePositiveInt(maxTokenBudget, 0, 0, 10000000);
         let skillReference = skillId || skillName || runMetadata.skillId || runMetadata.skillName || '';
@@ -276,100 +274,87 @@ function createAgentRunFactory(deps = {}) {
         }
         const modelCfg = await getRunnableModelForUserAsync(effectiveModelId, user);
         if (!modelCfg && normalizedRunMode !== 'dag') throw new Error('请选择当前账号可用的模型。');
-        if (parentRunId) {
-            const inherited = await reserveChildRunResources({
-                parentRunId,
-                userId: user.id,
-                requestedTokenBudget: effectiveChildTokenBudget,
-                forkHistory: normalizedForkHistory
-            });
-            effectiveChildTokenBudget = inherited.tokenBudget;
-            inheritedRiskBudget = inherited.riskBudget ?? null;
-            resourceReservation = inherited.reservation;
-            runMetadata.resourceInheritance = {
-                parentRunId: String(parentRunId),
-                tokenBudget: effectiveChildTokenBudget,
-                forkHistory: inherited.forkHistory
-            };
-            if (inherited.forkHistory.mode !== 'none') {
-                try {
-                    runMetadata.parentHistory = await buildForkHistory(parentRunId, user.id, inherited.forkHistory);
-                } catch (error) {
-                    try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
-                    throw error;
-                }
-            }
-        }
-        const effectiveTaskBudget = normalizeModelTaskBudget(budgetConfig, modelCfg || {});
-        if (inheritedRiskBudget !== null) effectiveTaskBudget.risk_budget = Math.min(effectiveTaskBudget.risk_budget, inheritedRiskBudget);
-        if (budgetConfig?.max_steps == null && budgetConfig?.maxSteps == null) {
-            effectiveTaskBudget.max_steps = normalizedRunMode === 'dag' ? Math.max(effectiveMaxSteps, runMetadata.dagSpec?.nodes?.length || 0) : Math.min(120, effectiveMaxSteps * 2);
-        }
-        if (parentRunId && effectiveChildTokenBudget > 0) {
-            // 子运行的两层 Token 限额保持一致或更紧，不能沿用父运行的完整总额。
-            effectiveTaskBudget.max_tokens_total = Math.min(effectiveTaskBudget.max_tokens_total, effectiveChildTokenBudget);
-        }
-        try {
-            await execute(`
-                INSERT INTO agent_runs (
-                    id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
-                    priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
-                    retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
-                    metadata, model_router, budget_config, usage_stats, network_policy, tenant_id, created_at, updated_at, helper_browser_key
-                )
-                VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                )
-            `, [
-                runId,
-                user.id,
-                sessionId || null,
-                modelCfg?.id || null,
-                normalizeAgentTitle(title, cleanGoal),
-                cleanGoal,
-                'queued',
-                normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
-                parentRunId || null,
-                normalizePriority(priority),
-                normalizedRunMode,
-                normalizedToolPolicy,
-                serializeToolAllowlist(toolAllowlist),
-                normalizeApprovalPolicy(approvalPolicy),
-                normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
-                normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
-                normalizePositiveInt(retryLimit, 1, 0, 5),
-                effectiveChildTokenBudget,
-                normalizedTemplateId,
-                normalizedScheduleId,
-                normalizedDedupeKey,
-                serializeContextConfig(resolvedContext.contextConfig),
-                normalizePositiveInt(resumeFromStep, 0, 0, 999),
-                JSON.stringify(runMetadata),
-                normalizedRouter,
-                JSON.stringify(effectiveTaskBudget),
-                JSON.stringify({}),
-                JSON.stringify(networkPolicy || {}),
-                user.tenant_id || user.tenantId || null,
-                now,
-                now,
-                require('../request-context').getRequestContext().helperBrowserKey || null
-            ]);
-        } catch (err) {
-            if (resourceReservation) {
-                try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
-            }
-            if (normalizedDedupeKey && (String(err.code || '').includes('CONSTRAINT') || String(err.code || '').includes('23505'))) {
-                const existing = await queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
+        const admitted = await transaction(async trx => {
+            if (normalizedDedupeKey) {
+                await trx.queryOne('SELECT pg_advisory_xact_lock(hashtextextended(?, 0))', ['agent-admission:' + user.id + ':' + normalizedDedupeKey]);
+                const existing = await trx.queryOne('SELECT * FROM agent_runs WHERE user_id = ? AND dedupe_key = ? AND deleted_at IS NULL', [user.id, normalizedDedupeKey]);
                 if (existing) return existing;
             }
-            throw err;
-        }
-        let taskTransaction = null;
-        try {
+            if (parentRunId) {
+                const inherited = await reserveChildRunResources({
+                    parentRunId,
+                    userId: user.id,
+                    requestedTokenBudget: effectiveChildTokenBudget,
+                    forkHistory: normalizedForkHistory
+                }, trx);
+                effectiveChildTokenBudget = inherited.tokenBudget;
+                inheritedRiskBudget = inherited.riskBudget ?? null;
+                runMetadata.resourceInheritance = {
+                    parentRunId: String(parentRunId),
+                    tokenBudget: effectiveChildTokenBudget,
+                    forkHistory: inherited.forkHistory
+                };
+                if (inherited.forkHistory.mode !== 'none') {
+                    runMetadata.parentHistory = await buildForkHistory(parentRunId, user.id, inherited.forkHistory, trx);
+                }
+            }
+            const effectiveTaskBudget = normalizeModelTaskBudget(budgetConfig, modelCfg || {});
+            if (inheritedRiskBudget !== null) effectiveTaskBudget.risk_budget = Math.min(effectiveTaskBudget.risk_budget, inheritedRiskBudget);
+            if (budgetConfig?.max_steps == null && budgetConfig?.maxSteps == null) {
+                effectiveTaskBudget.max_steps = normalizedRunMode === 'dag' ? Math.max(effectiveMaxSteps, runMetadata.dagSpec?.nodes?.length || 0) : Math.min(120, effectiveMaxSteps * 2);
+            }
+            if (parentRunId && effectiveChildTokenBudget > 0) {
+                // 子运行的两层 Token 限额保持一致或更紧，不能沿用父运行的完整总额。
+                effectiveTaskBudget.max_tokens_total = Math.min(effectiveTaskBudget.max_tokens_total, effectiveChildTokenBudget);
+            }
+            await trx.execute(`
+                    INSERT INTO agent_runs (
+                        id, user_id, session_id, model_id, title, goal, status, max_steps, parent_run_id,
+                        priority, run_mode, tool_policy, tool_allowlist, approval_policy, timeout_ms, tool_timeout_ms,
+                        retry_limit, max_token_budget, template_id, schedule_id, dedupe_key, context_config, resume_from_step,
+                        metadata, model_router, budget_config, usage_stats, network_policy, tenant_id, created_at, updated_at, helper_browser_key
+                    )
+                    VALUES (
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    )
+                `, [
+                    runId,
+                    user.id,
+                    sessionId || null,
+                    modelCfg?.id || null,
+                    normalizeAgentTitle(title, cleanGoal),
+                    cleanGoal,
+                    'queued',
+                    normalizeMaxSteps(effectiveMaxSteps, normalizedRunMode),
+                    parentRunId || null,
+                    normalizePriority(priority),
+                    normalizedRunMode,
+                    normalizedToolPolicy,
+                    serializeToolAllowlist(toolAllowlist),
+                    normalizeApprovalPolicy(approvalPolicy),
+                    normalizePositiveInt(timeoutMs, AGENT_DEFAULT_TIMEOUT_MS, 60000, 24 * 60 * 60 * 1000),
+                    normalizePositiveInt(toolTimeoutMs, AGENT_TOOL_TIMEOUT_MS, 30000, 10 * 60 * 1000),
+                    normalizePositiveInt(retryLimit, 1, 0, 5),
+                    effectiveChildTokenBudget,
+                    normalizedTemplateId,
+                    normalizedScheduleId,
+                    normalizedDedupeKey,
+                    serializeContextConfig(resolvedContext.contextConfig),
+                    normalizePositiveInt(resumeFromStep, 0, 0, 999),
+                    JSON.stringify(runMetadata),
+                    normalizedRouter,
+                    JSON.stringify(effectiveTaskBudget),
+                    JSON.stringify({}),
+                    JSON.stringify(networkPolicy || {}),
+                    user.tenant_id || user.tenantId || null,
+                    now,
+                    now,
+                    require('../request-context').getRequestContext().helperBrowserKey || null
+                ]);
             if (typeof createTaskTransaction === 'function') {
-                taskTransaction = await createTaskTransaction({
+                const taskTransaction = await createTaskTransaction({
                     run: { id: runId, user_id: user.id, tenant_id: user.tenant_id || user.tenantId || 0, goal: cleanGoal },
                     user,
                     taskContract: runMetadata.taskContract,
@@ -378,37 +363,31 @@ function createAgentRunFactory(deps = {}) {
                         runMode: normalizedRunMode,
                         createdAt: now
                     }
-                });
+                }, trx);
                 runMetadata.taskTransactionId = taskTransaction.id;
                 runMetadata.taskTransactionStatus = taskTransaction.status;
-                await execute('UPDATE agent_runs SET metadata = ?::jsonb, updated_at = ? WHERE id = ? AND user_id = ?', [JSON.stringify(runMetadata), now, runId, user.id]);
+                await trx.execute('UPDATE agent_runs SET metadata = ?::jsonb, updated_at = ? WHERE id = ? AND user_id = ?', [JSON.stringify(runMetadata), now, runId, user.id]);
             }
             await persistWorkingMemoryRevision({
                 run: { id: runId, user_id: user.id, goal: cleanGoal }, user,
                 state: runMetadata.workingState, taskContract: runMetadata.taskContract, reason: 'initial', now
-            });
+            }, { transaction: operation => operation(trx) });
             await initializeAgentRunResources({
                 runId,
                 userId: user.id,
                 parentRunId,
                 tokenBudget: effectiveChildTokenBudget,
                 forkHistory: normalizedForkHistory
-            });
-        } catch (error) {
-            // 事务控制面是 Agent 任务的一部分；创建失败时不能留下可排队但
-            // 无法验收/回滚的半初始化任务。
-            await execute('DELETE FROM agent_runs WHERE id = ? AND user_id = ?', [runId, user.id]);
-            if (resourceReservation) {
-                try { await cancelChildRunReservation({ parentRunId, userId: user.id, tokenBudget: effectiveChildTokenBudget }); } catch (_) {}
+            }, trx);
+            if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
+                const { upsertDagNode } = require('../agent-dag-runtime');
+                for (const node of runMetadata.dagSpec.nodes) {
+                    await upsertDagNode(runId, node, { status: 'pending' }, trx);
+                }
             }
-            throw error;
-        }
-        if (normalizedRunMode === 'dag' && Array.isArray(runMetadata.dagSpec?.nodes) && runMetadata.dagSpec.nodes.length > 0) {
-            const { upsertDagNode } = require('../agent-dag-runtime');
-            for (const node of runMetadata.dagSpec.nodes) {
-                await upsertDagNode(runId, node, { status: 'pending' });
-            }
-        }
+            return null;
+        });
+        if (admitted) return admitted;
         if (typeof enqueueAgentRun === 'function') {
             enqueueAgentRun(runId, user);
         }

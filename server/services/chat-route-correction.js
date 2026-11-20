@@ -4,6 +4,8 @@ const crypto = require('crypto');
 const { recordUserDecisionFeedback } = require('./decision-observability');
 const { redactRoutingText } = require('./decision-provider');
 const { currentRequestText, isPlanOnlyRequest } = require('./chat-request-constraints');
+const { getChatAutoRouteConfig } = require('./chat-route-config');
+const { getCapabilityDecision } = require('./chat-capability-decision');
 const { resolveChatRequestScope, constrainChatDecision } = require('./chat-request-scope');
 
 // 只读取本轮用户自己表达的限制；引用、代码和附件不能撤销或授予任务权限。
@@ -45,16 +47,18 @@ function parseMetadata(value) {
     try { return typeof value === 'string' ? JSON.parse(value) : value || {}; } catch (_) { return {}; }
 }
 
-function applyAutomaticExecutionDecision(state, decision) {
+function applyAutomaticExecutionDecision(state, decision, config = getChatAutoRouteConfig()) {
     const requestScope = resolveChatRequestScope(state.modelContent, { ...state, ...(state.requestScope || {}), ...(decision.requestScope || {}) });
     decision = constrainChatDecision(decision, requestScope);
     state.requestScope = requestScope;
     state.intentDecision = decision;
+    state.routeConfig = config;
     require('./chat-intent-fallback').restrictIntentFallbackState(state);
-    const routing = decision.shadow !== true && decision.routing;
-    if (routing?.source === 'semantic_intent') {
+    const routing = getCapabilityDecision(state);
+    if (routing) {
         if (routing.knowledge === 'required') state.routeOverrides = { ...state.routeOverrides, forceRag: true };
-        if (routing.allowAutomaticRead && routing.tools === 'read_only') {
+        if (routing.allowAutomaticRead && routing.tools === 'read_only' && config.autoToolDiscoveryEnabled
+            && state.routeOverrides?.excludeTools !== true && (state.mcpEnabled || !state.routeOverrides?.tools?.length)) {
             state.automaticReadCapabilities = routing.requestedCapabilities;
             state.mcpEnabled = true;
         }

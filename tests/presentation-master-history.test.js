@@ -22,6 +22,57 @@ function referenceCheckpoint(turns, pageLength) {
         inputFiles: [], materials: [], maxSteps: 80, tokenBudget: 10000000 }, messages };
 }
 
+test('归档后普通读取、指引页和历史页都可重新补回，未改变的清单仍判为重复', async () => {
+    const { createInspectionProgress } = require('../server/services/presentations/master/inspection-progress');
+    const state = referenceCheckpoint(0, 0);
+    const record = (action, result) => state.messages.push({ role: 'assistant', content: JSON.stringify({ actions: [action] }) },
+        { role: 'user', content: JSON.stringify([{ action: action.action, result }]) });
+    const material = { action: 'read', path: 'inputs/material-1.md', offset: 0 };
+    const runtime = { action: 'read_runtime', path: 'references/authoring.md', offset: 0 };
+    const page = action => ({ path: action.path, offset: 0, nextOffset: null, totalChars: 2000, text: '文'.repeat(2000) });
+    const list = { action: 'list' }, listing = { files: [{ path: material.path, bytes: 6000 }] };
+    record(material, page(material));
+    record(list, listing);
+    await archiveOlderObservations(state, { force: true, recentTurns: 1 });
+    const history = { action: 'read_history', ...JSON.parse(state.messages[3].content)[0].result.archived };
+    const historyResult = await readHistory(state, history);
+    record(history, historyResult);
+    record(runtime, page(runtime));
+    record(material, page(material));
+    record(list, listing);
+    const progress = createInspectionProgress(state.messages);
+    const evaluate = (action, result) => progress.evaluate([action], [{ action: action.action, result }]).progressed;
+    assert.equal(evaluate(runtime, page(runtime)), false);
+    assert.ok(await archiveOlderObservations(state, { force: true, recentTurns: 1 }));
+    progress.syncVisibleObservations(state.messages);
+    assert.equal(evaluate(list, listing), false);
+    assert.equal(evaluate(material, page(material)), true);
+    assert.equal(evaluate(runtime, page(runtime)), true);
+    assert.equal(evaluate(history, historyResult), true);
+    assert.equal(evaluate(history, historyResult), false);
+    progress.syncVisibleObservations([...state.messages]);
+    assert.equal(evaluate(runtime, page(runtime)), true, '同页第二次补回时仍允许恢复');
+    progress.syncVisibleObservations([...state.messages]);
+    assert.equal(evaluate(runtime, page(runtime)), false, '同页反复归档不能无限作为新资料');
+    assert.equal(evaluate(runtime, { ...page(runtime), nextOffset: 2100 }), true, '扩展到新字符范围可以推进');
+});
+
+test('主动归档优先收起旧阶段指引，给当前阶段和源材料保留有界工作集', async () => {
+    const state = referenceCheckpoint(4, 4000);
+    state.workflowPhaseFrom = 6;
+    const source = { action: 'read', path: 'inputs/material-1.md' };
+    state.messages.splice(4, 0, { role: 'assistant', content: JSON.stringify({ actions: [source] }) },
+        { role: 'user', content: JSON.stringify([{ action: 'read', result: { path: source.path, text: '原材料'.repeat(1000), nextOffset: null } }]) });
+    state.workflowPhaseFrom += 2;
+    assert.equal(await archiveOlderObservations(state, { force: true, recentTurns: 1, preserveActive: true }), true);
+    const old = JSON.parse(state.messages[3].content)[0].result;
+    assert.ok(old.archived);
+    assert.match((await readHistory(state, old.archived)).text, /制作流程/);
+    assert.match(state.messages[5].content, /原材料/);
+    assert.match(state.messages[9].content, /制作流程/);
+    assert.equal(JSON.parse(state.messages[7].content)[0].result.archived.archive, 0);
+});
+
 test('256K 模型从连续 28 步指引读取后的检查点继续，保留确认和分页并执行文件写入', async t => {
     const directory = await fs.promises.mkdtemp(path.join(require('node:os').tmpdir(), 'pivot-ppt-history-'));
     t.after(() => fs.promises.rm(directory, { recursive: true, force: true }));
@@ -228,6 +279,15 @@ test('已确认且同一项目的设计文件经校验回执后仅收起固定�
     assert.equal(result.messages.at(-1).content, original.at(-1).content);
     assert.ok(estimateMessagesTokens(result.messages) < estimateMessagesTokens(original));
     assert.equal(JSON.parse(original[1].content).text, text);
+    const routing = fs.readFileSync(path.join(path.dirname(file), 'routing.md'), 'utf8').replace(/\r\n/g, '\n');
+    const messages = [...original, { role: 'user', content: JSON.stringify({ runtimeDocument: 'workflows/routing.md', text: routing }) }];
+    const routingView = JSON.parse(phaseMessages(messages, state).messages.at(-1).content).text;
+    assert.match(routingView, /暂收起已完成的流程选路表/);
+    assert.doesNotMatch(routingView, /Top-Level Route Matrix/);
+    assert.match(routingView, /Template Selection Boundary/);
+    const calibrated = [...original, { role: 'assistant', content: JSON.stringify({ actions: [{ action: 'run', tool: 'text_measure', args: ['calibrate', 'project', '--outline'] }] }) },
+        { role: 'user', content: JSON.stringify([{ action: 'run', result: { exitCode: 0 } }]) }];
+    assert.match(JSON.parse(phaseMessages(calibrated, { ...state, messages: calibrated }).messages[1].content).text, /暂收起步骤1至3/);
     assert.equal(phaseMessages(original, { ...state, confirmedGates: 1 }).messages[1], original[1]);
     assert.equal(phaseMessages(original, { ...state, request: { operation: 'generate', profile: 'quick' } }).messages[1], original[1]);
     const changed = original.map((message, index) => index === 1 ? { ...message, content: JSON.stringify({ runtimeDocument: 'workflows/generate-pptx.md', text: text + 'x', nextOffset: null }) } : message);

@@ -617,3 +617,40 @@ test('英文受控资料与实时数据请求同样按需唤醒对应路由', as
     });
     assert.equal(data.tools.action, 'candidate_only');
 });
+
+test('工具授权与显式排除在影子、关闭和目录故障分支继续约束执行候选', async () => {
+    const selected = { name: '数据汇总', fullName: 'mcp.10.db.summary', capabilities: ['data.query'] };
+    const excluded = { ...selected, fullName: 'mcp.20.db.summary' };
+    const overrides = { tools: [selected.fullName], excludedTools: [excluded.fullName] };
+    const configs = [{}, { shadowMode: true }, { enabled: false }, { autoToolDiscoveryEnabled: false }, { catalogFailure: true }];
+    for (const settings of configs) {
+        const router = createSemanticRouter({
+            getChatAutoRouteConfig: () => ({ ...getChatAutoRouteConfig({}), ...settings }), getEmbeddingConfig: async () => ({}),
+            mcpToolCatalogIndex: { async getEntries(tools) {
+                if (settings.catalogFailure) throw new Error('合成目录故障');
+                return tools.map(tool => ({ tool, name: tool.name, vector: [] }));
+            }, scheduleRefresh() {} },
+            resolveBusinessDecision: async () => null, recordChatRouteMetric() {}
+        });
+        const state = { mcpEnabled: true, ragEnabled: false, routeOverrides: overrides };
+        const route = await router.resolveRoutePlan({ prompt: '请查询合成数据', user: { id: 1, tenant_id: 1 }, state, availableMcpTools: [selected, excluded] });
+        assert.deepEqual(route.execution.tools.candidates.map(tool => tool.fullName), [selected.fullName]);
+        const unavailable = await router.resolveRoutePlan({ prompt: '请查询合成数据', user: { id: 1, tenant_id: 1 }, state, availableMcpTools: [excluded] });
+        assert.equal(unavailable.execution.tools.shouldPlan, false);
+        assert.equal(unavailable.tools.reasonCode, 'explicit_tool_unavailable');
+    }
+});
+
+test('路由影子和工具发现开关能阻止语义建议开启自动只读，同时保留人工授权', () => {
+    const { applyAutomaticExecutionDecision } = require('../server/services/chat-route-correction');
+    const proposal = { action: 'direct_answer', routing: { source: 'semantic_intent', knowledge: 'required', tools: 'read_only', allowAutomaticRead: true, requestedCapabilities: ['data.query'] } };
+    for (const flags of [{ shadowMode: true }, { enabled: false }, { autoToolDiscoveryEnabled: false, autoRagEnabled: false }]) {
+        const config = { ...getChatAutoRouteConfig({}), ...flags };
+        const base = { modelContent: '核对日报数据', ragEnabled: true, routeOverrides: {}, mcpEnabled: false };
+        assert.equal(applyAutomaticExecutionDecision(base, proposal, config).mcpEnabled, false);
+        assert.equal(base.routeOverrides.forceRag, undefined);
+        const explicit = { ...base, routeOverrides: { forceRag: true }, mcpEnabled: true };
+        assert.equal(applyAutomaticExecutionDecision(explicit, proposal, config).mcpEnabled, true);
+        assert.equal(explicit.routeOverrides.forceRag, true);
+    }
+});

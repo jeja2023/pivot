@@ -6,9 +6,24 @@ function currentUserText(prompt = '') {
         .replace(/!?\[(?:附件|文件)[:：][^\]]*\]\([^\n)]*\)/g, '').trim();
 }
 
+function stripCodeFences(text) {
+    let fence = '';
+    return text.split(/\r?\n/).map(line => {
+        const delimiter = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/u);
+        if (fence) {
+            if (delimiter && delimiter[1][0] === fence[0] && delimiter[1].length >= fence.length && !delimiter[2].trim()) fence = '';
+            return '';
+        }
+        if (!delimiter || (delimiter[1][0] === '`' && delimiter[2].includes('`'))) return line;
+        fence = delimiter[1];
+        return '';
+    }).join('\n');
+}
+
 function currentRequestText(prompt = '') {
-    return currentUserText(prompt)
-        .replace(/```[\s\S]*?```/g, '').replace(/^[ \t]*>.*$/gm, '')
+    return stripCodeFences(currentUserText(prompt))
+        .replace(/(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\1(?!`)/g, ' ')
+        .replace(/^[ \t]*>.*$/gm, ' ')
         .replace(/[“「][^”」]*[”」]|"[^"\n]*"/g, '').trim();
 }
 

@@ -725,7 +725,7 @@ function validateStructuredOutput(content, schema = {}) {
     return { value: parsed, issues };
 }
 
-async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName, signal, usageRef }) {
+async function requestStructuredOutput({ modelCfg, messages, user, temperature, maxTokens, schema, schemaName, signal, usageRef, budget, requestModel }) {
     const responseFormat = schemaHasRules(schema)
         ? {
             type: 'json_schema',
@@ -736,8 +736,8 @@ async function requestStructuredOutput({ modelCfg, messages, user, temperature, 
             }
         }
         : null;
-    const content = await callModelText(modelCfg, messages, {
-        user,
+    const invoke = requestModel || ((input, options) => callModelText(modelCfg, input, { ...options, user, budget }));
+    const content = await invoke(messages, {
         temperature,
         maxTokens,
         signal,
@@ -771,29 +771,38 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
     const fitted = fitMessagesToContextBudget(messages, modelCfg, { maxOutputTokens: maxTokens });
     const modelMessages = fitted.messages;
     const outputSchema = outputSchemaForNode(context);
+    async function requestModel(inputMessages, options, source = 'agent_llm_node') {
+        const fit = fitMessagesToContextBudget(inputMessages, modelCfg, { maxOutputTokens: options.maxTokens }).messages;
+        const budget = context.budget;
+        const inputTokens = require('./context-budget').estimateMessagesTokens(fit) +
+            (options.responseFormat ? require('./context-budget').estimateContentTokens(JSON.stringify(options.responseFormat)) : 0);
+        const admission = await budget?.reserveModelRequest?.(inputTokens, options.maxTokens, options.signal);
+        try {
+            const answer = await callModelText(modelCfg, fit, { ...options, user, source, maxTokens: admission?.maxTokens ?? options.maxTokens });
+            await recordAgentModelUsage(user, modelCfg, fit, answer, source, context.run?.id || context.runId || '', { usageRef: options.usageRef, budget });
+            return answer;
+        } finally { admission?.release(); }
+    }
     let content = '';
     let nativeStructured = false;
     if (responseFormat === 'json') {
         const usageRef = {};
         try {
             const result = await requestStructuredOutput({
-                modelCfg,
                 messages: modelMessages,
-                user,
                 temperature,
                 maxTokens,
                 schema: outputSchema,
                 schemaName: context.node?.id || 'workflow_output',
                 signal: context.signal || null,
-                usageRef
+                usageRef, requestModel
             });
             content = result.content;
             nativeStructured = result.native;
         } catch (error) {
-            if (!isNativeStructuredOutputUnsupported(error)) throw error;
-            content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
+            if (error.code === 'INSUFFICIENT_QUOTA' || require('./agent-execution-control').isExecutionControlError(error) || !isNativeStructuredOutputUnsupported(error)) throw error;
+            content = await requestModel(modelMessages, { temperature, maxTokens, signal: context.signal || null, usageRef });
         }
-        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '', { usageRef });
         let validation = validateStructuredOutput(content, outputSchema);
         if (validation.issues.length) {
             const repairMessages = [
@@ -807,8 +816,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
                 }
             ];
             const repairUsageRef = {};
-            const repaired = await callModelText(modelCfg, repairMessages, { user, temperature: 0, maxTokens, signal: context.signal || null, usageRef: repairUsageRef });
-            await recordAgentModelUsage(user, modelCfg, repairMessages, repaired, 'agent_llm_node_json_repair', context.run?.id || context.runId || '', { usageRef: repairUsageRef });
+            const repaired = await requestModel(repairMessages, { temperature: 0, maxTokens, signal: context.signal || null, usageRef: repairUsageRef }, 'agent_llm_node_json_repair');
             content = repaired;
             validation = validateStructuredOutput(content, outputSchema);
             if (validation.issues.length) {
@@ -820,8 +828,7 @@ async function executeAgentLlmNode(input = {}, user, context = {}) {
         }
     } else {
         const usageRef = {};
-        content = await callModelText(modelCfg, modelMessages, { user, temperature, maxTokens, signal: context.signal || null, usageRef });
-        await recordAgentModelUsage(user, modelCfg, modelMessages, content, 'agent_llm_node', context.run?.id || context.runId || '', { usageRef });
+        content = await requestModel(modelMessages, { temperature, maxTokens, signal: context.signal || null, usageRef });
     }
     return {
         content,

@@ -5,7 +5,7 @@ const { recordModelTokenUsage, buildThinkingControlPayload, isChatThinkingEnable
 const { normalizeTaskBudget } = require('./agent-budget');
 const {
     buildChatCompletionsUrl,
-    buildModelHeaders
+    buildModelHeaders, isDeepSeekApi
 } = require('./model-adapter');
 const { aiSemaphore } = require('./concurrency');
 const {
@@ -142,6 +142,7 @@ async function forwardStreamingWithFirstResponseDeadline(request, options = {}) 
 
 function applyAgentThinkingControls(data, modelCfg, options = {}) {
     if (agentThinkingKept(modelCfg, options)) return data;
+    if (options.enableThinking === false && isDeepSeekApi(modelCfg.url)) return Object.assign(data, { thinking: { type: 'disabled' } });
     return Object.assign(data, buildThinkingControlPayload(modelCfg));
 }
 
@@ -163,7 +164,7 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         recordModelSuccess(modelCfg, Date.now() - startedAt);
         return result;
     } catch (err) {
-        if (endpointRelease) recordModelFailure(modelCfg, err, { signal: options.signal });
+        if (endpointRelease && err.code !== 'INSUFFICIENT_QUOTA') recordModelFailure(modelCfg, err, { signal: options.signal });
         throw err;
     } finally {
         if (options.usageRef && typeof options.usageRef === 'object') {
@@ -174,6 +175,28 @@ async function withAgentModelConcurrency(modelCfg, operation, options = {}) {
         if (endpointRelease) endpointRelease();
         if (globalAcquired) aiSemaphore.release();
     }
+}
+
+const quotaCharges = new WeakSet();
+
+async function withAgentDailyQuota(model, messages, payload, maxTokens, options, invoke) {
+    if (options.quotaManaged || !(Number(model.daily_token_limit) > 0)) return await invoke();
+    const user = options.user;
+    if (!user?.id) throw Object.assign(new Error('模型日额度需要有效的用户身份。'), { code: 'INSUFFICIENT_QUOTA', status: 429 });
+    const { estimateMessagesTokens, estimateContentTokens } = require('./context-budget');
+    const inputEstimate = estimateMessagesTokens(messages) + estimateContentTokens(JSON.stringify(payload.tools || payload.response_format || payload.text?.format || ''));
+    const releaseQuota = await require('./model-daily-quota').ensureModelQuota(user, model, messages, maxTokens, { signal: options.signal, inputEstimate });
+    let settled = false;
+    async function settle(output, usage) {
+        if (settled) return;
+        settled = true;
+        const estimated = estimateProviderUsage(messages, output);
+        const input = usage?.input_tokens ?? usage?.prompt_tokens ?? usage?.inputTokens ?? estimated.inputTokens;
+        const completion = usage?.output_tokens ?? usage?.completion_tokens ?? usage?.outputTokens ?? estimated.outputTokens;
+        await recordModelTokenUsage(user.id, model.id, Number(input) + Number(completion), options.source || 'agent', input, completion, extractPromptCacheUsage(usage));
+        if (options.usageRef && typeof options.usageRef === 'object') quotaCharges.add(options.usageRef);
+    }
+    try { return await invoke(settle); } finally { releaseQuota(); }
 }
 
 async function callModelJson(modelCfg, messages, options = {}) {
@@ -200,6 +223,7 @@ async function callModelJson(modelCfg, messages, options = {}) {
             responseProtocol = responsesProtocol.responsesRequest(modelCfg, providerMessages, [], { ...options, maxTokens });
             targetUrl = responseProtocol.url; data = responseProtocol.data;
         }
+        return await withAgentDailyQuota(modelCfg, providerMessages, data, maxTokens, options, async settle => {
         const response = await forwardChatCompletion({
             modelCfg,
             user: options.user || null,
@@ -225,7 +249,10 @@ async function callModelJson(modelCfg, messages, options = {}) {
         if (usage && typeof options.onUsage === 'function') {
             try { options.onUsage(usage); } catch (_) {}
         }
-        return converted ? converted.content : response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
+        const content = converted ? converted.content : response.data?.choices?.[0]?.message?.content || response.data?.output_text || '';
+        await settle?.(content, usage);
+        return content;
+        });
     }, options);
 }
 
@@ -329,12 +356,14 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             }
         });
         const targetUrl = responses?.url || buildChatCompletionsUrl(modelCfg.url, { appendV1ForLocal: false });
+        const requestPayload = responses?.data || payload;
+        return await withAgentDailyQuota(modelCfg, providerMessages, requestPayload, payload.max_tokens, options, async settle => {
         const { response, cleanup: cleanupStreamingRequest } = await forwardStreamingWithFirstResponseDeadline({
             modelCfg,
             user: options.user || null,
             url: targetUrl,
             headers: { ...buildModelHeaders(modelCfg, { acceptJson: false }), Accept: 'text/event-stream' },
-            data: responses?.data || payload,
+            data: requestPayload,
         }, options);
         try {
         await new Promise((resolve, reject) => {
@@ -379,6 +408,10 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             });
             response.data.on('error', error => finish(reject, error));
         });
+        } catch (error) {
+            const snapshot = accumulator.snapshot();
+            if (timing.firstFrameAt) await settle?.(snapshot.content || '', snapshot.usage);
+            throw error;
         } finally {
             cleanupStreamingRequest();
         }
@@ -389,7 +422,9 @@ async function callModelStreamingWithTools(modelCfg, messages, tools = [], optio
             try { options.onUsage(provider.usage.raw || provider.usage); } catch (_) {}
         }
         Object.assign(result, { provider, timing: snapshotTiming() });
+        await settle?.(result.content || '', result.usage || provider.usage?.raw);
         return result;
+        });
         } catch (error) {
             if (error?.code === 'ECONNABORTED' && !timing.firstByteAt) {
                 error.code = 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT';
@@ -410,7 +445,9 @@ async function recordAgentModelUsage(user, modelCfg, messages, output, source = 
     const inputTokens = valid(usageInput) ? Number(usageInput) : estimated.inputTokens;
     const outputTokens = valid(usageOutput) ? Number(usageOutput) : estimated.outputTokens;
     const promptCache = options.promptCache || options.usageRef?.promptCache || extractPromptCacheUsage(usage);
-    await recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
+    if (!quotaCharges.delete(options.usageRef)) {
+        await recordModelTokenUsage(user.id, modelCfg.id, inputTokens + outputTokens, source, inputTokens, outputTokens, promptCache);
+    }
     let calibration = null;
     if (usage) {
         try {

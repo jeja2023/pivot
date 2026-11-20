@@ -138,3 +138,74 @@ test('真实原生执行使用兼容名称和长provider调用ID，默认交付�
         await new Promise(resolve => server.close(resolve));
     }
 });
+
+test('成本升级在正常 JSON 与流式交付里重写总结并正确归因，失败保留首次回答', async () => {
+    const { createChatFixture } = require('./security-chat/chat-route-harness');
+    const { modelQualityIdentity } = require('../server/services/agent-model-quality');
+    const { getRunnableModelForUserAsync } = require('../server/services/models');
+    const originalStreaming = process.env.AGENT_STREAMING_TOOLS;
+    const originalNative = process.env.AGENT_NATIVE_TOOL_CALLS;
+    process.env.AGENT_NATIVE_TOOL_CALLS = 'enabled';
+    const firstAnswer = '我不确定摘要是否完整。';
+    const upgradedAnswer = '合成材料包含三条说明。本次核对确认三条说明均已纳入摘要。';
+    let failUpgrade = false;
+    const calls = [];
+    const fake = http.createServer((req, res) => {
+        let data = '';
+        req.on('data', chunk => { data += chunk; });
+        req.on('end', () => {
+            const input = JSON.parse(data);
+            const verify = input.messages[0].content.includes('独立核验交付');
+            const summary = !verify && input.model === 'strong-fixture';
+            calls.push({ verify, summary, stream: Boolean(input.stream) });
+            if (summary && failUpgrade) {
+                res.writeHead(401, { 'Content-Type': 'application/json' });
+                return res.end(JSON.stringify({ error: { message: '合成鉴权失败' } }));
+            }
+            if (input.stream) {
+                res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+                res.write('data: ' + JSON.stringify({ choices: [{ index: 0, delta: { content: firstAnswer }, finish_reason: null }] }) + '\n\n');
+                res.end('data: ' + JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }) + '\n\ndata: [DONE]\n\n');
+                return;
+            }
+            const content = verify ? JSON.stringify({ passed: true, needsInput: false, coveredDeliverables: [], missing: [] })
+                : summary ? upgradedAnswer : JSON.stringify({ action: 'final', answer: firstAnswer });
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }));
+        });
+    });
+    await new Promise(resolve => fake.listen(0, '127.0.0.1', resolve));
+    const endpoint = 'http://127.0.0.1:' + fake.address().port + '/v1';
+    const fixture = createChatFixture({ prefix: 'routing_escalation', upstreamUrl: endpoint,
+        modelColumns: { max_input_tokens: 16000, input_price_per_million: 1, supports_tool_calls: true, tool_call_mode: 'enabled' } });
+    const strong = await queryOne(`INSERT INTO models (user_id,name,url,model_name,status,max_input_tokens,input_price_per_million,supports_tool_calls,tool_call_mode)
+        VALUES (?, ?, ?, ?, 'active', 64000, 2, TRUE, 'enabled') RETURNING id`, [fixture.userId, '模拟升级模型', endpoint, 'strong-fixture']);
+    try {
+        for (const config of [{ streaming: false }, { streaming: true }, { streaming: false, fail: true }]) {
+            process.env.AGENT_STREAMING_TOOLS = String(config.streaming);
+            failUpgrade = config.fail === true;
+            const start = calls.length;
+            const chosen = failUpgrade ? fixture.modelId : Number(strong.id);
+            const run = await createAgentRunFactory({})({ user: fixture.user, modelId: fixture.modelId, modelRouter: 'auto-escalate',
+                sessionId: fixture.sessionId, goal: '请核对合成材料并给出摘要。', maxSteps: 8, taskContract: {}, metadata: { autoPersonalSkill: false } });
+            await runAgent(run.id, fixture.user);
+            const final = await queryOne('SELECT status,final_answer,error_message,chosen_model_id,metadata FROM agent_runs WHERE id = ?', [run.id]);
+            assert.equal(final.status, 'completed', final.error_message);
+            assert.equal(final.final_answer, failUpgrade ? firstAnswer : upgradedAnswer);
+            assert.equal(Number(final.chosen_model_id), chosen);
+            assert.equal(final.metadata.taskVerification.executionModelIdentity, modelQualityIdentity(await getRunnableModelForUserAsync(chosen, fixture.user)));
+            const runCalls = calls.slice(start);
+            assert.equal(runCalls[0].stream, config.streaming);
+            assert.equal(runCalls.filter(call => call.summary).length, 1);
+            assert.ok(runCalls.findIndex(call => call.summary) < runCalls.findIndex(call => call.verify));
+        }
+    } finally {
+        if (originalStreaming === undefined) delete process.env.AGENT_STREAMING_TOOLS; else process.env.AGENT_STREAMING_TOOLS = originalStreaming;
+        if (originalNative === undefined) delete process.env.AGENT_NATIVE_TOOL_CALLS; else process.env.AGENT_NATIVE_TOOL_CALLS = originalNative;
+        fake.closeAllConnections();
+        await new Promise(resolve => fake.close(resolve));
+        fixture.cleanup();
+        await execute('DELETE FROM models WHERE id = ?', [strong.id]);
+        fixture.cleanup();
+    }
+});

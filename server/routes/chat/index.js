@@ -63,6 +63,7 @@ const { beginChatTurn } = require('../../services/chat-turn-ledger');
 const conversationTurns = require('../../repositories/chat-conversation-turns');
 const { decideAutomaticChatExecution, handleAutomaticTaskControl, applyAutomaticExecutionDecision } = require('../../services/chat-auto-execution-handler');
 const { MAX_CHAT_AGENT_GOAL_LENGTH } = require('../../services/agent-validators');
+const { detectChatTaskControl } = require('../../services/chat-auto-execution');
 const { getChatAutoRouteConfig } = require('../../services/chat-route-config');
 const sessionsRepository = require('../../repositories/sessions');
 const {
@@ -101,8 +102,7 @@ function createChatRouter({
         if (agentExecutionEnabled !== undefined && agentExecutionEnabled !== null) return agentExecutionEnabled === true;
         return typeof autoAgent === 'function' ? autoAgent() === true : autoAgent === true;
     };
-    const readAutoExecutionEnabled = () => {
-        const routeConfig = getChatAutoRouteConfig();
+    const readAutoExecutionEnabled = (routeConfig = getChatAutoRouteConfig()) => {
         if (!routeConfig.enabled || routeConfig.shadowMode) return false;
         if (typeof autoExecutionEnabled === 'function') return autoExecutionEnabled() === true;
         if (autoExecutionEnabled !== undefined && autoExecutionEnabled !== null) return autoExecutionEnabled === true;
@@ -263,8 +263,10 @@ function createChatRouter({
         }
 
         // --- 业务逻辑检查 ---
+        const taskControl = !regenerate && !ephemeralVoice && chatMode === 'normal' ? detectChatTaskControl(modelContent) : null;
         const preflight = await validateChatPreflight({
             state: chatState,
+            taskControl: Boolean(taskControl),
             user: req.user,
             req,
             logAction
@@ -289,7 +291,7 @@ function createChatRouter({
             finishChatTrace('completed', { mode: 'agent_validation' });
             return res.end();
         }
-        if (mcpEnabled) {
+        if (mcpEnabled && !taskControl) {
             const localBridgeDevice = registerChatRequestLocalBridge(req);
             if (localBridgeDevice) {
                 req.log.info({ deviceId: localBridgeDevice.deviceId, grants: localBridgeDevice.grants }, '聊天请求已同步桌面端本机执行器');
@@ -313,7 +315,7 @@ function createChatRouter({
         }
         let knowledgeSelection;
         try {
-            knowledgeSelection = await require('../../services/chat-knowledge-selection').resolveChatKnowledgeSelection(chatState, req.user, userMessageId);
+            if (!taskControl) knowledgeSelection = await require('../../services/chat-knowledge-selection').resolveChatKnowledgeSelection(chatState, req.user, userMessageId);
             if (knowledgeSelection && !knowledgeSelection.scope.cleared) {
                 ragScope = knowledgeSelection.scope;
                 chatState.ragScope = ragScope;
@@ -323,10 +325,14 @@ function createChatRouter({
             writeSse('[DONE]');
             return res.end();
         }
-        let automaticExecution = await decideAutomaticChatExecution({
-            routeOverrides: chatState.routeOverrides, mcpToolAllowlist, requestScope: chatState.requestScope,
+        let decisionTenant;
+        chatState.getDecisionTenantId = () => decisionTenant ??= Promise.resolve(req.user.tenant_id || require('../../services/enterprise-access').getPrimaryTenantId(userId));
+        const routeConfig = getChatAutoRouteConfig();
+        const observeOnly = !routeConfig.enabled || routeConfig.shadowMode || !chatState.autoRouteEnabled;
+        let automaticExecution = taskControl || await decideAutomaticChatExecution({
+            routeOverrides: chatState.routeOverrides, mcpToolAllowlist, requestScope: chatState.requestScope, getDecisionTenantId: chatState.getDecisionTenantId,
             regenerate, ephemeralVoice, chatMode, agentExecutionAllowed,
-            autoExecutionEnabled: readAutoExecutionEnabled(), modelContent,
+            autoExecutionEnabled: chatState.autoRouteEnabled && readAutoExecutionEnabled(routeConfig), observeOnly, modelContent,
             maxGoalLength: MAX_CHAT_AGENT_GOAL_LENGTH, sessionId, userId,
             user: req.user, userMessageId, modelCfg, signal: abortController.signal,
             projectId: chatState.projectId, writeSse, sessionsRepository, log: req.log
@@ -335,7 +341,7 @@ function createChatRouter({
         automaticExecution.modelId = modelCfg.id;
         if (knowledgeSelection) automaticExecution.knowledgeScope = knowledgeSelection.scope;
         await conversationTurns.updateTurn(conversationTurn, { decision: automaticExecution });
-        ({ mcpEnabled, ragEnabled } = applyAutomaticExecutionDecision(chatState, automaticExecution));
+        ({ mcpEnabled, ragEnabled } = applyAutomaticExecutionDecision(chatState, automaticExecution, routeConfig));
         if (automaticExecution.action === 'agent_run') {
             writeSse(JSON.stringify({
                 type: 'route',

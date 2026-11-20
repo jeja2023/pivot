@@ -298,8 +298,8 @@ function buildReviewMessages(record, chunk, chunkIndex, chunkCount, instructions
 async function callReviewModel(params) {
     const fitted = fitMessagesToContextBudget(params.messages, params.modelCfg, { maxOutputTokens: params.maxTokens });
     const usageRef = {};
-    const content = await params.deps.callModelText(params.modelCfg, fitted.messages, { user: params.user, temperature: 0.1, maxTokens: params.maxTokens, usageRef });
-    await params.deps.recordAgentModelUsage(params.user, params.modelCfg, fitted.messages, content, 'agent_content_review', params.context.run?.id || params.context.runId || '', { usageRef });
+    const content = await params.deps.callModelText(params.modelCfg, fitted.messages, { user: params.user, temperature: 0.1, maxTokens: params.maxTokens, usageRef, budget: params.context.budget, signal: params.context.signal });
+    await params.deps.recordAgentModelUsage(params.user, params.modelCfg, fitted.messages, content, 'agent_content_review', params.context.run?.id || params.context.runId || '', { usageRef, budget: params.context.budget });
     return { content, contextBudget: fitted.metadata };
 }
 

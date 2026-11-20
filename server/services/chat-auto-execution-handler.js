@@ -13,19 +13,23 @@ const { isDirectConversation } = require('./chat-capability-decision');
 const { getChatCapabilityAvailability } = require('./chat-capability-scope');
 const { resolveChatRequestScope, constrainChatDecision, toolAllowedByRequestScope } = require('./chat-request-scope');
 const { applyChatRouteCorrection } = require('./chat-route-correction-handler');
-const { buildIntentFallback } = require('./chat-intent-fallback');
-const { readTypedEnv } = require('../config/env-registry');
+const { buildIntentFallback, buildUnappliedIntent } = require('./chat-intent-fallback');
+const { getChatIntentConfig, chatIntentApplies } = require('./chat-route-config');
+const { createChatIntentAudit } = require('./chat-intent-audit');
 const { createChatIntentBudget } = require('./chat-intent-budget');
 const { ACTIVE_STATUSES } = require('./agent-validators');
+const { getAgentRunTitle } = require('./agent-runtime/metadata');
 const { currentUserText } = require('./chat-request-constraints');
 
 async function decideAutomaticChatExecution(options = {}, deps = {}) {
     const startedAt = Date.now();
+    const config = getChatIntentConfig(deps.config);
+    const intentAudit = createChatIntentAudit({ ...options, getTenantId: options.getDecisionTenantId, enqueueObservation: deps.recordDecision });
     const budget = createChatIntentBudget({ signal: options.signal, deadlineAt: options.deadlineAt,
-        timeoutMs: deps.config?.timeoutMs ?? readTypedEnv('PIVOT_CHAT_INTENT_TIMEOUT_MS') });
+        timeoutMs: config.timeoutMs });
     const intentDiagnostics = {};
     try {
-        const decision = await budget.run('total', () => decideWithinIntentBudget({ ...options, intentDiagnostics, signal: budget.signal, deadlineAt: budget.deadlineAt }, { ...deps, budget }));
+        const decision = await budget.run('total', () => decideWithinIntentBudget({ ...options, intentDiagnostics, intentAudit, signal: budget.signal, deadlineAt: budget.deadlineAt }, { ...deps, budget }));
         return { ...decision, timing: { ...decision.timing, contextMs: Math.max(budget.timings.history || 0, 0) + Math.max(budget.timings.tasks || 0, budget.timings.memories || 0, budget.timings.availability || 0),
             semanticMs: budget.timings.semantic || 0, totalMs: Date.now() - startedAt, stages: { ...budget.timings } } };
     } catch (error) {
@@ -35,18 +39,24 @@ async function decideAutomaticChatExecution(options = {}, deps = {}) {
         const snapshot = budget.snapshot();
         const failureStage = diagnostic.failureStage || snapshot.stage;
         const timing = { ...diagnostic.timing, totalMs: Date.now() - startedAt, stages: snapshot.timings };
+        const failureCode = error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : 'intent_context_unavailable';
+        const applied = !options.observeOnly && chatIntentApplies(config, options.userId || options.user?.id, options.sessionId);
+        const selected = applied ? buildIntentFallback(baseline, failureCode) : buildUnappliedIntent(baseline, config.mode);
+        const durationMs = Date.now() - startedAt;
+        intentAudit.record({ selected, applied, mode: config.mode === 'disabled' ? 'disabled' : applied ? 'active' : 'shadow', failure: failureCode,
+            failureStage, timing: { ...timing, historyMs: snapshot.timings.history, tasksMs: snapshot.timings.tasks }, durationMs, routingModelId: diagnostic.intentModelId });
         options.log?.warn?.({ sessionId: options.sessionId, userId: options.userId, modelId: options.modelCfg?.id,
-            intentModelId: diagnostic.intentModelId, code: error.code, failureStage, timing }, '任务理解超过等待或上下文不可用，本轮仅提供文本回复');
-        return constrainChatDecision({ ...buildIntentFallback(baseline, error.code === 'CHAT_INTENT_TIMEOUT' ? 'intent_timeout' : 'intent_context_unavailable'),
-            durationMs: Date.now() - startedAt, failureStage, timing, intentModelId: diagnostic.intentModelId, routingModelSource: diagnostic.routingModelSource },
+            intentModelId: diagnostic.intentModelId, code: error.code, failureStage, timing }, '任务理解超过等待或上下文不可用，已按当前路由配置回退');
+        return constrainChatDecision({ ...selected, decisionId: intentAudit.id, failureCode,
+            durationMs, failureStage, timing, intentModelId: diagnostic.intentModelId, routingModelSource: diagnostic.routingModelSource },
         resolveChatRequestScope(options.modelContent, { ...(options.requestScope || {}), routeOverrides: options.routeOverrides }));
     } finally { budget.dispose(); }
 }
 
 async function decideWithinIntentBudget({
     regenerate = false, ephemeralVoice = false, chatMode = 'normal', agentExecutionAllowed = false,
-    autoExecutionEnabled = false, modelContent = '', maxGoalLength = 12000,
-    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, deadlineAt, intentDiagnostics, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
+    autoExecutionEnabled = false, observeOnly = false, modelContent = '', maxGoalLength = 12000,
+    sessionId = '', userId = 0, user, userMessageId, modelCfg, signal, deadlineAt, intentDiagnostics, intentAudit, sessionsRepository, log, projectId, writeSse, routeOverrides = {}, mcpToolAllowlist = null, requestScope: suppliedScope = null
 } = {}, deps = {}) {
     const intentPrompt = currentUserText(modelContent);
     const providedSources = [...String(modelContent).matchAll(/【参考文档:\s*([^\n】]{1,240})】\s*\n/g)].slice(0, 20).map(match => ({ kind: 'inline_attachment', name: match[1], available: true, sourceMessageId: userMessageId }));
@@ -66,41 +76,34 @@ async function decideWithinIntentBudget({
         sourceLength: modelContent.length, user, modelCfg, sessionId, userMessageId, signal });
     if (isDirectConversation(intentPrompt)) return { ...initial, action: 'direct_answer' };
     writeSse?.(JSON.stringify({ type: 'route', status: 'understanding', message: '正在理解任务并安排处理' }));
-    try {
-        const history = (await deps.budget.run('history', () => sessionsRepository.listMessages(sessionId, userId))).filter(item => Number(item.id) !== Number(userMessageId));
-        requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, history });
-        if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, history, providedSources, requestScope,
-            user, modelCfg, sessionId, userMessageId, signal });
-        const [tasks, memories, availability] = await Promise.all([
-            deps.budget.run('tasks', () => (deps.getConversationTasks || getConversationTasks)(sessionId, userId)),
-            deps.budget.run('memories', stageSignal => (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4, signal: stageSignal }),
-                { optional: true, fallback: [], timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) }),
-            deps.budget.run('availability', stageSignal => (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user, {}, { prompt: intentPrompt, selectedTools: routeOverrides.tools, manualAllowlist: mcpToolAllowlist, signal: stageSignal }),
-                { optional: true, fallback: { status: 'unavailable', tools: [] }, timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) })
-        ]);
-        if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
-        const resolved = await deps.budget.run('semantic', () => (deps.resolveChatIntent || resolveChatIntent)({
-            prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, deadlineAt, intentDiagnostics, providedSources,
-            availability: { ...availability, tools: (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, requestScope)) }, requestScope, sourceLength: modelContent.length,
-            executionAllowed: agentExecutionAllowed && autoExecutionEnabled,
-            preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
-        }));
-        if (resolved.failureCode) log?.warn?.({ sessionId, userId, modelId: modelCfg?.id, code: resolved.failureCode,
-            intentModelId: resolved.intentModelId, durationMs: resolved.durationMs, failureStage: resolved.failureStage, timing: resolved.timing, policyVersion: resolved.policyVersion }, '任务意图判断未完成，本轮仅提供受限文本回复');
-        if (/^(?:不对|不是让你|不是这个意思)|(?:不要|不用).{0,8}(?:新建|另开|新开)任务/.test(intentPrompt)) {
-            try {
-                resolved.correctionEvidence = await (deps.recordChatRouteCorrection || recordChatRouteCorrection)({
-                    correction: { kind: 'semantic_adjustment', action: resolved.action, routeOverrides: {} }, history, tasks,
-                    prompt: intentPrompt, userId, sessionId, userMessageId, applied: { status: 'semantic_reroute', action: resolved.action, continuationOf: resolved.continuationOf || null }
-                });
-            } catch (error) { log?.warn?.({ sessionId, userId, code: error.code }, '语义纠正证据记录暂不可用'); }
-        }
-        return constrainChatDecision(resolved, requestScope);
-    } catch (error) {
-        if (signal?.aborted) throw error;
-        log?.warn?.({ sessionId, userId, code: error.code }, '自动任务语义路由不可用');
-        return constrainChatDecision(buildIntentFallback(initial, 'intent_context_unavailable', 'decision_unavailable'), requestScope);
+    void intentAudit.resolveTenant().catch(() => {});
+    const history = (await deps.budget.run('history', () => sessionsRepository.listMessages(sessionId, userId))).filter(item => Number(item.id) !== Number(userMessageId));
+    requestScope = resolveChatRequestScope(modelContent, { ...(suppliedScope || {}), providedSources, routeOverrides, history });
+    if (requestScope.directSourceAnswer) return (deps.resolveChatIntent || resolveChatIntent)({ prompt: intentPrompt, history, providedSources, requestScope,
+        user, modelCfg, sessionId, userMessageId, signal });
+    const [tasks, memories, availability] = await Promise.all([
+        deps.budget.run('tasks', () => (deps.getConversationTasks || getConversationTasks)(sessionId, userId)),
+        deps.budget.run('memories', stageSignal => (deps.retrieveLongTermMemories || retrieveLongTermMemories)(userId, intentPrompt.slice(0, maxGoalLength), { user, sessionId, projectId, limit: 4, signal: stageSignal }),
+            { optional: true, fallback: [], timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) }),
+        deps.budget.run('availability', stageSignal => (deps.getChatCapabilityAvailability || getChatCapabilityAvailability)(user, {}, { prompt: intentPrompt, selectedTools: routeOverrides.tools, excludedTools: routeOverrides.excludedTools, excludeTools: routeOverrides.excludeTools, manualAllowlist: mcpToolAllowlist, signal: stageSignal }),
+            { optional: true, fallback: { status: 'unavailable', tools: [] }, timeoutMs: Math.min(2500, deps.budget.remainingMs() / 5) })
+    ]);
+    if (initial.action === 'plan_only') writeSse?.(JSON.stringify({ type: 'route', status: 'plan_only', message: '本轮仅提供计划' }));
+    const resolved = await deps.budget.run('semantic', () => (deps.resolveChatIntent || resolveChatIntent)({
+        prompt: intentPrompt, history, tasks, modelCfg, user, userMessageId, sessionId, signal, deadlineAt, intentDiagnostics, intentAudit, providedSources,
+        availability: { ...availability, tools: (availability.tools || []).filter(tool => toolAllowedByRequestScope(tool, requestScope)) }, requestScope, sourceLength: modelContent.length,
+        executionAllowed: agentExecutionAllowed && autoExecutionEnabled, observeOnly,
+        preferences: memories.filter(item => item.type === 'preference').map(item => ({ id: item.id, scope: item.scope, content: item.content, version: item.updatedAt }))
+    }, { config: deps.config }));
+    if (resolved.failureCode) log?.warn?.({ sessionId, userId, modelId: modelCfg?.id, code: resolved.failureCode,
+        intentModelId: resolved.intentModelId, durationMs: resolved.durationMs, failureStage: resolved.failureStage, timing: resolved.timing, policyVersion: resolved.policyVersion }, '任务意图判断未完成，已按当前路由配置回退');
+    if (!resolved.failureCode && /^(?:不对|不是让你|不是这个意思)|(?:不要|不用).{0,8}(?:新建|另开|新开)任务/.test(intentPrompt)) {
+        resolved.correctionEvidence = await deps.budget.run('correctionEvidence', () => (deps.recordChatRouteCorrection || recordChatRouteCorrection)({
+            correction: { kind: 'semantic_adjustment', action: resolved.action, routeOverrides: {} }, history, tasks,
+            prompt: intentPrompt, userId, sessionId, userMessageId, applied: { status: 'semantic_reroute', action: resolved.action, continuationOf: resolved.continuationOf || null }
+        }), { optional: true, fallback: [], timeoutMs: 500 });
     }
+    return constrainChatDecision(resolved, requestScope);
 }
 
 async function handleAutomaticTaskControl(options = {}, deps = {}) {
@@ -125,14 +128,17 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
             }
         }
         if (decision.action === 'control') {
-            const tasks = await (deps.listSessionTasks || ledger.listSessionTasks)(sessionId, userId);
+            const tasks = await (deps.listSessionTasks || ledger.listSessionTasks)(sessionId, userId, { activeOnly: true });
             const active = tasks.filter(run => ACTIVE_STATUSES.has(run.status));
+            const target = decision.controlTarget;
+            const matches = target ? active.filter(run => [run.id, getAgentRunTitle(run)].includes(target)) : active;
             if (!active.length) content = '当前会话没有正在处理的任务。';
-            else if (active.length > 1) content = '当前有多项任务正在处理，请指出要停止的任务名称。';
+            else if (!matches.length) content = '当前会话没有找到这个活动任务，请核对名称或在任务卡上操作。';
+            else if (matches.length > 1) content = target ? '有多项活动任务使用此名称，请在对应任务卡上操作。' : '当前有多项任务正在处理，请指出要停止的任务名称。';
             else {
                 const runtime = deps.runtime || require('./agent-runtime').runs;
                 const control = decision.control === 'pause' ? runtime.pauseAgentRun : runtime.cancelAgentRun;
-                const run = await control(active[0].id, user);
+                const run = await control(matches[0].id, user);
                 content = run?.status === 'cancelled' ? '已停止当前任务的后续处理；已经完成的操作保留记录。'
                     : run?.status === 'needs_input' ? '已暂停当前任务，可以随后继续。'
                     : run?.status === 'awaiting_commit' ? '当前任务正在等待提交决定，请在任务详情中确认提交或回滚。'
@@ -154,6 +160,7 @@ async function handleAutomaticTaskControl(options = {}, deps = {}) {
     const { assistantMessageResult, assistantMessageId } = await persistAssistantResponse({
         sessionId, userId, userMessageId, user, modelCfg, visibleContent, assistantContent: content, assistantTokens: estimateTokens(content),
         skipMemoryExtraction: ['memory', 'control'].includes(decision.action),
+        skipTitleGeneration: decision.action === 'control',
         routeMetadata: { decisions: decision.decisionId ? [{ decisionId: decision.decisionId, scenario: 'chat.execution', selectedActionId: decision.action }] : [] }
     });
     if (decision.decisionId) recordDecisionOutcome({ decisionId: decision.decisionId, source: 'runtime', eventType: 'execution', status: 'partial', reasonCode: decision.reasonCode || decision.action, resultReference: String(assistantMessageId) });

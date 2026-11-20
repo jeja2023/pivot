@@ -1,6 +1,7 @@
 'use strict';
 
 const { assertApprovalBinding } = require('./approvals');
+const { approvalInputHash } = require('../agent-approval-grants');
 
 function createApprovalRefresh({ getRunForUser, getRunMetadata, updateRunCas, getTimestamp, recordAgentEvent }) {
     return async function refreshAgentToolApproval(runId, user, expected) {
@@ -10,7 +11,7 @@ function createApprovalRefresh({ getRunForUser, getRunMetadata, updateRunCas, ge
         const pending = getRunMetadata(run).pendingApproval || {};
         assertApprovalBinding(pending, expected, false);
         const now = getTimestamp();
-        const renewed = { ...pending, requestedAt: now, expiresAt: getTimestamp(new Date(Date.now() + 15 * 60 * 1000)) };
+        const renewed = { ...pending, inputHash: pending.inputHash || approvalInputHash(pending.input || {}), requestedAt: now, expiresAt: getTimestamp(new Date(Date.now() + 15 * 60 * 1000)) };
         const changed = await updateRunCas(runId, ['approval_required'], {
             metadata: JSON.stringify({ pendingApproval: renewed }), updated_at: now
         }, { mergeMetadata: true, approvalBinding: pending });

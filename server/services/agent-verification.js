@@ -1,7 +1,7 @@
 'use strict';
 
 const { normalizeJsonSchema, schemaHasRules, validateValueAgainstSchema } = require('./agent-dag-contracts');
-const { queryOne } = require('../db/client');
+const { queryOne, transaction } = require('../db/client');
 const { getBeijingTimestamp } = require('../time');
 const { buildChatAttachmentEvidenceObservation, buildChatRagEvidenceObservation } = require('./chat-rag-context');
 const { normalizeBusinessScope } = require('./chat-task-contract-update');
@@ -12,7 +12,7 @@ function text(value, max = 4000) {
     return String(value ?? '').trim().slice(0, max);
 }
 
-function list(value, limit = MAX_CONTRACT_ITEMS) {
+function normalizeContractItems(value, limit = MAX_CONTRACT_ITEMS) {
     const source = Array.isArray(value) ? value : [];
     return source.map(item => text(item, 500)).filter(Boolean).slice(0, limit);
 }
@@ -20,16 +20,19 @@ function list(value, limit = MAX_CONTRACT_ITEMS) {
 function normalizeAcceptance(value = {}) {
     const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
     const schema = normalizeJsonSchema(source.outputSchema || source.output_schema || {});
+    const requiredFormats = [...new Set(normalizeContractItems(source.requiredFormats || source.required_formats, 20).map(value => value.toLowerCase()))]
+        .filter(format => /^[a-z0-9][a-z0-9_-]{0,15}$/u.test(format));
     return {
-        requiredPhrases: list(source.requiredPhrases || source.required_phrases),
-        forbiddenPhrases: list(source.forbiddenPhrases || source.forbidden_phrases),
+        ...(requiredFormats.length ? { requiredFormats } : {}),
+        requiredPhrases: normalizeContractItems(source.requiredPhrases || source.required_phrases),
+        forbiddenPhrases: normalizeContractItems(source.forbiddenPhrases || source.forbidden_phrases),
         minLength: Math.max(0, Math.min(Number.parseInt(source.minLength || source.min_length, 10) || 0, 100000)),
         requireJson: source.requireJson === true || source.require_json === true,
         outputSchema: schemaHasRules(schema) ? schema : {},
-        requiredArtifacts: list(source.requiredArtifacts || source.required_artifacts, 16),
+        requiredArtifacts: normalizeContractItems(source.requiredArtifacts || source.required_artifacts, 16),
         requireEvidence: source.requireEvidence === true || source.require_evidence === true,
-        ...(source.artifactRequired === true ? { artifactRequired: true } : {}),
-        ...(source.requireSemanticVerification === true ? { requireSemanticVerification: true } : {}),
+        ...(source.artifactRequired === true || requiredFormats.length ? { artifactRequired: true } : {}),
+        ...(source.requireSemanticVerification === true || requiredFormats.length ? { requireSemanticVerification: true } : {}),
         ...(source.requireCompleteSource === true ? { requireCompleteSource: true } : {})
     };
 }
@@ -46,7 +49,7 @@ function normalizeTaskContract(value = {}, goal = '', { verifyByDefault = false 
         schemaVersion: 1,
         revision,
         goal: text(source.goal || goal, 12000),
-        constraints: list(source.constraints, 32),
+        constraints: normalizeContractItems(source.constraints, 32),
         ...(Object.keys(normalizeBusinessScope(source.businessScope)).length ? { businessScope: normalizeBusinessScope(source.businessScope) } : {}),
         deliverables: Array.isArray(source.deliverables) ? source.deliverables.slice(0, 16) : [],
         acceptance,
@@ -147,7 +150,7 @@ function taskVerificationFailureMessage(report = {}) {
     return `任务尚未完成：${details.filter(Boolean).join('；') || '请查看详情中的验收结果'}。`;
 }
 
-async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget, repairOptions = null } = {}, deps = {}) {
+async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContract = null, answer, observations, partial = false, reason = '', setRunMetadata, signal, budget, repairOptions = null, buildFinalState = null, beforeFinalize = null } = {}, deps = {}) {
     signal?.throwIfAborted();
     let metadata = run?.metadata;
     if (typeof metadata === 'string') {
@@ -204,83 +207,115 @@ async function verifyAndRecordTaskOutcome({ runId, run, user = null, taskContrac
         report.taskContract.repairAttempts += 1;
         report.repair = { allowed: true, attempt: report.taskContract.repairAttempts, maxAttempts: 2 };
     }
-    if (typeof setRunMetadata === 'function' && runId) {
-        await setRunMetadata(runId, { taskContract: report.taskContract, taskVerification: report });
-    }
+    // DAG 的验收报告、事务和终态在同一行锁内写入，暂停与换租约共享这道边界。
+    const persist = async executor => {
+        signal?.throwIfAborted();
+        if (executor) {
+            const current = await executor.queryOne(`SELECT status, locked_by, realtime_lease_epoch, deleted_at,
+                lock_expires_at > clock_timestamp() AS lease_current FROM agent_runs WHERE id = ? AND user_id = ? FOR UPDATE`, [runId, run.user_id]);
+            signal?.throwIfAborted();
+            if (!current || current.deleted_at || current.status !== 'verifying') {
+                throw Object.assign(new Error('任务已离开核验阶段。'), { code: current?.status === 'needs_input' ? 'AGENT_RUN_PAUSED' : 'AGENT_RUN_CANCELLED' });
+            }
+            if (current.locked_by !== (run.realtimeLeaseOwner || null) || (run.realtimeLeaseOwner &&
+                (!current.lease_current || String(current.realtime_lease_epoch) !== String(run.realtimeLeaseEpoch)))) {
+                throw Object.assign(new Error('任务核验执行权已失效。'), { code: 'AGENT_RUN_LEASE_LOST' });
+            }
+        }
+        const patch = async metadataPatch => {
+            if (executor) await executor.execute(`UPDATE agent_runs SET metadata = COALESCE(metadata, '{}'::jsonb) || ?::jsonb WHERE id = ?`, [JSON.stringify(metadataPatch), runId]);
+            else if (runId && typeof setRunMetadata === 'function') await setRunMetadata(runId, metadataPatch);
+        };
+        await patch({ taskContract: report.taskContract, taskVerification: report });
+        if (runId && run?.user_id) {
+            const verificationId = `verify_${runId}`.slice(0, 128);
+            await (executor?.queryOne || queryOne)(`
+                INSERT INTO agent_verifications (
+                    id, run_id, user_id, contract, outcome_status, report, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (run_id) DO UPDATE SET
+                    contract = EXCLUDED.contract,
+                    outcome_status = EXCLUDED.outcome_status,
+                    report = EXCLUDED.report,
+                    updated_at = EXCLUDED.updated_at
+                RETURNING id
+            `, [
+                verificationId,
+                runId,
+                run.user_id,
+                JSON.stringify(report.taskContract),
+                report.outcomeStatus,
+                JSON.stringify(report),
+                getBeijingTimestamp(),
+                getBeijingTimestamp()
+            ]);
+        }
+        // Task Transaction 与文本验收分层：先持久化独立 VerificationReport，
+        // 再推进事务。无副作用事务可在验收后自动提交；带副作用事务会停在
+        // awaiting_commit，直到每个 effect 提供提交证据，绝不因模型文本而自动交付。
+        const transactionId = String(metadata?.taskTransactionId || metadata?.task_transaction_id || '').trim();
+        signal?.throwIfAborted();
+        if (runId && transactionId && !report.repair?.allowed && (user?.id || run?.user_id)) {
+            const transactionUser = user || { id: run.user_id };
+            const {
+                commitTaskTransaction,
+                getTaskTransactionForUser,
+                recordTaskTransactionVerification
+            } = require('./agent-task-transactions');
+            let taskTransaction = await getTaskTransactionForUser(transactionId, transactionUser, executor);
+            signal?.throwIfAborted();
+            if (taskTransaction && ['executing', 'verifying'].includes(taskTransaction.status)) {
+                taskTransaction = await recordTaskTransactionVerification(transactionId, transactionUser, report, executor);
+            }
+            if (taskTransaction?.status === 'awaiting_commit') {
+                const hasPendingEffect = taskTransaction.effects.some(effect => (
+                    effect.commitMode !== 'preview' && effect.status !== 'committed'
+                ));
+                if (!hasPendingEffect) {
+                    signal?.throwIfAborted();
+                    taskTransaction = await commitTaskTransaction(transactionId, transactionUser, {
+                        kind: 'verification_auto_commit',
+                        verificationId: `verify_${runId}`.slice(0, 128),
+                        verifiedAt: report.verifiedAt
+                    }, { executor });
+                }
+            }
+            if (taskTransaction) {
+                report.taskTransaction = {
+                    id: taskTransaction.id,
+                    status: taskTransaction.status,
+                    effectCount: taskTransaction.effects.length,
+                    compensationCount: taskTransaction.compensations.length,
+                    committedAt: taskTransaction.committedAt || null
+                };
+                await patch({
+                        taskTransactionId: taskTransaction.id,
+                        taskTransactionStatus: taskTransaction.status,
+                        taskVerification: report
+                    });
+            }
+        }
+        if (executor) {
+            signal?.throwIfAborted();
+            const final = buildFinalState(report);
+            const now = getBeijingTimestamp();
+            const updated = await executor.execute(`UPDATE agent_runs SET status = ?, final_answer = ?, error_message = ?, completed_at = ?,
+                last_heartbeat_at = ?, updated_at = ? WHERE id = ? AND (NOT ?::boolean OR lock_expires_at > clock_timestamp())`,
+            [final.status, final.final_answer, final.error_message, final.completed_at || null, now, now, runId, Boolean(run.realtimeLeaseOwner)]);
+            if (!updated) throw Object.assign(new Error('任务核验执行权已失效。'), { code: 'AGENT_RUN_LEASE_LOST' });
+            return final.status;
+        }
+        return null;
+    };
+    if (beforeFinalize) await beforeFinalize();
+    const finalizedStatus = buildFinalState ? await transaction(persist) : await persist(null);
+    if (finalizedStatus) report.finalizedStatus = finalizedStatus;
     if (runId && run?.user_id) {
-        const verificationId = `verify_${runId}`.slice(0, 128);
-        await queryOne(`
-            INSERT INTO agent_verifications (
-                id, run_id, user_id, contract, outcome_status, report, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (run_id) DO UPDATE SET
-                contract = EXCLUDED.contract,
-                outcome_status = EXCLUDED.outcome_status,
-                report = EXCLUDED.report,
-                updated_at = EXCLUDED.updated_at
-            RETURNING id
-        `, [
-            verificationId,
-            runId,
-            run.user_id,
-            JSON.stringify(report.taskContract),
-            report.outcomeStatus,
-            JSON.stringify(report),
-            getBeijingTimestamp(),
-            getBeijingTimestamp()
-        ]);
         try {
             const { recordModelQualityOutcome } = require('./agent-model-quality');
             await recordModelQualityOutcome({ run, user: user || { id: run.user_id }, verification: report });
         } catch (_) {
             // 质量指标汇聚属于参考性操作，指标记录失败不能覆盖确定性的任务验收结果。
-        }
-    }
-    // Task Transaction 与文本验收分层：先持久化独立 VerificationReport，
-    // 再推进事务。无副作用事务可在验收后自动提交；带副作用事务会停在
-    // awaiting_commit，直到每个 effect 提供提交证据，绝不因模型文本而自动交付。
-    const transactionId = String(metadata?.taskTransactionId || metadata?.task_transaction_id || '').trim();
-    signal?.throwIfAborted();
-    if (runId && transactionId && !report.repair?.allowed && (user?.id || run?.user_id)) {
-        const transactionUser = user || { id: run.user_id };
-        const {
-            commitTaskTransaction,
-            getTaskTransactionForUser,
-            recordTaskTransactionVerification
-        } = require('./agent-task-transactions');
-        let taskTransaction = await getTaskTransactionForUser(transactionId, transactionUser);
-        signal?.throwIfAborted();
-        if (taskTransaction && ['executing', 'verifying'].includes(taskTransaction.status)) {
-            taskTransaction = await recordTaskTransactionVerification(transactionId, transactionUser, report);
-        }
-        if (taskTransaction?.status === 'awaiting_commit') {
-            const hasPendingEffect = taskTransaction.effects.some(effect => (
-                effect.commitMode !== 'preview' && effect.status !== 'committed'
-            ));
-            if (!hasPendingEffect) {
-                signal?.throwIfAborted();
-                taskTransaction = await commitTaskTransaction(transactionId, transactionUser, {
-                    kind: 'verification_auto_commit',
-                    verificationId: `verify_${runId}`.slice(0, 128),
-                    verifiedAt: report.verifiedAt
-                });
-            }
-        }
-        if (taskTransaction) {
-            report.taskTransaction = {
-                id: taskTransaction.id,
-                status: taskTransaction.status,
-                effectCount: taskTransaction.effects.length,
-                compensationCount: taskTransaction.compensations.length,
-                committedAt: taskTransaction.committedAt || null
-            };
-            if (typeof setRunMetadata === 'function') {
-                await setRunMetadata(runId, {
-                    taskTransactionId: taskTransaction.id,
-                    taskTransactionStatus: taskTransaction.status,
-                    taskVerification: report
-                });
-            }
         }
     }
     return report;

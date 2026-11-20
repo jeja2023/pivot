@@ -107,3 +107,20 @@ test('历史结果复用核对定义与真实输入，表格和文件输出优�
     assert.match(api.valueHtml({ name: 'table', format: 'json', presentation: 'table', table: { rows: [{ 数量: 0, 通过: false }] } }), /<td>0<\/td>.*<td>false<\/td>/);
     assert.doesNotMatch(api.valueHtml({ presentation: 'file', file: { name: '文件', url: 'javascript:alert(1)' } }), /href/);
 });
+test('工作流结果轮询继续跟踪执行态，完成后退出轮询', async () => {
+    let results, scheduled;
+    let reads = 0;
+    const bridge = { request: async () => response({ run: { id: 'test-run', status: ++reads === 1 ? 'executing' : 'completed' } }) };
+    vm.runInNewContext(source('workflow-product-results.js'), {
+        window: { Pivot: { moduleApi: key => key === 'agent.workflowBridge' ? bridge : null, registerModule: (_key, api) => { results = api; } } },
+        document: { getElementById: () => null },
+        setTimeout: callback => { scheduled = callback; return 1; }, clearTimeout() {}
+    });
+    await results.watch({ id: 'test-run' });
+    assert.equal(typeof scheduled, 'function');
+    const next = scheduled;
+    scheduled = null;
+    await next();
+    assert.equal(reads, 2);
+    assert.equal(scheduled, null);
+});

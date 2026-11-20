@@ -36,7 +36,7 @@ async function getDecisionFailureDetails(options = {}, deps = {}) {
                     providerId: safeText(provider.providerId, 80), providerVersion: safeText(provider.providerVersion, 128),
                     reasonCode: code, label: PROVIDER_REASONS[code] || '决策组件调用异常', detail: safe(provider.error, 240), durationMs: Math.max(0, Number(provider.durationMs) || 0),
                     failureStage: safeText(provider.metadata?.failureStage, 40),
-                    timing: Object.fromEntries(['modelMs', 'queueMs', 'providerMs', 'usageMs', 'learningMs'].filter(key => Number.isFinite(provider.metadata?.timing?.[key]))
+                    timing: Object.fromEntries(['modelMs', 'queueMs', 'providerMs', 'usageMs', 'learningMs', 'historyMs', 'tasksMs'].filter(key => Number.isFinite(provider.metadata?.timing?.[key]))
                         .map(key => [key, Math.max(0, Math.round(provider.metadata.timing[key]))])) };
             }
             const snapshot = parse(row.outcome_metadata).verification;

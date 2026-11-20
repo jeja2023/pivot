@@ -399,7 +399,8 @@ function normalizeApprovedOutline(input = {}) {
     const outlineSource = isPlainObject(input.outline) ? input.outline : {};
     const rawSections = Array.isArray(outlineSource.outline)
         ? outlineSource.outline
-        : (Array.isArray(outlineSource.sections) ? outlineSource.sections : []);
+        : (Array.isArray(outlineSource.sections) ? outlineSource.sections
+            : Array.isArray(outlineSource.slides) ? [{ slides: outlineSource.slides }] : []);
     const sections = rawSections.slice(0, 30).map((section, sectionIndex) => {
         const rawSlides = Array.isArray(section?.slides) ? section.slides : [];
         return {
