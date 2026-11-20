@@ -12,7 +12,7 @@
             await openPresentation(id);
         }
 
-        async function generateSlides(outline, { button, controller, isCurrent = () => true }) {
+        async function generateSlides(outline, { button = byId('presentation-create-submit-btn'), controller = beginAiRequest(), isCurrent = () => true } = {}) {
             const pending = state.pendingCreate;
             const outlineKey = JSON.stringify(outline);
             if (!pending.draftId || draftPlan?.pending !== pending || draftPlan.outlineKey !== outlineKey) {
