@@ -80,6 +80,13 @@ function master(messages, finish, citations = false, automatic = false) {
         else values.push(extra);
     }
     const firstPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_01.svg'));
+    if (automatic && firstPage) {
+        // 咨询模板在单次纠正后继续，学术模板模拟连续两次失败并经真实检查点续跑。
+        const academic = observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-academic-research');
+        const resumed = messages.some(item => item.role === 'user' && typeof item.content === 'string'
+            && item.content.startsWith('宿主中断后从已保存检查点继续。') && item.content.includes('上次回复在写入前被拒绝'));
+        firstPage.encoding = (academic ? resumed : system.includes('请移除或修正 encoding')) ? 'UTF-8' : 'UTF-16LE';
+    }
     if (citations && firstPage) firstPage.text = firstPage.text.replace('</g></svg>',
         '<text x="128" y="375" font-family="Noto Sans CJK SC" font-size="32" fill="#17324D">' + budget + '</text></g></svg>');
     const secondPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_02.svg'));

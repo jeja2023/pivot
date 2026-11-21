@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import threading
@@ -94,16 +95,43 @@ class Jobs:
             target = directory / name
             if target.resolve() != target.absolute():
                 raise ServiceError("输入快照路径已变化。", 409, "PPT_SERVICE_INPUT_CHANGED")
+            receipt = {"path": "inputs/" + name, "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data)}
+            previous_size = 0
             if target.exists():
-                if target.is_symlink() or not target.is_file() or target.read_bytes() != data:
+                if not target.is_file() or target.is_symlink():
+                    raise ServiceError("输入快照路径已变化。", 409, "PPT_SERVICE_INPUT_CHANGED")
+                previous = target.read_bytes()
+                if previous == data:
+                    target.chmod(0o400)
+                    return receipt
+                # 旧写法在写完后才设为只读；仅修复尚未封存且与本次输入前缀完全一致的文件。
+                if not target.stat().st_mode & stat.S_IWUSR or not data.startswith(previous):
                     raise ServiceError("不能覆盖已经保存的输入快照。", 409, "PPT_SERVICE_INPUT_CHANGED")
-            else:
-                if sum(item.stat().st_size for item in workspace.rglob("*") if item.is_file()) + len(data) > 250 * 1024**2 or shutil.disk_usage(self.root).free < len(data) + 128 * 1024**2:
-                    raise ServiceError("任务文件或服务磁盘容量不足。", 413, "PPT_SERVICE_STORAGE")
-                with target.open("xb") as output:
+                previous_size = len(previous)
+            # 同一任务持有排他锁，暂存于工作区外。进程中断后重试可安全清理遗留副本。
+            temporary = root / ".input-upload"
+            temporary.unlink(missing_ok=True)
+            used = sum(item.stat().st_size for item in workspace.rglob("*") if item.is_file())
+            if used - previous_size + len(data) > 250 * 1024**2 or shutil.disk_usage(self.root).free < len(data) + 128 * 1024**2:
+                raise ServiceError("任务文件或服务磁盘容量不足。", 413, "PPT_SERVICE_STORAGE")
+            try:
+                with temporary.open("xb") as output:
                     output.write(data)
-                target.chmod(0o400)
-            return {"path": "inputs/" + name, "sha256": hashlib.sha256(data).hexdigest(), "byteSize": len(data)}
+                    output.flush()
+                    os.fchmod(output.fileno(), 0o400)
+                    os.fsync(output.fileno())
+                with temporary.open("rb") as saved:
+                    if hashlib.file_digest(saved, "sha256").hexdigest() != receipt["sha256"]:
+                        raise ServiceError("输入快照写入校验失败，请重试。", 503)
+                os.replace(temporary, target)
+                directory_fd = os.open(directory, os.O_DIRECTORY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                temporary.unlink(missing_ok=True)
+            return receipt
 
     def output(self, key, name):
         review = REVIEW_IMAGE.fullmatch(name) is not None

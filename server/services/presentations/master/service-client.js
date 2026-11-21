@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { MAX_INPUT_FILE_BYTES, checkInputSize } = require('./input-snapshots');
 const { readTypedEnv } = require('../../../config/env-registry');
 const { pptMasterSettings } = require('./settings');
 const { safeJsonRequest } = require('../../safe-http-client');
@@ -42,7 +43,7 @@ async function request(settings, route, { method = 'GET', body, signal, timeout 
         agents = createSafeHttpAgents({ blockPrivate: process.env.ALLOW_PRIVATE_MCP_URLS === 'false', allowExplicitLoopback: isLoopbackHost(new URL(target).hostname), failClosedDns: true });
         const headers = { Authorization: 'Bearer ' + settings.token, ...(body ? { 'Content-Type': Buffer.isBuffer(body) ? 'application/octet-stream' : 'application/json' } : {}) };
         const response = await safeJsonRequest({ method, url: target, headers, data: body && (Buffer.isBuffer(body) ? body : JSON.stringify(body)), signal: controller.signal, timeout,
-            responseType: 'stream', maxContentLength: maximum, maxBodyLength: 50 * 1024 * 1024, validateStatus: () => true,
+            responseType: 'stream', maxContentLength: maximum, maxBodyLength: MAX_INPUT_FILE_BYTES, validateStatus: () => true,
             assertUrl: candidate => { if (candidate !== target) throw error('PPT服务目标发生变化。'); }, createAgents: () => agents });
         if (response.status < 200 || response.status >= 300) {
             const parsed = JSON.parse((await bytes(response, 16384)).toString('utf8'));
@@ -102,7 +103,8 @@ async function execute(user, id, operation, { signal, env = process.env } = {}) 
     } finally { signal?.removeEventListener('abort', cancel); }
 }
 async function inputFile(user, id, name, buffer, env = process.env) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name) || !Buffer.isBuffer(buffer) || buffer.length > 50 * 1024 * 1024) throw error('PPT输入文件名或大小无效。', 'PPT_SERVICE_INPUT_INVALID', 400);
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name) || !Buffer.isBuffer(buffer)) throw error('PPT输入文件名无效。', 'PPT_SERVICE_INPUT_INVALID', 400);
+    checkInputSize(name, buffer.length);
     const { settings, key } = await session(user, id, env);
     const result = await request(settings, '/v1/jobs/' + key + '/inputs/' + name, { method: 'PUT', body: buffer });
     if (result.sha256 !== crypto.createHash('sha256').update(buffer).digest('hex')) throw error('PPT输入文件校验失败。', 'PPT_SERVICE_INPUT_CHANGED', 502);

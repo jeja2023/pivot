@@ -2,34 +2,20 @@
 
 const { performance } = require('node:perf_hooks');
 const runtime = require('./runtime');
-const { callModelJson, recordAgentModelUsage, AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS } = require('../../agent-model');
+const { callModelJson, recordAgentModelUsage, AGENT_MODEL_REQUEST_TIMEOUT_MS } = require('../../agent-model');
 const { normalizeChatError } = require('../../chat-errors');
 const { estimateMessagesTokens } = require('../../context-budget');
 const { estimateTokens } = require('../../../llm');
 const { messagesForModel, markImagePageRead } = require('./model-input');
 const { compactMessages, planRequest, requestLimits, usageRecord } = require('./context');
+const { fitReferenceMessages } = require('./reference-context');
 const { archiveOlderObservations } = require('./history');
 const { phaseMessages } = require('./phase-context');
 const { ensureModelQuota } = require('../../model-daily-quota');
 const { getBeijingTimestamp } = require('../../../time');
-const { READ_PAGE_CHARS, HISTORY_PAGE_CHARS, recordTurnDiagnostic } = require('./observations');
+const { recordTurnDiagnostic } = require('./observations');
+const { hostGuidance, currentHostPrompt } = require('./host-protocol');
 const { citationId } = require('./citation-repair');
-
-function hostGuidance(state) {
-    const calibratedRoles = state.engine?.textCalibrationRoles === 1;
-    const bundledIcons = Array.isArray(state.engine?.tools) && state.engine.tools.includes('icon_sync');
-    return [
-        'Pivot 宿主协议优先于上游本地命令。使用 inputs/ 中已预处理的材料，源 PPTX 按所选流程使用 import_native 或 project import-sources，无需运行 source_to_md.py。确认统一使用 requestInput，不启动 confirm_ui/server.py，也不创建或轮询该服务的 JSON 回执。跳过 svg_editor/server.py 实时预览和 workflow_log.py 手动日志，使用宿主制作进度及快照。',
-        '沟通方向由模型内部规划，跳过旧指引中的沟通方向确认。生成、按模板生成或编辑演示文稿时，直接准备最终页面与关键数据清单（design）。创建可复用模板工作区时提交模板方案（template）。缺少必要事实时可以请求具体补充。',
-        state.request.draftFirst && '先生成可查看的初稿，最终页面清单由宿主自动校验。关键数字必须绑定原文来源，缺少来源的数据用待核对占位文字。只有缺少无法用占位内容继续的必要信息时才提问。',
-        '模板按宿主确认和校验证据安装。使用 apply_template 的正常校验流程，不使用 --skip-validation。',
-        calibratedRoles ? 'Default 用 text_measure 参数 ["calibrate", "项目目录", "--outline"]。Quick 无锁文件时，用 ["calibrate", "项目目录", "--role", "名称:字体:字号"]，可重复 --role，并按需用 --sample 提供短文本。'
-            : '当前执行服务只允许 text_measure 的 ["calibrate", "项目目录", "--outline"]。无锁文件的 Quick 无法使用该入口，按已选字体和版式保守布局，继续执行适用的 SVG 质量检查。',
-        bundledIcons ? '仅当设计选用运行包 SVG 图标时，用已登记的 icon_sync，参数为项目目录及明确的 library/name。'
-            : '当前执行服务未登记 icon_sync。使用已提供或已安装的合法素材、原生图形或适用的 emoji。',
-        `按当前阶段批量读取明确所需的参考。read/read_runtime 单页至多 ${READ_PAGE_CHARS} 字符，read_history 至多 ${HISTORY_PAGE_CHARS} 字符，较小模型窗口或多项同批读取可能进一步缩小页长。按 nextOffset 继续；正文已归档且仍需要时，可按归档坐标回读。已有可见正文或有效回执时直接推进当前阶段。`
-    ].filter(Boolean).join('\n');
-}
 
 function modelFailure(error, timeoutMs) {
     const status = Number(error.response?.status || error.statusCode || error.status);
@@ -42,9 +28,14 @@ function modelFailure(error, timeoutMs) {
     if (status === 429) return runtime.error('模型服务暂时限流，请稍后从检查点继续。', 'PPT_MASTER_MODEL_RATE_LIMIT', 429);
     if (status === 504) return Object.assign(runtime.error('上游模型网关返回 HTTP 504。检查点已保留。', 'PPT_MASTER_MODEL_TIMEOUT', 504),
         { modelFailureKind: 'upstream_timeout' });
-    if (['ETIMEDOUT', 'ECONNABORTED', 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT'].includes(error.code)) {
+    if (error.code === 'AGENT_MODEL_FIRST_RESPONSE_TIMEOUT'
+        || (['ECONNABORTED', 'ETIMEDOUT'].includes(error.code) && !error.syscall && /^timeout of \d+ms exceeded$/i.test(error.message))) {
         return Object.assign(runtime.error(`模型请求超时，Pivot 本轮请求时限为 ${Math.ceil(timeoutMs / 1000)} 秒。检查点已保留。`,
             'PPT_MASTER_MODEL_TIMEOUT', 504), { modelFailureKind: 'local_timeout' });
+    }
+    if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        return Object.assign(runtime.error('连接模型服务超时。请核对模型服务与网关的连通状态后从检查点继续。',
+            'PPT_MASTER_MODEL_TIMEOUT', 504), { modelFailureKind: 'transport_timeout' });
     }
     if (status === 401 || status === 403) return runtime.error('模型服务拒绝授权，请在模型管理中核对密钥与权限后继续。', 'PPT_MASTER_MODEL_AUTH', status);
     if (['ECONNRESET', 'EPIPE', 'ERR_STREAM_PREMATURE_CLOSE'].includes(error.code)) {
@@ -63,24 +54,25 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
     const limits = requestLimits(model);
     const makeView = async () => {
         const original = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
-        const compacted = compactMessages(original);
-        const { messages: prepared } = phaseMessages(compacted.messages, state);
+        const compacted = compactMessages(original, { forModel: true });
+        const { messages: prepared, ranges } = phaseMessages(compacted.messages, state);
         // 清单阶段使用宿主协议、所选模板和材料。绘制指引在制稿阶段恢复。
         const planning = state.request.draftFirst && state.managedProject && state.review?.approvals && !state.review.approvals.design;
-        const messages = (planning || citationIssues?.length) ? prepared.filter(message => !(message.role === 'user'
+        const visible = (planning || citationIssues?.length) ? prepared.filter(message => !(message.role === 'user'
             && typeof message.content === 'string' && (
                 /^\{"runtimeDocument":"(?:SKILL\.md|workflows\/[^"]+)",/u.test(message.content)
                 || message.content.startsWith('宿主中断后从已保存检查点继续。') && message.content.includes('repairCitations')
             ))) : prepared;
-        if (messages[0]?.role === 'system' && typeof messages[0].content === 'string') {
-            messages[0] = { ...messages[0], content: [messages[0].content, hostGuidance(state), progressGuidance].filter(Boolean).join('\n') };
+        if (visible[0]?.role === 'system' && typeof visible[0].content === 'string') {
+            visible[0] = { ...visible[0], content: [currentHostPrompt(visible[0].content), hostGuidance(state), progressGuidance].filter(Boolean).join('\n') };
         }
         if (citationIssues?.length) {
-            messages.push({ role: 'user', content: JSON.stringify({
+            visible.push({ role: 'user', content: JSON.stringify({
                 citationRepairEvidence: citationIssues.map(issue => ({ ...issue, ...(!issue.missing ? { id: citationId(issue) } : {}) })),
                 ...(state.citationDraft?.plan ? { savedCitationPlan: state.citationDraft.plan } : {})
             }) });
         }
+        const messages = fitReferenceMessages(visible, limits.fullOutputInputBudget, ranges);
         return { original, messages, compactedWrites: compacted.compactedWrites, inputEstimate: estimateMessagesTokens(messages) };
     };
     const archive = async options => {
@@ -103,7 +95,7 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
 
     const send = async () => {
         state.modelRequest = { contextWindow: limits.contextWindow, configuredInputLimit: limits.configuredInputLimit,
-            inputEstimate: view.inputEstimate, timeoutSeconds: Math.ceil(AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS / 1000) };
+            inputEstimate: view.inputEstimate, timeoutSeconds: Math.ceil(AGENT_MODEL_REQUEST_TIMEOUT_MS / 1000) };
         const remainingTokens = state.request.tokenBudget === 0 ? Infinity : state.request.tokenBudget - state.usedTokens;
         const plan = planRequest(view.messages, original, model, remainingTokens, limits);
         state.modelRequest.outputLimit = plan.maxTokens;
@@ -118,13 +110,15 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
             if (!deps.callModel) releaseQuota = await ensureModelQuota(user, model, view.messages, plan.maxTokens, { signal: hooks.signal, inputEstimate: plan.inputEstimate });
             startedAt = getBeijingTimestamp();
             turnStartMs = performance.now();
+            // 非流式调用使用该选项设置 HTTP 等待时限。PPT 必须等完整 JSON，再校验和执行动作。
             output = await (deps.callModel || callModelJson)(model, view.messages, { user, signal: hooks.signal, maxTokens: plan.maxTokens,
+                firstResponseTimeoutMs: AGENT_MODEL_REQUEST_TIMEOUT_MS,
                 temperature: 0.2, usageRef, quotaManaged: true, enableThinking: false, budget: deps.budget, responseFormat: { type: 'json_object' } });
         } catch (error) {
             const timing = turnStartMs === undefined ? null : finishTiming();
             releaseQuota();
             hooks.signal?.throwIfAborted();
-            const failure = modelFailure(error, AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS);
+            const failure = modelFailure(error, AGENT_MODEL_REQUEST_TIMEOUT_MS);
             if (timing) {
                 usageRecord(state, plan, usageRef, undefined, view.compactedWrites, estimateTokens, { ...timing, failed: true });
                 recordTurnDiagnostic(state, { outcome: 'model_failed', errorCode: failure.code, modelFailureKind: failure.modelFailureKind });

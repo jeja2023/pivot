@@ -46,6 +46,23 @@ class JobsTests(unittest.TestCase):
             changed.open(self.key)
         changed.delete(self.key)
 
+    def test_interrupted_input_can_retry_without_overwriting_committed_snapshot(self):
+        root = self.jobs.directory(self.key)
+        dest = root / 'workspace/inputs/material-1.md'
+        body = b'original full snapshot'
+        with patch('service_jobs.os.replace', side_effect=OSError('写入中断')):
+            with self.assertRaises(OSError):
+                self.jobs.put_input(self.key, dest.name, body)
+        self.assertFalse(dest.exists())
+        self.assertFalse((root / '.input-upload').exists())
+        dest.write_bytes(body[:4])
+        self.jobs.put_input(self.key, dest.name, body)
+        self.assertEqual(dest.read_bytes(), body)
+        self.assertEqual(dest.stat().st_mode & 0o222, 0)
+        with self.assertRaises(ServiceError):
+            self.jobs.put_input(self.key, dest.name, body + b'more')
+        self.assertEqual(dest.read_bytes(), body)
+
     def test_cancel_before_start_blocks_operation_and_replay_is_not_implicit(self):
         request = 'd' * 32
         self.jobs.cancel(self.key, request)

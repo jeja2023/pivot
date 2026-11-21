@@ -51,6 +51,7 @@ const ENV_CONFIG_REGISTRY = Object.freeze({
     PIVOT_PRESENTATION_MAX_BYTES: { group: 'PPT 制作', type: 'integer', defaultValue: 8_388_608, min: 262_144, max: 67_108_864, description: '单份演示文稿结构化 IR 的最大字节数，限制页面、文本和内嵌表格数据，避免编辑与渲染耗尽内存。' },
     PIVOT_PRESENTATION_ASSET_MAX_BYTES: { group: 'PPT 制作', type: 'integer', defaultValue: 20_971_520, min: 1_048_576, max: 67_108_864, description: '单个 PPT 图片素材允许上传的最大字节数；素材仍受安全上传 MIME、真实文件头与 CAS 归属校验。' },
     PIVOT_PPT_MASTER_ENABLED: { group: 'PPT 制作', type: 'boolean', defaultValue: false, description: '仅控制直接Docker执行兼容路径；独立服务通过SERVICE_URL启用，标准PPT创建、编辑和导出不依赖此开关。' },
+    PIVOT_PPT_MASTER_MODEL_PREFLIGHT_TIMEOUT_MS: { group: 'PPT 制作', type: 'integer', defaultValue: 60_000, min: 5_000, max: 120_000, description: 'PPT 模型兼容性预检的总等待时限（毫秒），包含排队，并受平台单轮模型请求时限约束。' },
     PIVOT_PPT_MASTER_IMAGE: { group: 'PPT 制作', type: 'string', defaultValue: '', description: '仅供直接Docker兼容路径使用的不可变仓库摘要或完整sha256镜像ID；独立服务无需填写。' },
     PIVOT_PPT_MASTER_SERVICE_URL: { group: 'PPT 制作', type: 'string', defaultValue: '', description: '独立PPT服务根地址的初始默认值，例如http://ppt-master:8502；admin可在模型配置页面加密保存连接，保存后立即优先于环境配置，无需挂载Docker。' },
     PIVOT_PPT_MASTER_SERVICE_TOKEN: { group: 'PPT 制作', type: 'string', defaultValue: '', description: '独立PPT服务访问密钥的初始默认值，与PPT_MASTER_TOKEN一致；页面保存后以加密配置为准，密钥不回显、不发送给模型。' },

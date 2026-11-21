@@ -16,6 +16,33 @@ from tool_catalog import command  # noqa: E402
 
 
 class MasterToolTests(unittest.TestCase):
+    def test_selected_template_recovers_partial_copy_and_does_not_publish_interrupted_staging(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            skill = root / 'skill'
+            source = skill / 'templates/styles/example'
+            source.mkdir(parents=True)
+            (source / 'reference.md').write_text('原始模板', encoding='utf-8')
+            workspace = root / 'workspace'
+            selected = workspace / 'selected-template'
+            selected.mkdir(parents=True)
+            request = {'source': 'templates/styles/example', 'path': 'selected-template', 'ensureSelectedTemplate': True}
+            with patch.object(runner, 'SKILL', skill), patch.object(runner, 'WORKSPACE', workspace):
+                with patch.object(runner.shutil, 'copytree', side_effect=OSError('中断')):
+                    with self.assertRaises(OSError):
+                        runner.copy_runtime_template(request)
+                self.assertEqual(list(selected.iterdir()), [])
+                runner.copy_runtime_template(request)
+                original = selected / 'reference.md'
+                self.assertEqual(original.read_text(encoding='utf-8'), '原始模板')
+                with patch.object(runner.shutil, 'copytree', side_effect=AssertionError('完整副本应复用')):
+                    runner.copy_runtime_template(request)
+                original.write_text('中断的残缺副本', encoding='utf-8')
+                runner.copy_runtime_template(request)
+                self.assertEqual(original.read_text(encoding='utf-8'), '原始模板')
+                with self.assertRaises(ValueError):
+                    runner.copy_runtime_template({**request, 'ensureSelectedTemplate': False})
+
     def test_readonly_template_copy_keeps_source_and_allows_task_cleanup(self):
         engine = ROOT / 'artifacts' / 'ppt-master-runtime'
         if not (engine / 'manifest.json').exists():

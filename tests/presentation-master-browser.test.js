@@ -488,7 +488,8 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
         const task = {
             id: 'fixture-task', status: 'failed', request: { presentationId: '', tokenBudget: 0 },
             usageDiagnostics: [
-                { ...prior, call: 1 },
+                { ...prior, call: 1, outcome: 'retry', correctionKind: 'action_fields', actionType: 'write', actionIndex: 1,
+                    fieldMessage: require('../server/services/presentations/master/action-parameters').fieldMessage('write', 1, ['append']) },
                 { ...prior, call: 2, step: 2, outcome: 'model_failed', errorCode: 'PPT_MASTER_MODEL_TIMEOUT',
                     startedAt, durationMs: 119900, inputTokens: null, outputTokens: null },
                 { ...prior, call: 3, step: 2, startedAt, durationMs: 59950, outcome: 'citation_placeholder', errorCode: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' },
@@ -512,6 +513,7 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
                 '开始 15:42:31 · 用时 未记录', '开始 未记录 · 用时 0 毫秒'
             ]);
             await expect(failed).toContainText('模型调用失败');
+            await expect(dialog.getByRole('listitem').filter({ hasText: '第 1 次模型调用' })).toContainText('请移除或修正 append。请仅提交 action、path、text。');
             await expect(failed).toContainText('异常诊断：模型请求超时。');
             await expect(failed).toContainText('输入 未知，输出 未知，累计已记录 12');
             await expect(failed.locator('.presentation-master-usage-time')).toHaveAttribute('title', '开始时间（北京时间）：' + startedAt + '\n用时：2 分钟');
@@ -675,10 +677,21 @@ test('切换模板保留未提交内容，关闭后清空旧任务问题、进�
         const formDialog = page.getByRole('dialog', { name: '完整演示制作' });
         const processDialog = page.getByRole('dialog', { name: '完整制作过程' });
         await page.evaluate(() => window.Pivot.exposeModule('apps.presentations.catalog', { open: async () => { } }));
+        const assets = page.locator('#presentation-master-source');
+        await assets.setInputFiles({ name: '参考图.png', mimeType: 'image/png', buffer: Buffer.from('测试文件') });
         await page.getByRole('button', { name: '更换模板' }).click();
-        await page.locator('#entry').click();
+        await page.evaluate(() => window.Pivot.moduleApi('apps.presentations.master').open({ operation: 'generate', template: {
+            type: 'runtime', id: 'master-style-academic-research', name: '学术研究'
+        } }));
         await expect(page.locator('#presentation-master-title')).toHaveValue('测试演示');
         await expect(page.locator('#presentation-master-instruction')).toHaveValue('按材料制作汇报，保留原始数字和来源。');
+        await expect(page.getByRole('button', { name: '移除文件 参考图.png' })).toBeVisible();
+        await assets.setInputFiles(Array.from({ length: 21 }, (_, index) => ({
+            name: `参考图${index + 1}.png`, mimeType: 'image/png', buffer: Buffer.from('测试文件')
+        })));
+        await page.locator('#presentation-master-start').click();
+        await expect(page.locator('#presentation-master-form-error')).toContainText('最多提供 20 个补充素材');
+        assert.ok(!(await page.evaluate(() => window.fixtureTaskResponses)).some(url => /model-preflight|\/assets$/.test(url)));
         await formDialog.getByRole('button', { name: '关闭', exact: true }).click();
         let recent = {
             id: 'fixture-task', status: 'completed', result: {
@@ -846,7 +859,7 @@ test('停滞详情显示重复动作的归档坐标，连续工具失败显示�
         });
         await page.locator('#presentation-master-start').click();
         const panel = page.locator('#presentation-master-status');
-        await expect(panel).toContainText('已修正模型动作 3 次。最近原因：动作格式、参数或阶段不符。');
+        await expect(panel).toContainText('已请求模型修正动作 3 次。最近原因：动作格式、参数或阶段不符。');
         await expect(panel).toContainText('重复检查：回读历史 · 归档 2，消息 18 · 偏移 12000');
         await expect(panel).toContainText('本步工作（第 2 步）：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）（其余 1 项因前序失败未执行）。');
         await expect(panel).toContainText('轮次异常记录（共 2 轮，最近在第 3 轮 / 步骤 2）：工具动作未通过：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）；同批后续 1 项动作已停止。');
@@ -858,7 +871,7 @@ test('停滞详情显示重复动作的归档坐标，连续工具失败显示�
         await expect(usageDialog).toContainText('异常诊断：工具动作未通过：执行工具 · 文字排版校准（字体字号校准） · 未通过（退出码 2）；同批后续 1 项动作已停止。');
         await usageDialog.getByRole('button', { name: '关闭', exact: true }).click();
         await page.getByRole('button', { name: '从检查点继续' }).click();
-        await expect(panel).toContainText('最近失败：执行工具 · text_measure · 退出码 2');
+        await expect(panel).toContainText('最近一次工具执行失败：执行工具 · text_measure · 退出码 2');
     } finally { await context.close(); }
 });
 
@@ -1179,6 +1192,37 @@ test('空白、超长和取消读取不会提交不完整材料，失败保留�
         await formDialog.getByRole('button', { name: '关闭', exact: true }).click(); await page.locator('#entry').click();
         await expect(page.locator('#presentation-master-material-files')).toHaveValue('');
         await expect(page.locator('#presentation-master-instruction')).toHaveValue('');
+    } finally { await context.close(); }
+});
+
+test('模板制作上传前提示执行器单文件上限，任务完成后刷新文稿库一次', async () => {
+    const context = await fixture();
+    try {
+        const page = await pageFor(context, undefined, 'light', false);
+        await page.route('**/master/info', route => route.fulfill({ json: { engine: { enabled: true, maxInputFileBytes: 1024 * 1024 } } }));
+        await page.evaluate(() => {
+            window.fixtureRefreshes = 0;
+            window.fixtureHelpers.loadDocuments = async () => { window.fixtureRefreshes++; };
+        });
+        await page.locator('#entry').click();
+        await page.locator('#presentation-master-title').fill('完成初稿');
+        await page.locator('#presentation-master-instruction').fill('使用已选模板。');
+        const source = page.locator('#presentation-master-source');
+        await source.setInputFiles({ name: '会议.mp4', mimeType: 'video/mp4', buffer: Buffer.alloc(1024 * 1024 + 1) });
+        await page.locator('#presentation-master-start').click();
+        await expect(page.locator('#presentation-master-form-error')).toContainText('会议.mp4」超过完整制作的单文件上限 1 MiB');
+        assert.ok(!(await page.evaluate(() => window.fixtureTaskResponses)).some(url => /model-preflight|\/assets$/.test(url)));
+        await source.setInputFiles([]);
+        let polls = 0;
+        await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task: { id: 'fixture-task', draftFirst: true,
+            status: ++polls === 1 ? 'working' : 'completed', result: { message: '已取得制作回执' } } } }));
+        await page.locator('#presentation-master-start').click();
+        await expect.poll(() => page.evaluate(() => window.fixtureRefreshes)).toBe(1);
+        await page.locator('#presentation-master-process-modal .workspace-modal-close').click();
+        await page.route('**/master/tasks/latest?**', route => route.fulfill({ json: { task: { id: 'fixture-task', status: 'completed' } } }));
+        await page.locator('#presentation-master-history').click();
+        await expect(page.locator('#presentation-master-status .presentation-master-task-message')).toHaveText('已取得制作回执');
+        assert.equal(await page.evaluate(() => window.fixtureRefreshes), 1);
     } finally { await context.close(); }
 });
 

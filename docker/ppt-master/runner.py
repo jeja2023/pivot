@@ -32,6 +32,7 @@ REVIEW_DRAFT = ".pivot/review-draft.pptx"
 PREVIOUS_REVIEW_DRAFT = ".pivot/previous-review-draft.pptx"
 REVIEW_PREVIEW = ".pivot/review-preview"
 PROGRESS_DIRECTORY = (".pivot", "progress")
+TEMPLATE_STAGING = (".pivot", "template-staging")
 
 
 def source_fingerprint() -> str:
@@ -64,7 +65,7 @@ def inventory() -> list[Path]:
             raise ValueError("任务目录包含符号链接。")
         if file.is_file():
             # 由宿主单独限额并转存的快照中转文件不计入源工作区配额。
-            if file.relative_to(WORKSPACE).parts[:2] == PROGRESS_DIRECTORY:
+            if file.relative_to(WORKSPACE).parts[:2] in {PROGRESS_DIRECTORY, TEMPLATE_STAGING}:
                 continue
             files.append(file)
             size += file.stat().st_size
@@ -154,6 +155,64 @@ def installed_template_digest(project, template_source):
     read_template_install(project, plan.root_snapshots, plan.selection_sha256)
     spec = source / "templates" / "design_spec.md"
     return hashlib.sha256(spec.read_text(encoding="utf-8").encode("utf-8")).hexdigest()
+
+
+def copy_runtime_template(request):
+    source = relative_path(request.get("source"), SKILL, must_exist=True)
+    target = relative_path(request.get("path"), WORKSPACE)
+    parts = target.relative_to(WORKSPACE).parts
+    if not source.is_dir() or source.relative_to(SKILL).parts[:1] != ("templates",) or not parts or parts[0] in {"inputs", "delivery"}:
+        raise ValueError("仅能复制正式模板工作区到新的任务目录。")
+    entries = list(source.rglob("*"))
+    files = [file for file in entries if file.is_file()]
+    if len(files) > 2000 or sum(file.stat().st_size for file in files) > 50 * 1024 * 1024 or any(file.is_symlink() for file in entries):
+        raise ValueError("模板工作区超过单次复制范围。")
+    recover = request.get("ensureSelectedTemplate") is True and parts == ("selected-template",) and source.relative_to(SKILL).parts[:2] == ("templates", "styles")
+    paths = {file.relative_to(source) for file in files}
+    stage = WORKSPACE.joinpath(*TEMPLATE_STAGING, hashlib.sha256(target.relative_to(WORKSPACE).as_posix().encode()).hexdigest())
+
+    def writable_directories(root):
+        for directory, _, _ in os.walk(root):
+            folder = Path(directory)
+            folder.chmod(stat.S_IMODE(folder.stat().st_mode) | stat.S_IWUSR)
+
+    def clear_stage():
+        if stage.exists():
+            writable_directories(stage)
+            shutil.rmtree(stage)
+
+    clear_stage()
+    if target.exists():
+        if not recover or not target.is_dir():
+            raise ValueError("仅能复制正式模板工作区到新的任务目录。")
+        existing = {file.relative_to(target) for file in target.rglob("*") if file.is_file()}
+        if existing == paths and all((target / name).read_bytes() == (source / name).read_bytes() for name in paths):
+            return {"path": request["path"], "files": len(files)}
+    retained = [file for file in inventory() if not file.is_relative_to(target)]
+    if len(retained) + len(files) > 16_000 or sum(file.stat().st_size for file in retained + files) > MAX_WORKSPACE:
+        raise ValueError("任务目录文件或总大小超过限制。")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # 在同一文件系统准备完整副本，最终目录只接收已核对内容的副本。
+    stage.mkdir(parents=True)
+    try:
+        staging = stage / "copy"
+        shutil.copytree(source, staging)
+        writable_directories(staging)
+        if not all((staging / name).read_bytes() == (source / name).read_bytes() for name in paths):
+            raise ValueError("模板副本未通过内容核对。")
+        previous = stage / "previous"
+        if target.exists():
+            target.rename(previous)
+        try:
+            staging.rename(target)
+        except OSError:
+            if previous.exists():
+                previous.rename(target)
+            raise
+    finally:
+        clear_stage()
+    inventory()
+    return {"path": request["path"], "files": len(files)}
 
 
 def registered_export(path, *, current=False):
@@ -399,7 +458,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "selectedTemplateRecovery": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action == "inspect_export":
         return inspect_export(request)
@@ -432,20 +491,7 @@ def main(request: dict) -> dict:
         inventory()
         return {"path": request["path"], "bytes": target.stat().st_size}
     if action == "copy_template":
-        source = relative_path(request.get("source"), SKILL, must_exist=True)
-        target = relative_path(request.get("path"), WORKSPACE)
-        if not source.is_dir() or source.relative_to(SKILL).parts[0] != "templates" or target.exists() or target.relative_to(WORKSPACE).parts[0] in {"inputs", "delivery"}:
-            raise ValueError("仅能复制正式模板工作区到新的任务目录。")
-        entries = [file for file in source.rglob("*") if file.is_file()]
-        if len(entries) > 2000 or sum(file.stat().st_size for file in entries) > 50 * 1024 * 1024 or any(file.is_symlink() for file in entries):
-            raise ValueError("模板工作区超过单次复制范围。")
-        shutil.copytree(source, target)
-        # 发行包目录为只读，任务副本的目录须允许当前服务用户清理。
-        for directory, _, _ in os.walk(target):
-            copied = Path(directory)
-            copied.chmod(stat.S_IMODE(copied.stat().st_mode) | stat.S_IWUSR)
-        inventory()
-        return {"path": request["path"], "files": len(entries)}
+        return copy_runtime_template(request)
     if action == "read":
         file = relative_path(request.get("path"), WORKSPACE, must_exist=True)
         if file.suffix not in TEXT_EXTENSIONS or file.stat().st_size > 2 * 1024 * 1024:

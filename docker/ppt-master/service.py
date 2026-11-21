@@ -176,7 +176,7 @@ def main():
         health = jobs.execute(probe_key, "0" * 32, runtime, {"action": "health"})
         if not health.get("ok") or health.get("result", {}).get("status") != "ready":
             raise RuntimeError("制作运行包启动检查失败，请检查镜像。")
-        health = {**health["result"], "runtimeId": runtime, "serviceProtocol": 1, "version": json.loads(Path("/runner/engine-lock.json").read_text())["skillVersion"],
+        health = {**health["result"], "runtimeId": runtime, "serviceProtocol": 1, "atomicInputSnapshots": 1, "version": json.loads(Path("/runner/engine-lock.json").read_text())["skillVersion"],
                   "capabilities": ["files", "operations", "cancel", "native", "templates"], "network": "worker_network_denied"}
     finally:
         jobs.delete(probe_key)

@@ -6,6 +6,14 @@ const crypto = require('node:crypto');
 const { run } = require('./lib/ppt_master_release');
 const { digestFile } = require('../server/services/offline-backup-bundle');
 const lock = require('../config/ppt-master-engine.json');
+
+function assertServiceCapabilities(health) {
+    const required = ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle', 'selectedTemplateRecovery', 'atomicInputSnapshots'];
+    const missing = required.filter(key => health[key] !== 1);
+    if (health.serviceProtocol !== 1 || !/^sha256:[a-f0-9]{64}$/.test(health.runtimeId || '') || missing.length) {
+        throw new Error('镜像的协议、运行身份或执行能力未通过校验，请使用当前源码重新构建。' + (missing.length ? '缺少 ' + missing.join('、') : ''));
+    }
+}
 async function main(args = process.argv.slice(2)) {
     const settings = {};
     for (let index = 0; index < args.length; index++) {
@@ -44,10 +52,7 @@ async function main(args = process.argv.slice(2)) {
         if (health.revision !== lock.revision || health.version !== lock.skillVersion || health.contentDigest !== lock.contentDigest) {
             throw new Error('镜像的上游运行包与当前源码锁定信息不一致。');
         }
-        if (health.serviceProtocol !== 1 || !/^sha256:[a-f0-9]{64}$/.test(health.runtimeId || '')
-            || ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle'].some(key => health[key] !== 1)) {
-            throw new Error('镜像缺少当前执行器的项目准备、交付核验、源包限额或快照能力，请使用当前源码重新构建。');
-        }
+        assertServiceCapabilities(health);
     } finally { await run('docker', ['rm', '-f', '-v', name]).catch(() => {}); }
     const api = (await run('docker', ['version', '--format', '{{.Server.APIVersion}}'])).stdout.trim().split('.').map(Number);
     const archive = path.join(output, 'ppt-master.tar');
@@ -67,4 +72,4 @@ async function main(args = process.argv.slice(2)) {
     process.stdout.write('独立PPT服务镜像和部署文件已生成：' + output + '\n');
 }
 if (require.main === module) main().catch(error => { process.stderr.write('独立PPT服务构建失败：' + error.message + '\n'); process.exitCode = 1; });
-module.exports = { main };
+module.exports = { main, assertServiceCapabilities };

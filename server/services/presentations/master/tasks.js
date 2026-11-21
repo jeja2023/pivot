@@ -6,13 +6,14 @@ const repository = require('../../../repositories/presentation-master-tasks');
 const service = require('../presentation-service');
 const runtime = require('./runtime');
 const contract = require('./contract');
+const { checkInputSize } = require('./input-snapshots');
 const { drive } = require('./driver');
 const { actionSummary, usageDiagnosticsView } = require('./observations');
 const { prepareDelivery, commitDelivery } = require('./delivery');
 const { pendingInput, parseDecision, isLegacyDirection } = require('./confirmation');
 const { markMilestone } = require('./milestones');
 const { checkModel } = require('./model-preflight');
-const { initializeReview, reopenReview, resetCitationRepair, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('./review-plan');
+const { initializeReview, reopenReview, resetCitationRepair, approvalIssue, exportReview, verifyReceipt, reviewRecoveryGuidance } = require('./review-plan');
 const { CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { registerSupplement } = require('./user-supplements');
 const { createReviewPreviewService, exportForPreview } = require('./review-previews');
@@ -39,7 +40,7 @@ function draftContinuation(pending) {
     return pending?.kind === 'confirmation' && (pending.stage === 'design' || isLegacyDirection(pending));
 }
 
-async function ensureAccess(user, request) {
+async function ensureAccess(user, request, { forCreation = false } = {}) {
     let visionRequired = false;
     if (request.template?.type === 'organization') {
         const template = await service.resolveTemplateVersionForUser(user, request.template.id, request.template.version, { forCreation: true });
@@ -49,6 +50,7 @@ async function ensureAccess(user, request) {
     for (const id of new Set([request.sourceAssetId, ...(request.assetIds || [])].filter(Boolean))) {
         const item = await service.getPresentationAsset(user, id, { metadataOnly: true });
         if (!item) throw runtime.error('源文件或补充素材已不存在或无权访问。', 'PPT_MASTER_SOURCE_FORBIDDEN', 403);
+        if (forCreation) checkInputSize(item.asset.filename, item.asset.byteSize);
         if (/^image\/(?:png|jpeg|webp)$/.test(item.asset?.mimeType || '')) visionRequired = true;
     }
     return visionRequired;
@@ -196,7 +198,14 @@ async function run(id, user, deps = {}) {
     heartbeat.unref?.();
     try {
         const row = await repo.read(user, id);
-        state = row.result_json.state || { request: row.input_request, steps: 0, usedTokens: 0, bootstrapped: false };
+        state = row.result_json.state;
+        if (!state) {
+            // 只有从原任务通过权限复核的重新生成入口能登记继承资料。
+            const { inheritedSupplements, previousPlan, ...request } = row.input_request;
+            state = { request, steps: 0, usedTokens: 0, bootstrapped: false,
+                ...(inheritedSupplements?.length ? { userSupplements: inheritedSupplements, inheritedSupplementCount: inheritedSupplements.length } : {}),
+                ...(previousPlan ? { previousPlan } : {}) };
+        }
         state.startedAt ||= Date.parse(row.created_at) || Date.now();
         const currentRuntime = await runtime.identity();
         deployment.assertCheckpoint(state, currentRuntime);
@@ -206,6 +215,14 @@ async function run(id, user, deps = {}) {
         if (initializeReview(state)) {
             if (state.bootstrapped) state.messages?.push({ role: 'user', content: '请按当前宿主要求核对方案与现有文件。旧确认缺少可核验清单，请重新提交最终方案供用户批准。' });
             await checkpoint(state, { phase: 'preparing', message: '已启用最终方案确认与交付核验。' });
+        }
+        const issue = approvalIssue(state);
+        if (issue) {
+            state.previousPlan = state.review.approvals.design.plan;
+            delete state.revisionReadOffsets;
+            reopenReview(state);
+            state.messages.push({ role: 'user', content: issue + '原清单可通过 read 读取 previous-plan.json。请沿用已核实事实重提清单。' });
+            await checkpoint(state, { phase: 'authoring', message: '正在重新核对已保存清单的标题数据和模板规则。' });
         }
         const captureProgress = async (nextState, action, output) => {
             try { await progressSnapshots.capture(user, id, lease, nextState, action, output, { signal, ensureCurrent }); }
@@ -221,7 +238,10 @@ async function run(id, user, deps = {}) {
             await checkpoint(state, { phase: 'input_required', message: result.pending.question });
             await store.requestInput(id, user, result.pending, { expectedLease: lease }); return;
         }
-        if (state.deliveryReview) verifyReceipt(result.receipt, exportReview(state, state.deliveryReview.project, state.deliveryReview.templateOnly));
+        if (state.deliveryReview) {
+            const templateApplication = verifyReceipt(result.receipt, exportReview(state, state.deliveryReview.project, state.deliveryReview.templateOnly));
+            if (templateApplication) result.receipt = { ...result.receipt, packageCheck: { ...result.receipt.packageCheck, templateApplication } };
+        }
         else throw runtime.error('交付缺少已批准的核验记录，请重新确认。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
         const prepared = deps.deliver ? null : await (deps.prepareDelivery || prepareDelivery)(user, id, state.request, result.receipt, { signal, engine: state.engine });
         await ensureCurrent();
@@ -250,9 +270,15 @@ async function start(user, input, context = {}) {
     const available = await runtime.availability();
     const normalized = contract.normalize(input);
     const request = { ...normalized, draftFirst: normalized.operation !== 'create_template', runId: String(context.run?.id || context.runId || ''),
-        ...(context.regeneratedFrom ? { regeneratedFrom: context.regeneratedFrom } : {}) };
+        ...(context.regeneratedFrom ? { regeneratedFrom: context.regeneratedFrom, inheritedSupplements: context.inheritedSupplements,
+            previousPlan: context.previousPlan } : {}) };
+    if (request.previousPlan || request.inheritedSupplements?.length) {
+        request.sourceDigest = crypto.createHash('sha256').update(require('../../canonical-json').canonicalJson([
+            normalized.sourceDigest, request.inheritedSupplements || [], request.previousPlan || null
+        ])).digest('hex');
+    }
     runtime.requireReady(available, request.operation);
-    const visionRequired = await ensureAccess(user, request);
+    const visionRequired = await ensureAccess(user, request, { forCreation: true });
     await checkModel(user, request, { visionRequired });
     const task = await repository.admit(user, client => { deployment.assertAccepting(); return taskStore.createToolTaskStore({ queryOne: client.queryOne, execute: client.execute }).create({ user, toolName: repository.TOOL, inputRequest: request, ttlMs: 60 * 60 * 1000 }); });
     setImmediate(() => run(task.id, user, { driverDeps: { budget: context.budget } }).catch(error => require('../../../logger').logger.warn({ taskId: task.id, code: error.code }, '完整PPT制作任务无法登记状态')));
@@ -370,7 +396,8 @@ async function resume(user, id, input = {}) {
         }
     }
     if (changedModel) {
-        await checkModel(user, { ...state.request, modelId }, { visionRequired: imageCoverage(state).total > 0 });
+        await checkModel(user, { ...state.request, modelId, previousPlan: state.previousPlan,
+            inheritedSupplements: state.userSupplements?.slice(0, state.inheritedSupplementCount || 0) }, { visionRequired: imageCoverage(state).total > 0 });
     }
     const maxSteps = Number(input.maxSteps || state.request.maxSteps), tokenBudget = contract.normalizeTokenBudget(input.tokenBudget, state.request.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < state.request.maxSteps || maxSteps > 160) throw runtime.error('继续轮次只能在上限内增加，不能重置累计消耗。');
@@ -397,7 +424,7 @@ async function resume(user, id, input = {}) {
         const recoveryCode = paused && row.error_code === 'PPT_MASTER_PHASE_LIMIT' ? CITATION_REVIEW_REQUIRED : row.error_code;
         const repair = input.pages === undefined && !(hadCitationDraft && state.citationDraft)
             ? reviewRecoveryGuidance(state, recoveryCode, row.error_message) : '';
-        let workspaceCheck = '上一轮动作可能已经部分执行，请先用 list/read 核对相关任务文件，再决定下一步。';
+        let workspaceCheck = '沿用已确认写入的回执。若文件的实际状态不明确，先用 list/read 核对再继续。';
         if (stalled) workspaceCheck = '从已保存的动作回执推进当前阶段。如某项文件状态仍不明确，先定向核对。';
         if (input.pages !== undefined) {
             workspaceCheck = '按本次选页范围修复源页。整稿复检、定稿和导出由宿主执行。';
@@ -436,8 +463,17 @@ async function regenerate(user, id, dependencies = {}, input = {}) {
         }
     }));
     const { sourceAssetId, ...settings } = request;
-    const instruction = input.note ? settings.instruction + '\n\n本次整份修改要求：\n' + input.note.trim() : settings.instruction;
-    return (dependencies.start || start)(user, { ...settings, instruction, ...(sourceAssetId ? { sourceAssetId } : {}), materials }, { regeneratedFrom: id });
+    const priorState = previous.row.result_json.state;
+    const inherited = { userSupplements: globalThis.structuredClone(priorState?.userSupplements || request.inheritedSupplements || []), steps: 0 };
+    let instruction = settings.instruction;
+    if (input.note) {
+        const revised = instruction + '\n\n本次整份修改要求：\n' + input.note.trim();
+        if (revised.length <= 16000) instruction = revised;
+        else registerSupplement(inherited, input.note.trim(), 'revise');
+    }
+    const previousPlan = priorState?.review?.approvals?.design?.plan || priorState?.previousPlan || request.previousPlan;
+    return (dependencies.start || start)(user, { ...settings, instruction, ...(sourceAssetId ? { sourceAssetId } : {}), materials },
+        { regeneratedFrom: id, inheritedSupplements: inherited.userSupplements, previousPlan });
 }
 
 module.exports = { start, get, readReviewDraft, readSnapshot, ...reviewPreviews, respond, cancel, latest, recent, listDrafts, activeTask, run, resume, regenerate };

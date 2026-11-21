@@ -403,7 +403,7 @@ test('按模板生成 8 页时可从局部清单误提交恢复，阶段耗尽�
     state.request.pageCount = 8;
     state.request.inputFiles = [{ path: material, kind: 'text' }];
     state.request.template = { type: 'runtime', id: 'fixed-template' };
-    state.templateSpec = { id: 'fixed-template', path: 'templates/fixed-template', text: rule, digest: 'a'.repeat(64) };
+    state.templateSpec = { id: 'fixed-template', path: 'templates/fixed-template', text: '## V. Visual System Defaults\n' + rule, digest: 'a'.repeat(64) };
     state.managedProject = 'report';
     const proposal = globalThis.structuredClone(design);
     const originals = new Map();
@@ -416,6 +416,15 @@ test('按模板生成 8 页时可从局部清单误提交恢复，阶段耗尽�
     plan.pages = Array.from({ length: 8 }, (_, index) => ({ title: `经营回顾 ${index + 1}`, values: [value(index + 1)] }));
     plan.pages[0].values.push(value(9));
     plan.templateUse = { page: 1, rule, visibleText: plan.pages[0].title };
+    const { normalizeTemplateUse } = require('../server/services/presentations/master/template-application');
+    const metadata = '| Style Name | Academic Research |';
+    state.templateSpec.text = '## I. Style Overview\n' + metadata + '\n' + state.templateSpec.text;
+    assert.throws(() => normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: metadata } }, plan.pages),
+        { code: 'PPT_MASTER_ACTION_INVALID' });
+    state.templateSpec.text += '\n| Role | Evidence Obligation |\n| :--- | ---: |\n| Result | Include the verified finding. |';
+    assert.throws(() => normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: 'Evidence Obligation' } }, plan.pages),
+        { code: 'PPT_MASTER_ACTION_INVALID' });
+    assert.equal(normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: 'Include the verified finding.' } }, plan.pages).page, 1);
     const partial = globalThis.structuredClone(proposal);
     partial.requestInput.plan.pages = partial.requestInput.plan.pages.slice(0, 1);
     const invoke = (current, callModel) => drive({ id: 1 }, 'task', current, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {

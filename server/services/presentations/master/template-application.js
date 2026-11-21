@@ -19,11 +19,28 @@ function normalizeTemplateUse(state, plan, pages) {
     if (state.request.template?.type !== 'runtime') return undefined;
     const { page, rule, visibleText } = plan.templateUse || {};
     const target = Number.isInteger(page) && pages[page - 1];
-    if (!target || typeof rule !== 'string' || rule.trim().length < 12 || rule.length > 350
-        || !state.templateSpec?.text.includes(rule) || !(visibleText === target.title || target.values.some(value => !value.chart && value.text === visibleText))) {
-        throw error('请用 templateUse 的 rule 逐字引用所选模板的一条设计规范（12 至 350 字符），用 page 和 visibleText 指明落实该规范的页码和清单中的可见标题或数据。', 'PPT_MASTER_ACTION_INVALID', 422);
+    if (!target || typeof rule !== 'string' || rule.trim() !== rule || rule.length < 12 || rule.length > 350
+        || !quotedDesignRule(state.templateSpec?.text, rule)
+        || !(visibleText === target.title || target.values.some(value => !value.chart && value.text === visibleText))) {
+        throw error('请从所选模板第 II 至 VII 节的正文逐字引用一条设计规则（12 至 350 字符），并指定对应页码及该页清单中的可见标题或数据。', 'PPT_MASTER_ACTION_INVALID', 422);
     }
     return { id: state.templateSpec.id, digest: state.templateSpec.digest, rule, page, visibleText };
+}
+
+function quotedDesignRule(spec, rule) {
+    let inDesignSection = false;
+    const lines = (spec || '').split(/\r?\n/u);
+    const divider = line => /^\s*\|?\s*:?-+:?\s*(?:\|\s*:?-+:?\s*)*\|?\s*$/u.test(line || '');
+    for (const [index, line] of lines.entries()) {
+        if (/^##\s/u.test(line)) inDesignSection = /^##\s+(?:II|III|IV|V|VI|VII)\./u.test(line);
+        if (!inDesignSection || !line.trim() || /^\s*(?:#|<!--)/u.test(line) || divider(line) || line.includes('|') && divider(lines[index + 1])) continue;
+        const body = line.trim().replace(/^[-*]\s+\*\*[^*]+\*\*:\s*/u, '');
+        // 表格中的规则正文可引用单元格，标题、对齐行和字段名不能作为规则。
+        if (body.includes('|')) {
+            if (body.replace(/^\||\|$/gu, '').split(/(?<!\\)\|/u).slice(1).some(cell => cell.includes(rule))) return true;
+        } else if (body.includes(rule)) return true;
+    }
+    return false;
 }
 
 async function installTemplate(state, project, execute) {

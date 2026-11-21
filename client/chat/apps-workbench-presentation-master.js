@@ -13,7 +13,6 @@
     }
     function isProcessCurrent(sequence) {
         const processModal = byId('presentation-master-process-modal');
-        if (processModal) delete processModal.dataset.wasWorking;
         return sequence === epoch && processModal && !processModal.classList.contains('hidden')
             && processModal.dataset.owner === actorId() && processModal.dataset.presentationId === presentationId();
     }
@@ -96,6 +95,8 @@
         const focus = returnFocus; returnFocus = null; focus?.focus();
     }
     function post(body) { return { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }; }
+    // 任务创建、换模型续跑和整稿重生成都可能触发预检，浏览器等待覆盖服务端最长两分钟的探测。
+    function modelPost(body) { return { ...post(body), timeoutMs: 150000 }; }
 
     function renderTemplateCard() {
         const card = byId('presentation-master-template-note');
@@ -395,7 +396,6 @@
             selectedTemplate = options.template || null;
             if (selectedTemplate) {
                 byId('presentation-master-operation').disabled = true;
-                window.Pivot.moduleApi('apps.presentations.masterForm').resetFiles('source');
             } else byId('presentation-master-operation').disabled = false;
         } else if (options.template) {
             selectedTemplate = options.template;
@@ -495,7 +495,7 @@
             if (!isProcessCurrent(sequence)) return;
             if (task) {
                 if (showAccountTask) renderTask(task);
-                if (!showAccountTask || task.request && task.status === 'working') await poll(task.id, sequence);
+                if (!showAccountTask || task.request && task.status === 'working') await poll(task.id, sequence, task.status === 'working');
             } else byId('presentation-master-status').replaceChildren(node('p', 'presentation-master-task-message', showAccountTask ? '当前账号暂无进行中的制作任务。' : '暂无制作记录。'));
         } catch (error) { showError(error, sequence); }
         finally { if (isCurrent(sequence) || !byId('presentation-master-modal')?.classList.contains('hidden')) button.disabled = false; }
@@ -511,7 +511,8 @@
         if (preparation) return;
         clearFormError();
         const button = byId('presentation-master-start'), history = byId('presentation-master-history'), activeButton = byId('presentation-master-active');
-        let title, instruction, modelId, tokenBudget, files, form, snapshot;
+        const template = selectedTemplate;
+        let title, instruction, modelId, tokenBudget, files, primaryFile, form, snapshot;
         try {
             title = byId('presentation-master-title').value.trim();
             instruction = byId('presentation-master-instruction').value.trim();
@@ -519,7 +520,13 @@
             if (!title || !instruction || !modelId) throw new Error('请填写名称和制作要求，并选择模型。');
             tokenBudget = readTokenBudget();
             files = [...(byId('presentation-master-source').files || [])];
-            if (files.length > 21) throw new Error('单次最多提供21个原稿和补充素材。');
+            const maxInputBytes = engineInfo?.maxInputFileBytes || 50 * 1024 * 1024;
+            const oversized = files.find(file => file.size > maxInputBytes);
+            if (oversized) throw new Error(`文件「${oversized.name}」超过完整制作的单文件上限 ${maxInputBytes / 1024 / 1024} MiB，请压缩后重新选择。`);
+            const sourceDeck = files.find(file => /\.pptx$/i.test(file.name));
+            if (template && sourceDeck) throw new Error('所选模板已确定原稿来源。请在文件列表移除 PPTX 原稿后继续，图片和音视频可以保留。');
+            primaryFile = template ? null : sourceDeck || files.find(file => /\.(?:png|jpe?g|webp)$/i.test(file.name));
+            if (files.length - Number(Boolean(primaryFile)) > 20) throw new Error('单次最多提供 20 个补充素材，请移除多余文件。');
             form = window.Pivot.moduleApi('apps.presentations.masterForm');
             snapshot = form.snapshot();
         } catch (error) {
@@ -531,7 +538,6 @@
         const ensureCurrent = () => { if (controller.signal.aborted || !isProcessCurrent(sequence) || active !== state.active) throw Object.assign(new Error('制作准备已取消'), { name: 'AbortError' }); };
         openProcessModal({ trigger: button, initialMessage: '正在预检模型…' });
         try {
-            const template = selectedTemplate;
             const currentMaterial = active?.content ? { title: active.title || '当前文稿', text: JSON.stringify(active.content) } : null;
             const request = { title, instruction, modelId, operation: byId('presentation-master-operation').value,
                 productionProfile: window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master', active?.content?.metadata?.productionProfile || {}),
@@ -539,7 +545,7 @@
                 maxSteps: Number(byId('presentation-master-steps').value), presentationId: active?.id || '',
                 ...(template ? { template: { type: template.type, id: template.id, ...(template.version ? { version: template.version } : {}) } } : {}) };
             button.textContent = '正在预检模型…';
-            await helpers.requestJson(API + '/model-preflight', { ...post({ modelId, operation: request.operation, profile: request.profile,
+            await helpers.requestJson(API + '/model-preflight', { ...modelPost({ ...request,
                 visionRequired: files.some(file => /\.(?:png|jpe?g|webp)$/i.test(file.name)) }), signal: controller.signal });
             ensureCurrent();
             button.textContent = snapshot.files.length ? '正在读取材料…' : '正在准备制作…';
@@ -547,7 +553,6 @@
             const materials = await form.extract(snapshot, helpers.requestJson, { signal: controller.signal, ensureCurrent });
             if (currentMaterial) materials.push(currentMaterial);
             ensureCurrent();
-            files.sort((a, b) => Number(/\.pptx$/i.test(b.name)) - Number(/\.pptx$/i.test(a.name)));
             let sourceAssetId; const assetIds = [];
             for (const file of files) {
                 const assetType = /\.pptx$/i.test(file.name) ? 'attachment' : /\.(?:wav|mp3|ogg)$/i.test(file.name) ? 'audio' : /\.mp4$/i.test(file.name) ? 'video' : 'image';
@@ -555,12 +560,11 @@
                 ensureCurrent();
                 const data = await helpers.requestJson('/api/apps/presentations/assets', { method: 'POST', body, signal: controller.signal });
                 ensureCurrent();
-                if (!template && !sourceAssetId && ['attachment', 'image'].includes(assetType)) sourceAssetId = String(data.asset.id); else assetIds.push(String(data.asset.id));
+                if (file === primaryFile) sourceAssetId = String(data.asset.id); else assetIds.push(String(data.asset.id));
             }
-            const data = await helpers.requestJson(API + '/tasks', { ...post({ ...request, materials, assetIds, ...(sourceAssetId ? { sourceAssetId } : {}) }), signal: controller.signal });
+            const data = await helpers.requestJson(API + '/tasks', { ...modelPost({ ...request, materials, assetIds, ...(sourceAssetId ? { sourceAssetId } : {}) }), signal: controller.signal });
             ensureCurrent();
-            byId('presentation-master-process-modal').dataset.wasWorking = data.task.id;
-            await poll(data.task.id, sequence);
+            await poll(data.task.id, sequence, true);
         } catch (error) { showError(error, sequence); }
         finally {
             if (preparation === controller) {
@@ -572,7 +576,7 @@
             }
         }
     }
-    async function poll(id, sequence, failures = 0) {
+    async function poll(id, sequence, wasWorking = false, failures = 0) {
         if (!isProcessCurrent(sequence)) return;
         let data;
         try { data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id)); }
@@ -583,18 +587,15 @@
             if (!warning) { warning = node('div', 'presentation-master-task-feedback'); warning.dataset.masterPollError = 'true'; warning.setAttribute('role', 'alert'); panel.appendChild(warning); }
             warning.replaceChildren(node('p', '', '状态暂时无法更新，后台任务可能仍在运行。'));
             const retry = node('button', 'btn-secondary', '重新查询状态'); retry.type = 'button';
-            retry.addEventListener('click', () => { retry.disabled = true; const retrySequence = ++epoch; void poll(id, retrySequence).catch(error => showError(error, retrySequence)); }); warning.appendChild(retry);
-            if (failures < 3) window.setTimeout(() => poll(id, sequence, failures + 1).catch(error => showError(error, sequence)), 3000);
+            retry.addEventListener('click', () => { retry.disabled = true; const retrySequence = ++epoch; void poll(id, retrySequence, wasWorking).catch(error => showError(error, retrySequence)); }); warning.appendChild(retry);
+            if (failures < 3) window.setTimeout(() => poll(id, sequence, wasWorking, failures + 1).catch(error => showError(error, sequence)), 3000);
             return;
         }
         if (!isProcessCurrent(sequence)) return;
-        const newlyCompleted = data.task.status === 'completed' && data.task.draftFirst && !historySession
-            && byId('presentation-master-process-modal').dataset.wasWorking === id;
-        if (data.task.status === 'working') byId('presentation-master-process-modal').dataset.wasWorking = id;
-        else delete byId('presentation-master-process-modal').dataset.wasWorking;
+        const newlyCompleted = data.task.status === 'completed' && data.task.draftFirst && wasWorking;
         renderTask(data.task);
         if (newlyCompleted) void helpers.loadDocuments?.().catch(error => helpers.toast(errorText(error), 'error'));
-        if (data.task.status === 'working') window.setTimeout(() => poll(id, sequence).catch(error => showError(error, sequence)), 1500);
+        if (data.task.status === 'working') window.setTimeout(() => poll(id, sequence, true).catch(error => showError(error, sequence)), 1500);
     }
     function renderTask(value) {
         const panel = byId('presentation-master-status');
@@ -720,7 +721,7 @@
                 const sequence = ++epoch;
                 try {
                     await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/respond', post({ answer: response, decision, promptId: request.promptId }));
-                    await poll(value.id, sequence);
+                    await poll(value.id, sequence, true);
                 } catch (error) { if (isProcessCurrent(sequence)) { submit.disabled = false; if (revise) revise.disabled = false; feedback.textContent = errorText(error); } }
             }
             submit.addEventListener('click', () => respond(continuing ? 'continue' : confirmation ? 'approve' : 'clarify'));
@@ -806,19 +807,25 @@
                     resumeBudget.focus();
                     throw new Error('请先提高续跑累计模型预算，或填 0 取消累计上限。');
                 }
-                await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', post({
+                await helpers.requestJson(API + '/tasks/' + encodeURIComponent(value.id) + '/resume', modelPost({
                     tokenBudget: tokenBudget > 0 ? Math.max(tokenBudget, currentBudget ?? 0) : tokenBudget,
                     maxSteps: Math.max(Number(resumeSteps.value), Number(value.request?.maxSteps || 0)),
                     modelId: resumeModel.value || formModel?.value || '',
                     ...(readRepair ? readRepair() : readNote())
                 }));
-                await poll(value.id, sequence);
+                await poll(value.id, sequence, true);
             } catch (error) { if (isProcessCurrent(sequence)) { resume.disabled = false; feedback.textContent = errorText(error); } } });
             resumeActions.appendChild(resume);
             resumePanel.appendChild(resumeActions);
             panel.appendChild(resumePanel);
         }
         const actionRow = node('div', 'presentation-master-task-actions');
+        const templateApplication = value.result?.checks?.templateApplication;
+        if (templateApplication?.styleReview === 'manual') {
+            const note = node('p', 'presentation-master-task-summary', `第 ${templateApplication.page} 页已核对模板安装记录和对应文字「${templateApplication.visibleText}」。风格规则需人工复核。`);
+            note.title = templateApplication.rule;
+            panel.appendChild(note);
+        }
         const openNative = source => {
             closeModal();
             return window.Pivot.moduleApi('apps.presentations.native').open(source).catch(error => helpers.toast(errorText(error), 'error'));
@@ -831,8 +838,8 @@
                 if (!regenerate) return poll(id, sequence).catch(error => showError(error, sequence));
                 regenerate.disabled = true;
                 try {
-                    const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id) + '/regenerate', post(note ? { note } : {}));
-                    if (isProcessCurrent(sequence)) await poll(data.task.id, sequence);
+                    const data = await helpers.requestJson(API + '/tasks/' + encodeURIComponent(id) + '/regenerate', modelPost(note ? { note } : {}));
+                    if (isProcessCurrent(sequence)) await poll(data.task.id, sequence, true);
                 } catch (error) {
                     if (isProcessCurrent(sequence)) { feedback.textContent = errorText(error); regenerate.disabled = false; }
                 }

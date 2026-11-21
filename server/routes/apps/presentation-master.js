@@ -3,6 +3,7 @@
 const tasks = require('../../services/presentations/master/tasks');
 const runtime = require('../../services/presentations/master/runtime');
 const { checkModel } = require('../../services/presentations/master/model-preflight');
+const { MAX_INPUT_FILE_BYTES } = require('../../services/presentations/master/input-snapshots');
 
 function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler, writeLog }) {
     router.get('/apps/presentations/template-catalog', authMiddleware, asyncHandler(async (req, res) => res.json(await require('../../services/presentations/presentation-template-catalog').list(req.user))));
@@ -13,14 +14,21 @@ function registerPresentationMasterRoutes(router, { authMiddleware, asyncHandler
     router.get('/apps/presentations/master/info', authMiddleware, asyncHandler(async (_req, res) => {
         const available = await runtime.availability();
         res.json({ engine: { ...available, revision: available.revision || runtime.lock.revision, version: available.version || runtime.lock.skillVersion,
-            operations: ['generate', 'create_template', 'edit_native'], profiles: ['default', 'quick', 'beautify', 'image_to_pptx'],
+            maxInputFileBytes: MAX_INPUT_FILE_BYTES, operations: ['generate', 'create_template', 'edit_native'], profiles: ['default', 'quick', 'beautify', 'image_to_pptx'],
             editing: '保留原生PPTX和完整项目源包；复杂对象不自动转换为Pivot画布。' } });
     }));
     router.post('/apps/presentations/master/model-preflight', authMiddleware, asyncHandler(async (req, res) => {
         const available = await runtime.availability();
         runtime.requireReady(available, req.body?.operation || 'generate');
         res.set('Cache-Control', 'no-store');
-        res.json({ compatibility: await checkModel(req.user, req.body || {}, { visionRequired: req.body?.visionRequired === true }) });
+        const { modelId, operation, profile, template, title, instruction, pageCount, visionRequired } = req.body || {};
+        if ((title !== undefined && (typeof title !== 'string' || title.length > 120)) ||
+            (instruction !== undefined && (typeof instruction !== 'string' || instruction.length > 16000))) {
+            throw runtime.error('预检的文稿名称或制作要求无效。');
+        }
+        const productionProfile = require('../../services/presentations/presentation-production-profile').fromRequest(req.body || {});
+        res.json({ compatibility: await checkModel(req.user, { modelId, operation, profile, template, title, instruction, pageCount, productionProfile },
+            { visionRequired: visionRequired === true }) });
     }));
     router.post('/apps/presentations/master/tasks', authMiddleware, asyncHandler(async (req, res) => {
         const task = await tasks.start(req.user, req.body || {});

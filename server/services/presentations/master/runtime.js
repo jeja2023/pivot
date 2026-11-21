@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs/promises');
+const { checkInputSize, saveInputSnapshot } = require('./input-snapshots');
 const path = require('node:path');
 const { readTypedEnv } = require('../../../config/env-registry');
 const worker = require('../../agent-capability-worker');
@@ -73,17 +74,12 @@ async function execute(user, id, input, { signal, env = process.env, runWorker =
     return output.result;
 }
 async function inputFile(user, id, name, buffer) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name) || !Buffer.isBuffer(buffer) || buffer.length > 50 * 1024 * 1024) throw error('制作输入文件无效或超过上限。');
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name) || !Buffer.isBuffer(buffer)) throw error('制作输入文件无效。');
+    checkInputSize(name, buffer.length);
     if (await remote.configured()) return remote.inputFile(user, id, name, buffer);
     const root = await workspace(user, id), directory = path.join(root, 'inputs');
     await fs.mkdir(directory, { recursive: true });
-    const file = path.join(directory, name);
-    try { await fs.writeFile(file, buffer, { flag: 'wx', mode: 0o444 }); }
-    catch (failure) {
-        if (failure.code !== 'EEXIST') throw failure;
-        const stat = await fs.lstat(file);
-        if (!stat.isFile() || stat.isSymbolicLink() || !Buffer.from(await fs.readFile(file)).equals(buffer)) throw error('输入快照已变化，不能覆盖原任务材料。', 'PPT_MASTER_INPUT_CHANGED', 409);
-    }
+    await saveInputSnapshot(directory, name, buffer);
     return 'inputs/' + name;
 }
 async function readOutput(user, id, name, maxBytes = 60 * 1024 * 1024) {

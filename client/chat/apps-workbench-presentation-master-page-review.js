@@ -788,7 +788,7 @@
         if (value.imageCoverage?.total) panel.appendChild(node('p', 'presentation-master-task-summary', `已发送 ${value.imageCoverage.read} / ${value.imageCoverage.total} 张图片给模型。`));
         if (value.actionRetries) {
             const reason = Object.hasOwn(ERROR_REASONS, value.lastActionCorrection) ? ERROR_REASONS[value.lastActionCorrection] : '';
-            panel.appendChild(node('p', 'presentation-master-task-summary', `已修正模型动作 ${value.actionRetries} 次。${reason ? '最近原因：' + reason + '。' : ''}`));
+            panel.appendChild(node('p', 'presentation-master-task-summary', `已请求模型修正动作 ${value.actionRetries} 次。${reason ? '最近原因：' + reason + '。' : ''}`));
         }
         const audit = value.result?.checks;
         if (audit?.checklistDigest) panel.appendChild(node('p', 'presentation-master-task-summary', `交付已按批准清单核对 ${audit.checkedPages} 页及 ${audit.checkedValues} 项关键数据。`));
@@ -802,7 +802,7 @@
             const stalled = value.error?.code === 'PPT_MASTER_NO_PROGRESS';
             const diagnostic = stalled ? value.inspectionDiagnostic : actions.lastFailure;
             if (diagnostic && ACTION_LABELS[diagnostic.action] && (value.error || actions.lastActions?.some(item => item.failed))) {
-                const prefix = stalled ? '重复检查' : '最近失败';
+                const prefix = stalled ? '重复检查' : '最近一次工具执行失败';
                 const coordinates = Number.isSafeInteger(diagnostic.archive) && Number.isSafeInteger(diagnostic.index)
                     ? `归档 ${diagnostic.archive}，消息 ${diagnostic.index}` : '';
                 const details = [ACTION_LABELS[diagnostic.action], diagnostic.tool, diagnostic.path, coordinates,

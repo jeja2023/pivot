@@ -15,7 +15,6 @@
   },
   "include": [
     "types/**/*",
-    "client/src/**/*",
     "desktop/stealth-policy.js",
     "server/services/agent-browser-profile-cleanup.js",
     "server/services/agent-event-batch-writer.js",

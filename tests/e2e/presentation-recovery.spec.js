@@ -83,13 +83,31 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         const { task: { id } } = await started.json();
         const read = async () => (await (await user.request.get(API + '/master/tasks/' + id)).json()).task;
         const panel = user.locator('#presentation-master-status');
+        if (style === 'academic-research') {
+            await expect.poll(async () => (await read()).status, { timeout: 120000 }).toBe('failed');
+            const failed = await read();
+            expect(failed.error).toMatchObject({ code: 'PPT_MASTER_ACTION_INVALID', message: expect.stringContaining('请移除或修正 encoding') });
+            expect(failed.usageDiagnostics.filter(item => item.correctionKind === 'action_fields').map(item => item.outcome)).toEqual(['retry', 'failed']);
+            expect(failed.milestones.firstPageWrite).toBeUndefined();
+            await expect(panel).toContainText('请移除或修正 encoding');
+            const resuming = user.waitForResponse(r => r.url().endsWith('/' + id + '/resume') && r.request().method() === 'POST');
+            await panel.getByRole('button', { name: '从检查点继续', exact: true }).click();
+            const resumed = await resuming;
+            expect(resumed.ok(), await resumed.text()).toBeTruthy();
+            expect((await resumed.json()).task.id).toBe(id);
+        }
         await expect.poll(async () => (await read()).status, { timeout: 120000 }).toMatch(/^(completed|failed)$/);
         const done = await read();
         expect(done.status, done.error?.message || done.inputRequest?.question).toBe('completed');
         expect(done.milestones.firstApproval).toBeUndefined();
+        const fieldIssues = done.usageDiagnostics.filter(item => item.correctionKind === 'action_fields');
+        expect(fieldIssues.map(issue => issue.outcome)).toEqual(style === 'academic-research' ? ['retry', 'failed'] : ['retry']);
+        for (const issue of fieldIssues) expect(issue).toMatchObject({ actionType: 'write', actionIndex: 1,
+            rejectedFields: ['encoding'], fieldMessage: expect.stringContaining('请移除或修正 encoding') });
         expect(done.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, preservation: {
             pages: [2], sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
-        }, templateSpecDigest: expect.any(String) });
+        }, templateSpecDigest: expect.any(String), templateApplication: { page: 1, visibleText: title, styleReview: 'manual' } });
+        await expect(panel).toContainText('风格规则需人工复核');
         async function download(label) {
             const event = user.waitForEvent('download');
             await panel.getByRole('button', { name: label }).click();

@@ -6,6 +6,8 @@ const { error } = require('./runtime');
 const { getSupplement } = require('./user-supplements');
 const { compact, containsValue, locateCitation, verifiedCorrection, originalLine, extendCitation, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { normalizeTemplateUse } = require('./template-application');
+const { writeCorrection } = require('./action-parameters');
+const { missingTitleClaims } = require('./title-evidence');
 
 const digest = value => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
 const draftPlanDigest = plan => createHash('sha256').update(canonicalJson(plan), 'utf8').digest('hex');
@@ -69,6 +71,8 @@ async function normalizeStage(input, state, verifySource) {
         throw invalid('请按制作流程提交当前待确认阶段：' + (labels[nextStage(state)] || '已批准方案的修订') + '。');
     }
     if (!input.plan || typeof input.plan !== 'object' || Array.isArray(input.plan)) throw invalid('请提供结构化的待确认方案。');
+    const unread = Object.entries(state.revisionReadOffsets || {}).find(([, offset]) => offset != null);
+    if (unread) throw invalid(`请先用 read 从 ${unread[0]} 的 offset=${unread[1]} 继续读取原稿修订依据。`);
     const summary = valueText(input.plan.summary, 4000, '方案说明');
     const project = valueText(input.plan.project, 180, '任务项目目录');
     if (!projectPath.test(project)) throw invalid('请填写实际任务项目的相对目录。');
@@ -183,7 +187,39 @@ async function normalizeStage(input, state, verifySource) {
                 failures.push({ ...fact, path, reason, ...(excerpt ? { excerpt } : {}) });
             } else verified.add(value);
         }
-        normalized.push({ title, values });
+        const normalizedPage = { title, values };
+        if (state.request.draftFirst) {
+            if (page.titleSource !== undefined) {
+                let citation;
+                try {
+                    citation = { path: valueText(page.titleSource?.path, 140, '标题数据来源'),
+                        quote: valueText(page.titleSource?.quote, 350, '标题引文', true) };
+                } catch (error) {
+                    if (error.code !== 'PPT_MASTER_ACTION_INVALID') throw error;
+                }
+                if (citation && availablePaths.has(citation.path) && containsValue((await readSource(citation.path)).normalized, citation.quote)) {
+                    normalizedPage.titleSource = citation;
+                }
+            }
+            // 只有已核对的数据项能证明标题。缺少依据的标题分句进入既有逐项修复和占位流程。
+            const missing = missingTitleClaims({ ...normalizedPage, values: values.filter(v => verified.has(v)) });
+            for (const claim of new Set(missing)) {
+                if (failures.some(f => f.page === pageIndex + 1 && f.text === claim)) continue;
+                let position = values.findIndex(value => value.text === claim);
+                if (claim.length > 120 || position < 0 && (values.length >= 8 || totalValues >= 120)) {
+                    throw invalid(`第 ${pageIndex + 1} 页标题含未核对的业务数字。请用 titleSource 的 path 和 quote 提供连续原文，或修改标题。`);
+                }
+                if (position < 0) {
+                    position = values.push({ text: claim }) - 1;
+                    totalValues++;
+                }
+                const fact = { key: citationKey(values[position]), page: pageIndex + 1, item: position + 1, title, text: claim,
+                    path: '', reason: '标题中的业务数字需要对应指标、单位及原文依据。' };
+                failures.push(fact);
+                seen.add(fact.key);
+            }
+        }
+        normalized.push(normalizedPage);
     }
     for (const [key, fact] of requiredFacts) {
         if (fact.allowOmit || seen.has(key)) continue;
@@ -278,6 +314,17 @@ function recordDraftPlan(state, plan) {
     state.review.approvals.design = { basis: 'automatic', digest: draftPlanDigest(plan), plan };
 }
 
+function approvalIssue(state) {
+    const plan = state.review?.approvals?.design?.plan;
+    if (!plan) return '';
+    if (state.request.draftFirst && plan.pages?.some(page => missingTitleClaims(page).length)) return '原标题中的业务数字仍需核对来源。';
+    if (state.request.template?.type === 'runtime' && state.templateSpec) {
+        try { normalizeTemplateUse(state, plan, plan.pages); }
+        catch (failure) { return failure.message; }
+    }
+    return '';
+}
+
 function exportReview(state, project, templateOnly = false) {
     const missing = nextStage(state);
     if (missing) throw checklistError('请先提交并取得用户对' + labels[missing] + '的明确批准，再执行导出。');
@@ -286,6 +333,8 @@ function exportReview(state, project, templateOnly = false) {
     if (!approval || approval.digest !== planDigest(approval.plan) || approval.plan.project !== project) {
         throw checklistError('导出项目与用户批准的方案不一致，请核对任务目录和确认记录。');
     }
+    const issue = approvalIssue(state);
+    if (issue) throw checklistError(issue + '请重提最终页面清单。');
     if (state.request.template?.type === 'runtime' && (!state.templateSpec || approval.plan.templateUse?.id !== state.templateSpec.id
         || approval.plan.templateUse.digest !== state.templateSpec.digest)) {
         throw checklistError('请重新提交采用所选模板的最终清单并取得确认，再执行导出。');
@@ -305,6 +354,13 @@ function verifyReceipt(receipt, expected) {
         || receipt.packageCheck.checkedValues !== expected.checklist.reduce((count, page) => count + page[1].length, 0)) {
         throw error('交付回执缺少当前清单的完整核验，请更新 PPT Master 执行服务后继续。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
     }
+    const use = expected.templateUse;
+    if (!use) return undefined;
+    const page = expected.checklist[use.page - 1];
+    if (!page || use.visibleText !== page[0] && !page[1].includes(use.visibleText)) {
+        throw error('交付缺少模板规则对应页的已核验内容，请重新核对清单。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
+    }
+    return { page: use.page, visibleText: use.visibleText, rule: use.rule, styleReview: 'manual' };
 }
 
 function pageReviewFor(state, report, checklist) {
@@ -363,6 +419,9 @@ function reviewGuidance(state) {
 function reviewRecoveryGuidance(state, code, message) {
     const reason = String(message || '').slice(0, 500);
     if (code === 'PPT_MASTER_ACTION_INVALID' && reason) {
+        if (/^同批第 [1-6] 项 write 含不支持的参数/u.test(reason)) {
+            return '\n上次回复在写入前被拒绝。' + reason + writeCorrection + '沿用已保存的清单和有效写入回执，按最近的项目校验结果继续。';
+        }
         return '\n上次无效回复未执行。失败原因：' + reason + '\n若保有待修清单，按待核对项提交局部修正；需要重提方案时，提交完整清单。';
     }
     if (code === CITATION_REVIEW_REQUIRED) {
@@ -406,4 +465,4 @@ function resetCitationRepair(state, { allowRevision = false } = {}) {
     }
 }
 
-module.exports = { initializeReview, normalizeStage, normalizeCitationPatch, applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };
+module.exports = { initializeReview, normalizeStage, normalizeCitationPatch, applyReviewDecision, recordDraftPlan, reopenReview, resetCitationRepair, approvalIssue, exportReview, verifyReceipt, pageReviewFor, pageRepairSources, repairActionAllowed, reviewGuidance, reviewRecoveryGuidance, labels };

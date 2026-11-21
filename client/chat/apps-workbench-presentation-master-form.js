@@ -167,6 +167,12 @@
     function updateTemplateLock(locked) {
         const lockNotice = byId('presentation-master-lock-notice');
         if (lockNotice) lockNotice.classList.toggle('hidden', !locked);
+        const input = byId('presentation-master-source');
+        if (input) input.accept = (locked ? '' : '.pptx,') + '.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4';
+        const sourceHint = byId('presentation-master-source-hint');
+        if (sourceHint) sourceHint.textContent = locked
+            ? '可选，最多 20 个图片和音视频素材。选用模板时请移除另选的 PPTX 原稿。'
+            : '可选，支持 1 份原稿及最多 20 个补充素材。图片和音视频也可作为制作素材。';
     }
     function mount() {
         const form = node('div', 'presentation-master-form');
@@ -232,7 +238,7 @@
         const materialFiles = fileField('文件材料', 'material-files', '.doc,.docx,.pdf,.txt,.md', '最多10份，单份≤10MB；读取文字内容（扫描件请先识别，图片/嵌入附件不参与解析）。', '支持 Word (.doc/.docx)、PDF、TXT、Markdown');
         const supplementField = field('补充文字材料（可选）', 'material', 'textarea');
         supplementField.classList.add('presentation-master-material-field');
-        sources.append(materialFiles, supplementField, fileField('原稿与图片、音视频', 'source', '.pptx,.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4', '可选，最多21个文件；演示原稿（.pptx）用于编辑，图片和音视频作为制作素材。', '支持 PPTX 原稿、图片 (PNG/JPG/WEBP)、音视频 (WAV/MP3/MP4)'));
+        sources.append(materialFiles, supplementField, fileField('原稿与图片、音视频', 'source', '.pptx,.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4', '可选，支持 1 份原稿及最多 20 个补充素材。图片和音视频也可作为制作素材。', '支持 PPTX 原稿、图片 (PNG/JPG/WEBP)、音视频 (WAV/MP3/MP4)'));
 
         columns.append(requirements, sources);
 

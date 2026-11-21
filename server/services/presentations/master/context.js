@@ -20,8 +20,35 @@ function requestLimits(model) {
     return { ...budget, outputLimit, archiveAt, fullOutputInputBudget };
 }
 
+function describeArchivedWrites(messages) {
+    return messages.map((message, index) => {
+        const reply = messages[index + 1];
+        if (message.role !== 'assistant' || reply?.role !== 'user' || typeof message.content !== 'string'
+            || !/"saved(?:Content|Sha256)"\s*:/u.test(message.content) || typeof reply.content !== 'string') return message;
+        let turn, observations;
+        try { turn = JSON.parse(message.content); observations = JSON.parse(reply.content); } catch (_) { return message; }
+        if (!Array.isArray(turn?.actions) || !Array.isArray(observations)) return message;
+        const writes = [];
+        const actions = turn.actions.filter((action, position) => {
+            if (action?.action !== 'write' || typeof action.text === 'string') return true;
+            const observation = observations[position], receipt = observation?.result;
+            const legacy = action.savedSha256 === undefined && typeof action.savedContent === 'string' && action.savedContent.startsWith('已成功写入；')
+                && observation?.action === 'write' && !observation.error && receipt?.path === action.path && /^[a-f0-9]{64}$/u.test(receipt?.sha256 || '');
+            if (!legacy && !confirmedWrite(action, observation)) return true;
+            const location = /archive=\d+、index=\d+/u.exec(action.savedContent || '');
+            writes.push(`第 ${position + 1} 项 ${receipt.path}${location ? '（原文可用 read_history 回读，' + location[0] + '）' : ''}`);
+            return false;
+        });
+        if (!writes.length) return message;
+        // 文件摘要及原批次顺序由下一条工具回执提供，模型不需要模仿带宿主字段的写入动作。
+        const note = '本批已成功写入 ' + writes.join('、') + '。下一条工具回执按原批次顺序排列。需要当前正文时用 read 读取。';
+        if (!actions.length) return { role: 'user', content: JSON.stringify({ writeReceiptSummary: note }) };
+        return { ...message, content: JSON.stringify({ ...turn, message: [turn.message, note].filter(Boolean).join('\n'), actions }) };
+    });
+}
+
 // 只压缩已经确认写入的旧文件正文；原始消息仍保存在检查点中。
-function compactMessages(messages) {
+function compactMessages(messages, { forModel = false } = {}) {
     const result = messages.map(message => ({ ...message }));
     let compactedWrites = 0;
     const lastAssistant = result.findLastIndex(message => message.role === 'assistant');
@@ -70,21 +97,22 @@ function compactMessages(messages) {
         });
         if (changed) result[index] = { ...message, content: JSON.stringify(revised) };
     }
-    return { messages: result, compactedWrites };
+    return { messages: forModel ? describeArchivedWrites(result) : result, compactedWrites };
 }
 
 function planRequest(messages, originalMessages, model, remainingTokens, limits = requestLimits(model)) {
     const inputEstimate = estimateMessagesTokens(messages);
     const originalEstimate = estimateMessagesTokens(originalMessages);
-    const firstAssistant = messages.findIndex(message => message.role === 'assistant');
+    const firstTurn = messages.findIndex(message => message.role === 'assistant'
+        || message.role === 'user' && typeof message.content === 'string' && message.content.startsWith('{"writeReceiptSummary":'));
     const breakdown = { initial: 0, history: 0, toolResults: 0, images: 0 };
     messages.forEach((message, index) => {
         const image = Array.isArray(message.content) && message.content.some(part => part?.type === 'image_url' || part?.type === 'input_image' || part?.image_url);
         let toolResult = false;
-        if (message.role === 'user' && typeof message.content === 'string' && index > firstAssistant && firstAssistant >= 0) {
+        if (message.role === 'user' && typeof message.content === 'string' && index > firstTurn && firstTurn >= 0) {
             try { const value = JSON.parse(message.content); toolResult = Array.isArray(value) && value.every(item => item && typeof item.action === 'string' && (Object.hasOwn(item, 'result') || Object.hasOwn(item, 'error'))); } catch (_) { /* 普通用户消息不属于工具结果。 */ }
         }
-        const key = image ? 'images' : firstAssistant < 0 || index < firstAssistant ? 'initial' : toolResult ? 'toolResults' : 'history';
+        const key = image ? 'images' : firstTurn < 0 || index < firstTurn ? 'initial' : toolResult ? 'toolResults' : 'history';
         breakdown[key] += estimateMessagesTokens([message]);
     });
     if (limits.outputLimit < MIN_OUTPUT_TOKENS) {
@@ -112,8 +140,11 @@ function usageRecord(state, plan, usageRef, output, compactedWrites, estimateTok
     const outputTokens = outputEstimated ? estimateTokens(typeof output === 'string' ? output : JSON.stringify(output))
         : reportedOutput;
     const previous = Array.isArray(state.usageDiagnostics) ? state.usageDiagnostics : [];
+    const transportTiming = Object.fromEntries(['queueMs', 'providerMs']
+        .filter(key => Number.isSafeInteger(usageRef[key]) && usageRef[key] >= 0 && (key !== 'providerMs' || usageRef.providerStartedAt != null))
+        .map(key => [key, usageRef[key]]));
     const item = { call: Number(previous.at(-1)?.call || previous.length) + 1, step: Number(state.steps || 0) + 1, inputTokens, outputTokens,
-        inputEstimated, outputEstimated,
+        inputEstimated, outputEstimated, ...transportTiming,
         inputEstimate: plan.inputEstimate, originalEstimate: plan.originalEstimate, compactedWrites, breakdown: plan.breakdown,
         ...(startedAt ? { startedAt } : {}), ...(Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {}) };
     state.usedTokens += (inputTokens ?? 0) + (outputTokens ?? 0);

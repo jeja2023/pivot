@@ -8,31 +8,30 @@ const { patchCitationDraft } = require('./citation-repair');
 const { requireChecks } = require('./tool-checks');
 const { HISTORY_PAGE_CHARS } = require('./observations');
 const { normalizeRuntimeReads } = require('./runtime-references');
+const { actionFields, rejectedFields, fieldMessage } = require('./action-parameters');
 
-const ACTIONS = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
-const allowed = new Set(['action', 'path', 'source', 'offset', 'length', 'text', 'tool', 'args', 'kind', 'archive', 'index']);
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
-const actionFields = {
-    read: ['path', 'offset', 'length'], read_runtime: ['path', 'offset', 'length'],
-    read_history: ['archive', 'index', 'offset', 'length'], read_images: ['offset', 'length'],
-    write: ['path', 'text'], run: ['tool', 'args'], list: [],
-    copy: ['path', 'source'], copy_template: ['path', 'source'], validate_template: ['path', 'kind']
-};
 const benignMetadata = new Set(['message', 'description', 'reason']);
 
 function normalizeAction(action) {
-    if (!action || typeof action !== 'object' || !ACTIONS.has(action.action)) return action;
+    if (!action || typeof action !== 'object' || typeof action.action !== 'string' || !Object.hasOwn(actionFields, action.action)) return action;
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
     const normalized = { ...action };
     for (const field of benignMetadata) {
         if (typeof normalized[field] === 'string' && normalized[field].length <= 500) delete normalized[field];
     }
     if (normalized.action === 'write') {
-        if (typeof normalized.content === 'string' && (normalized.text === undefined || normalized.text === normalized.content)) {
-            normalized.text = normalized.content;
-            delete normalized.content;
+        for (const [alias, target] of [['content', 'text'], ['file_path', 'path'], ['filePath', 'path']]) {
+            if (typeof normalized[alias] === 'string' && (normalized[target] === undefined || normalized[target] === normalized[alias])) {
+                normalized[target] = normalized[alias];
+                delete normalized[alias];
+            }
         }
         if (normalized.offset === 0) delete normalized.offset;
+        if (typeof normalized.encoding === 'string' && /^utf-?8$/i.test(normalized.encoding)) delete normalized.encoding;
+        if (normalized.append === false) delete normalized.append;
+        if (normalized.tool === '') delete normalized.tool;
+        if (Array.isArray(normalized.args) && !normalized.args.length) delete normalized.args;
     }
     return normalized;
 }
@@ -49,12 +48,12 @@ function parsedOutput(output) {
     throw error('模型未返回完整的制作操作，请重试或切换模型。', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 422);
 }
 
-function validateAction(action, state, index) {
-    if (!action || typeof action !== 'object' || !ACTIONS.has(action.action)) throw invalid('模型请求了未登记的制作动作。');
-    if (Object.keys(action).some(key => !allowed.has(key)) || action.action === 'write' && action.offset !== undefined) {
-        const fields = ['action', ...actionFields[action.action]];
-        throw Object.assign(invalid('同批第 ' + (index + 1) + ' 项 ' + action.action + ' 含不支持的参数。请仅提交 ' + fields.join('、') + '。'),
-            { correctionKind: 'action_fields', actionIndex: index + 1, actionType: action.action });
+function validateAction(action, state, index, original) {
+    if (!action || typeof action !== 'object' || typeof action.action !== 'string' || !Object.hasOwn(actionFields, action.action)) throw invalid('模型请求了未登记的制作动作。');
+    const rejected = rejectedFields(action, original);
+    if (rejected.length) {
+        throw Object.assign(invalid(fieldMessage(action.action, index + 1, rejected)),
+            { correctionKind: 'action_fields', actionIndex: index + 1, actionType: action.action, rejectedFields: rejected });
     }
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
     if (!state.review) return;
@@ -119,10 +118,11 @@ async function validateTurn(output, state, verifySource) {
     if (choices !== 1) throw invalid('模型须明确选择操作、询问或最终交付，不能混合执行。');
     if (turn.actions) {
         if (!Array.isArray(turn.actions) || turn.actions.length > 6) throw invalid('单轮制作操作超过上限。');
+        const originalActions = turn.actions;
         if (state.review) turn = { ...turn, actions: normalizeRuntimeReads(turn.actions.map(normalizeAction), state) };
         if (turn.actions.filter(action => action?.action === 'read_images').length > 1) throw invalid('每轮只请求一批图片。');
         for (const [index, action] of turn.actions.entries()) {
-            validateAction(action, state, index);
+            validateAction(action, state, index, originalActions[index]);
             if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0], turn.actions.slice(0, index));
         }
     }

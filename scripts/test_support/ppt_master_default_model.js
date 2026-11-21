@@ -143,7 +143,8 @@ function turn(request, messages, assistant) {
         summary: '使用白底深色文字，标题和正文左对齐。每页单独核对一项事实。',
         project, ...(templateUse ? { templateUse } : {}), pages: roster.map(page => ({ title: page.title, values: [{ text: page.fact, source: { path: materialPath, quote: page.fact } }] }))
     });
-    const authored = assistant.some(item => item.actions?.some(action => action.path === project + '/spec_lock.md'));
+    const authored = observations.some(item => item.action === 'write' && !item.error
+        && item.result?.path === project + '/spec_lock.md' && /^[a-f0-9]{64}$/.test(item.result.sha256 || ''));
     if (!authored) return { actions: [
         { action: 'read', path: 'references/executor-base.md', length: 1200 },
         { action: 'write', path: project + '/design_spec.md', text: spec(roster, templateUse) },

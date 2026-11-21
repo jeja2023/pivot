@@ -1,4 +1,5 @@
 'use strict';
+const { actionFields, publicFieldLabels, fieldMessage } = require('./action-parameters');
 
 const crypto = require('node:crypto');
 const READ_PAGE_CHARS = 24000;
@@ -76,7 +77,6 @@ const PAGE_CHECK_KINDS = new Set(['source_path', 'first_page_pending', 'source_x
 const SAFE_PAGE_REASONS = new Set(['页面对象区域重叠', '页面模块缺少边界声明', '重复使用了规范未声明的字号',
     '渐变路径的可见宽度或高度为零', '文字超出页面模块边界', 'SVG 格式无效', '页面未通过 SVG 校验']);
 const PROJECT_ISSUES = new Set(['design', 'lock', 'communication', 'layout', 'other']);
-const ACTION_TYPES = new Set(['read_runtime', 'read_history', 'read_images', 'list', 'read', 'write', 'run', 'copy', 'copy_template', 'validate_template']);
 
 function pageDiagnostics(observation) {
     if (!observation) return {};
@@ -196,11 +196,14 @@ function sanitizeTurnSummary(summary) {
     if (Number.isSafeInteger(summary.citationCount) && summary.citationCount > 0) out.citationCount = summary.citationCount;
     if (Number.isSafeInteger(summary.citationPatchIgnored) && summary.citationPatchIgnored > 0) out.citationPatchIgnored = Math.min(120, summary.citationPatchIgnored);
     if (['citation_patch', 'plan_page_count', 'action_fields'].includes(summary.correctionKind)) out.correctionKind = summary.correctionKind;
-    if (ACTION_TYPES.has(summary.actionType) && Number.isInteger(summary.actionIndex) && summary.actionIndex >= 1 && summary.actionIndex <= 6) {
+    if (typeof summary.actionType === 'string' && Object.hasOwn(actionFields, summary.actionType)
+        && Number.isInteger(summary.actionIndex) && summary.actionIndex >= 1 && summary.actionIndex <= 6) {
         out.actionIndex = summary.actionIndex;
         out.actionType = summary.actionType;
+        const rejected = publicFieldLabels(summary.rejectedFields);
+        if (out.correctionKind === 'action_fields' && rejected.length) out.rejectedFields = rejected;
     }
-    if (['connection_reset', 'gateway_error', 'local_timeout', 'upstream_timeout'].includes(summary.modelFailureKind)) {
+    if (['connection_reset', 'gateway_error', 'local_timeout', 'upstream_timeout', 'transport_timeout'].includes(summary.modelFailureKind)) {
         out.modelFailureKind = summary.modelFailureKind;
     }
     if (typeof summary.citationLocation === 'string' && /^第\s*\d+\s*页/.test(summary.citationLocation)) out.citationLocation = summary.citationLocation.slice(0, 80);
@@ -243,6 +246,9 @@ function usageDiagnosticsView(state, taskError) {
             ...(startedAt ? { startedAt } : {}),
             ...(Number.isFinite(durationMs) && durationMs >= 0 ? { durationMs } : {})
         };
+        for (const key of ['queueMs', 'providerMs']) {
+            if (Number.isSafeInteger(item[key]) && item[key] >= 0) base[key] = item[key];
+        }
         let summary = item.turnSummary && Object.keys(item.turnSummary).length ? sanitizeTurnSummary(item.turnSummary) : null;
         if (!summary) {
             const hasLaterSameStep = items.slice(index + 1).some(other => other.step === step);
@@ -259,6 +265,9 @@ function usageDiagnosticsView(state, taskError) {
             } else if (index === items.length - 1 && SAFE_ERROR_CODE.test(taskError?.code || '')) {
                 summary = sanitizeTurnSummary({ outcome: 'failed', errorCode: taskError.code });
             }
+        }
+        if (summary?.correctionKind === 'action_fields' && summary.rejectedFields?.length) {
+            summary.fieldMessage = fieldMessage(summary.actionType, summary.actionIndex, summary.rejectedFields);
         }
         return summary ? { ...base, ...summary } : base;
     });

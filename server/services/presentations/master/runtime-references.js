@@ -7,6 +7,10 @@ function normalizeRuntimeReads(actions, state) {
     const approvals = state.review.approvals;
     const project = state.managedProject || approvals?.design?.plan?.project || approvals?.template?.plan?.project;
     return actions.map(action => {
+        if (action?.action === 'read_runtime' && state.request?.template?.type === 'runtime'
+            && typeof action.path === 'string' && action.path.startsWith('selected-template/')) {
+            return { ...action, action: 'read' };
+        }
         if (action?.action !== 'read' || typeof action.path !== 'string' || !documentPath.test(action.path)) return action;
         if (project && action.path.startsWith(project + '/')) return action;
         return { ...action, action: 'read_runtime' };

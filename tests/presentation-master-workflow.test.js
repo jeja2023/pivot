@@ -190,7 +190,7 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
         { actions: [{ ...writePage, unsupported: '私有内容' }] },
         { actions: [
             { action: 'read', path: project + '/validation/text_calibration.json' },
-            { action: 'write', path: spec, content: '设计规范', offset: 0, description: '只用于显示' },
+            { action: 'write', file_path: spec, content: '设计规范', encoding: 'UTF-8', append: false, offset: 0, description: '只用于显示' },
             { action: 'write', path: lock, text: '错误执行锁' },
             writePage
         ] },
@@ -205,6 +205,8 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
         callModel: async (_model, messages) => {
             if (replies.length === 4) {
                 assert.match(messages[0].content, /第 1 项 write 含不支持的参数/);
+                assert.match(messages[0].content, /第4个键/);
+                assert.ok(messages[0].content.includes(require('../server/services/presentations/master/action-parameters').writeExample));
                 assert.doesNotMatch(messages[0].content, /私有内容/);
             }
             if (replies.length === 3) assert.match(messages[0].content, /执行锁的结构/);
@@ -221,6 +223,7 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
             assert.equal(action.content, undefined);
             assert.equal(action.description, undefined);
             assert.equal(action.offset, undefined);
+            if (action.action === 'write') assert.deepEqual(Object.keys(action).sort(), ['action', 'path', 'text']);
             return { path: action.path, sha256: createHash('sha256').update(action.text).digest('hex') };
         }
     });

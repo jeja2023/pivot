@@ -10,6 +10,44 @@ const { phaseMessages } = require('../server/services/presentations/master/phase
 const { estimateMessagesTokens } = require('../server/services/context-budget');
 const { usageDiagnosticsView } = require('../server/services/presentations/master/observations');
 
+test('制稿请求复用全文覆盖的指引与模板分页，未覆盖或不同版本的正文仍可见', async () => {
+    const { runModelTurn } = require('../server/services/presentations/master/model-turn');
+    const { normalizeRuntimeReads } = require('../server/services/presentations/master/runtime-references');
+    const state = referenceCheckpoint(0, 0);
+    const path = 'workflows/generate-pptx.md', templatePath = 'templates/styles/academic-research';
+    const full = '引导😀首段。' + '制稿第二段。'.repeat(500);
+    const templateText = '模板实际规范😀统一使用证据支持结论。';
+    const push = (role, value) => state.messages.push({ role, content: JSON.stringify(value) });
+    push('user', { runtimeDocument: path, text: full, offset: 0, nextOffset: null });
+    push('user', { selectedTemplateSpec: { path: templatePath, text: templateText } });
+    const page = (action, path, text, offset = 0) => ({ action, result: { path, text, offset, nextOffset: offset + Array.from(text).length } });
+    const batch = [
+        page('read_runtime', path, Array.from(full).slice(3, 16).join(''), 3),
+        page('read_runtime', path, '回读到不同的版本'),
+        page('read', 'selected-template/templates/design_spec.md', templateText),
+        page('read_runtime', templatePath + '/templates/design_spec.md', templateText)
+    ];
+    push('assistant', { actions: batch.map(({ action, result }) => ({ action, path: result.path, offset: result.offset })) });
+    push('user', batch);
+    Object.assign(state.request, { draftFirst: true, template: { type: 'runtime' } });
+    state.managedProject = 'demo';
+    state.review = { approvals: {} };
+    assert.deepEqual(normalizeRuntimeReads([{ action: 'read_runtime', path: batch[2].result.path, offset: 10 }], state),
+        [{ action: 'read', path: batch[2].result.path, offset: 10 }]);
+    const requests = [];
+    const run = () => runModelTurn({ id: 1 }, 'fixture', state, { context_window_tokens: 256000 },
+        { ensureCurrent: async () => {}, checkpoint: async () => {} },
+        { callModel: async (_model, messages) => { requests.push(JSON.parse(messages.at(-1).content)); return '{}'; } });
+    await run();
+    state.review.approvals.design = { plan: { project: 'demo' } };
+    await run();
+    assert.deepEqual(requests.map(items => items.map(entry => entry.result.text)), [
+        [batch[0].result.text, batch[1].result.text, undefined, undefined],
+        [undefined, batch[1].result.text, undefined, undefined]
+    ]);
+    assert.deepEqual(JSON.parse(state.messages.at(-1).content), batch);
+});
+
 function referenceCheckpoint(turns, pageLength) {
     const messages = [{ role: 'system', content: '原始制作指引' }, { role: 'user', content: '保留材料中的金额和来源' }];
     for (let index = 0; index < turns; index++) {
@@ -152,6 +190,7 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
     }
     for (const [error, code, kind] of [[upstream(), 'PPT_MASTER_UPSTREAM_CONTEXT_LIMIT'],
         [Object.assign(new Error('timeout of 120000ms exceeded'), { code: 'ECONNABORTED' }), 'PPT_MASTER_MODEL_TIMEOUT', 'local_timeout'],
+        [Object.assign(new Error('connect ETIMEDOUT'), { code: 'ETIMEDOUT', syscall: 'connect' }), 'PPT_MASTER_MODEL_TIMEOUT', 'transport_timeout'],
         [Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }), 'PPT_MASTER_MODEL_CONNECTION', 'connection_reset'],
         [Object.assign(new Error('Request failed'), { response: { status: 504 } }), 'PPT_MASTER_MODEL_TIMEOUT', 'upstream_timeout'],
         [Object.assign(new Error('Request failed'), { response: { status: 502 } }), 'PPT_MASTER_MODEL_CONNECTION', 'gateway_error'],
@@ -160,7 +199,11 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
         let calls = 0;
         await assert.rejects(drive({ id: 1 }, 'fixture', checkpoint, hooks, {
             resolveModel: async () => model,
-            callModel: async () => { calls++; throw error; },
+            callModel: async (_model, _messages, { usageRef }) => {
+                calls++;
+                Object.assign(usageRef, { providerStartedAt: 10, queueMs: 20, providerMs: 60 });
+                throw error;
+            },
             execute: async () => assert.fail('失败后不能执行动作')
         }), { code });
         assert.equal(calls, 1);
@@ -172,6 +215,7 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
         assert.equal(attempt.outcome, 'model_failed');
         assert.equal(attempt.errorCode, code);
         assert.equal(attempt.modelFailureKind, kind);
+        assert.deepEqual([attempt.queueMs, attempt.providerMs], [20, 60]);
         if (kind) assert.equal(checkpoint.focusModelHistory, true);
         assert.match(attempt.startedAt, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
         assert.ok(Number.isSafeInteger(attempt.durationMs) && attempt.durationMs >= 0);
@@ -180,19 +224,40 @@ test('供应商拒绝上下文时只在归档确实缩小请求后重试，超�
     }
 });
 
+test('PPT 完整制作的非流式请求使用平台完整请求时限，并按实际时限报告超时', async t => {
+    const axios = require('axios');
+    const { runModelTurn } = require('../server/services/presentations/master/model-turn');
+    const { AGENT_MODEL_REQUEST_TIMEOUT_MS } = require('../server/services/agent-model');
+    const current = referenceCheckpoint(0, 0);
+    const hooks = { signal: new AbortController().signal, ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const post = t.mock.method(axios, 'post', async (_url, _body, config) => {
+        throw Object.assign(new Error(`timeout of ${config.timeout}ms exceeded`), { code: 'ECONNABORTED' });
+    });
+    const model = { model_name: 'ppt-timeout-fixture', url: 'http://127.0.0.1:1/v1', context_window_tokens: 256000, max_tokens: 12000 };
+
+    const timeoutSeconds = Math.ceil(AGENT_MODEL_REQUEST_TIMEOUT_MS / 1000);
+    await assert.rejects(runModelTurn({ id: 1 }, 'fixture', current, model, hooks, {
+        messagesForModel: async () => current.messages
+    }), { code: 'PPT_MASTER_MODEL_TIMEOUT', message: new RegExp(`${timeoutSeconds} 秒`) });
+    assert.equal(post.mock.callCount(), 1);
+    const [, body, config] = post.mock.calls[0].arguments;
+    assert.equal(body.stream, false);
+    assert.equal(config.signal, hooks.signal);
+    assert.equal(config.timeout, AGENT_MODEL_REQUEST_TIMEOUT_MS);
+    assert.equal(current.modelRequest.timeoutSeconds, timeoutSeconds);
+    assert.equal(usageDiagnosticsView(current)[0].modelFailureKind, 'local_timeout');
+});
+
 test('超时和熔断保留续跑标记，256K 检查点整理后可以继续写入', async () => {
     const { drive } = require('../server/services/presentations/master/driver');
-    const { AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS } = require('../server/services/agent-model');
     const current = referenceCheckpoint(7, 4000);
     const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
     const requests = [], operations = [];
     const deps = {
         resolveModel: async () => ({ context_window_tokens: 256000, max_tokens: 12000 }),
-        callModel: async (_model, messages, options) => {
-            assert.equal(options.timeoutMs, undefined);
-            assert.equal(current.modelRequest.timeoutSeconds, Math.ceil(AGENT_MODEL_FIRST_RESPONSE_TIMEOUT_MS / 1000));
+        callModel: async (_model, messages) => {
             requests.push(estimateMessagesTokens(messages));
-            if (requests.length === 1) throw Object.assign(new Error('timeout of 300000ms exceeded'), { code: 'ECONNABORTED' });
+            if (requests.length === 1) throw Object.assign(new Error('模型响应超时。'), { code: 'ECONNABORTED' });
             if (requests.length === 2) throw Object.assign(new Error('模型端点暂时熔断。'), { code: 'AI_ENDPOINT_CIRCUIT_OPEN' });
             if (requests.length === 3) return { actions: [{ action: 'write', path: 'project/spec_lock.md', text: '方案正文' }] };
             return { complete: { path: 'project/exports/final.pptx' } };
@@ -302,6 +367,16 @@ test('已确认且同一项目的设计文件经校验回执后仅收起固定�
     const state = { request: { operation: 'generate', profile: 'default' }, confirmedGates: 1, messages: original,
         review: { approvals: { design: { plan: { project: 'project' } } } } };
     const result = phaseMessages(original, state), content = JSON.parse(result.messages[1].content).text;
+    const { fitReferenceMessages } = require('../server/services/presentations/master/reference-context');
+    const guide = 'workflows/generate-pptx.md', points = Array.from(text);
+    const pages = [0, 24000].map(offset => ({ role: 'user', content: JSON.stringify([{ action: 'read_runtime', result: {
+        path: guide, offset, text: points.slice(offset, offset + 24000).join(''), nextOffset: offset === 0 ? 24000 : null
+    } }]) }));
+    const fitted = fitReferenceMessages([...result.messages, ...pages], Infinity, result.ranges);
+    const reads = fitted.slice(-2).map(message => JSON.parse(message.content)[0].result);
+    assert.ok(reads.every(page => page.text === undefined));
+    assert.equal(reads.flatMap(page => page.uncovered || []).map(part => part.text).join(''),
+        text.slice(text.indexOf('### Step 1: Source Content Processing'), text.indexOf('### Step 4: Strategist Phase')));
     assert.match(content, /暂收起步骤1至3/);
     assert.match(content, /### Step 4: Strategist Phase/);
     assert.match(content, /### Step 6: Executor Phase/);

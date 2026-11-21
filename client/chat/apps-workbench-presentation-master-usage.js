@@ -22,13 +22,16 @@
         return seconds ? `${minutes} 分 ${seconds} 秒` : `${minutes} 分钟`;
     }
 
-    function timingLabel({ startedAt, durationMs }) {
+    function timingLabel({ startedAt, durationMs, queueMs, providerMs }) {
         const timestamp = typeof startedAt === 'string' ? startedAt.trim() : '';
         const time = timestamp.match(/\d{2}:\d{2}:\d{2}/)?.[0];
         const duration = formatDuration(durationMs) || '未记录';
+        const timings = [Number.isFinite(queueMs) && `排队 ${formatDuration(queueMs)}`,
+            Number.isFinite(providerMs) && `模型端点请求 ${formatDuration(providerMs)}`].filter(Boolean);
+        const detail = timings.length ? ' · ' + timings.join(' · ') : '';
         return {
-            text: `开始 ${time || '未记录'} · 用时 ${duration}`,
-            title: `开始时间（北京时间）：${time ? timestamp : '未记录'}\n用时：${duration}`
+            text: `开始 ${time || '未记录'} · 用时 ${duration}${detail}`,
+            title: `开始时间（北京时间）：${time ? timestamp : '未记录'}\n用时：${duration}${detail}`
         };
     }
 
@@ -44,13 +47,14 @@
 
     function formatModelError(code, kind) {
         const detail = { connection_reset: '模型连接提前关闭，未收到完整回复', gateway_error: '模型服务或上游网关返回服务器错误',
-            local_timeout: '模型请求达到 Pivot 的等待时限', upstream_timeout: '上游模型网关返回 HTTP 504' };
+            local_timeout: '模型请求达到 Pivot 的等待时限', upstream_timeout: '上游模型网关返回 HTTP 504',
+            transport_timeout: '模型请求在连接或传输过程中超时' };
         const reason = Object.hasOwn(MODEL_ERROR_REASONS, code) ? MODEL_ERROR_REASONS[code] : '模型调用未完成';
         return (detail[kind] || reason) + '。';
     }
 
     function preparationDiagnostic(item) {
-        if (item.correctionKind === 'action_fields') return `同批第 ${item.actionIndex} 项制作动作含不支持的参数（${item.actionType}）。`;
+        if (item.correctionKind === 'action_fields') return item.fieldMessage || `同批第 ${item.actionIndex} 项制作动作含不支持的参数（${item.actionType}）。`;
         const project = (item.actions || []).find(entry => entry.projectIssues?.length);
         if (project) {
             const labels = { design: '设计规范', lock: '执行锁', communication: '沟通字段', layout: '模板版式或资源引用', other: '项目结构' };

@@ -39,6 +39,13 @@ function signature(files) {
     return specNames.every(name => files[name]) ? specNames.map(name => files[name]).join(':') : '';
 }
 
+function deterministicSpecFailure(result) {
+    if (result?.exitCode !== 1 || result.truncated || result.stderr?.trim()) return false;
+    const errors = /(?:^|\n)\[ERROR\]\s*\r?\n([\s\S]*?)(?=\r?\n\s*\[|$)/.exec(result.stdout || '')?.[1]?.trim();
+    return Boolean(errors) && errors.split(/\r?\n/).every(line =>
+        /^\s*-\s+(?:spec_lock|design_spec)\.md schema: (?:unknown section|missing section|duplicate section)\b/i.test(line));
+}
+
 function specName(action, project) {
     return action?.action === 'write' && specNames.find(name => action.path === project + '/' + name);
 }
@@ -49,7 +56,12 @@ function receiptFor(prep, action, observation, project) {
     if (write) prep.files[name] = write.sha256;
     else if (isProjectValidation(action, project) && action.args.length === 2 && signature(prep.files) && observation) {
         const kinds = observation.projectIssues || projectIssueKinds(observation.result);
-        prep.validation = { signature: signature(prep.files), exitCode: observation.result?.exitCode ?? null, kinds };
+        prep.validation = { signature: signature(prep.files), exitCode: observation.result?.exitCode ?? null, kinds,
+            cacheable: deterministicSpecFailure(observation.result) || observation.result?.cachedSpecFailure === true };
+    } else if ((['write', 'copy', 'copy_template'].includes(action.action) && action.path?.startsWith(project + '/')
+        && !action.path.startsWith(project + '/svg_output/')) || (action.action === 'run'
+            && (['apply_template', 'import_template', 'import_native', 'icon_sync'].includes(action.tool) || action.tool === 'project' && action.args?.[0] === 'import-sources'))) {
+        delete prep.validation;
     }
 }
 
@@ -123,8 +135,8 @@ function requireValidatedProject(state, action) {
 function previousProjectFailure(state, action) {
     const prep = preparationFor(state);
     if (!prep || !isProjectValidation(action, state.managedProject) || action.args.length !== 2
-        || prep.validation?.signature !== signature(prep.files) || !prep.validation?.exitCode) return null;
-    return { exitCode: prep.validation.exitCode, projectIssues: prep.validation.kinds,
+        || prep.validation?.signature !== signature(prep.files) || !prep.validation?.cacheable || !prep.validation.exitCode) return null;
+    return { exitCode: prep.validation.exitCode, projectIssues: prep.validation.kinds, cachedSpecFailure: true,
         message: '规范文件摘要未变化，已沿用上次失败结果。请按上次执行器回执改正字段后再校验。' };
 }
 
@@ -138,7 +150,7 @@ function projectPreparationGuidance(state) {
     if (!prep || prep.validation?.exitCode === 0 && prep.validation.signature === signature(prep.files)) return '';
     const detail = projectIssueText(prep.validation?.kinds);
     return detail
-        ? '上次项目校验：' + detail + '。按最近一次 project validate 回执的具体错误修正对应规范，保留已登记的页数、标题和内容。文件更改后宿主自动复检。'
+        ? '上次项目校验：' + detail + '。按执行器回执核对规范、引用文件和运行状态，修正后重新执行 project validate。'
         : signature(prep.files) && prep.validation?.exitCode === null
             ? '上次项目校验没有取得执行器结果。按工具回执排查连接或参数，使用 project validate 和当前项目目录重试。'
             : '先写入完整 design_spec.md 和 spec_lock.md。按真实运行包模板的 schema 首行、字段和值域编写。宿主在两份规范可用后执行 project validate，通过后再写 SVG。';
