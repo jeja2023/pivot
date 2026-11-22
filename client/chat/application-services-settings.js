@@ -1,5 +1,5 @@
 /* 应用服务配置目录，复用各服务既有配置和测试入口。 */
-/* global API_BASE, apiFetch, PivotSafeHtml, escapeHtml, isSuperAdminUser */
+/* global API_BASE, apiFetch, PivotSafeHtml, escapeHtml, isSuperAdminUser, showToast */
 (function () {
     'use strict';
     const byId = id => document.getElementById(id);
@@ -11,8 +11,9 @@
         const ready = engine ? engine.available === true : null, manager = isSuperAdminUser();
         const address = manager ? ocr.serviceUrl || '未配置服务地址' : ocr.configured || ocr.serviceUrl ? '********' : '未配置服务地址';
         const status = ready === true ? '服务可用' : ready === false ? '服务未就绪，请测试连接或检查运行状态' : '已保存的连接将在识别时使用';
+        const vlStatus = ocr.vlServiceUrl || ocr.vlConfigured ? '文档解析（VL）已配置' : '文档解析（VL）未配置';
         return `<article class="retrieval-model-service-card ${ready === true ? 'is-ready' : ready === false ? 'is-warning' : ''}">
-            <strong>OCR识别服务</strong><span title="${escapeHtml(address)}">${escapeHtml(address)}</span><small>${escapeHtml(status)}</small>
+            <strong>OCR识别服务</strong><span title="${escapeHtml(address)}">${escapeHtml(address)}</span><small>${escapeHtml(status)} · ${vlStatus}</small>
             <div class="retrieval-model-service-actions">${manager ? '<button class="btn-secondary" type="button" data-retrieval-model-test="ocr">测试</button><button class="btn-secondary" type="button" data-retrieval-model-config-open="ocr">配置</button>' : '<small>由系统admin账号统一维护</small>'}</div></article>`;
     }
     const services = [
@@ -37,8 +38,45 @@
     function renderFromSettings(value = {}) {
         settings = { ...settings, ...value };
         if (value.ocrConfig) window.Pivot.ocrConfig = value.ocrConfig;
-        if (value.ocrEngineStatus) window.Pivot.ocrEngineStatus = value.ocrEngineStatus;
+        if (Object.hasOwn(value, 'ocrEngineStatus')) window.Pivot.ocrEngineStatus = value.ocrEngineStatus;
         render(value);
+    }
+
+    async function saveOcrSettings(button, close) {
+        const status = byId('setting-ocr-save-status');
+        const setStatus = (message, tone) => {
+            if (!status) return;
+            status.className = `model-modal-desc retrieval-config-status ${tone}`;
+            status.textContent = message;
+        };
+        const serviceUrl = byId('setting-ocr-service-url').value.trim();
+        const vlServiceUrl = byId('setting-ocr-vl-service-url')?.value.trim() || '';
+        const label = button.textContent;
+        button.disabled = true;
+        button.textContent = '保存中…';
+        setStatus('正在保存 OCR 服务地址…', 'is-loading');
+        let saved;
+        try {
+            const response = await apiFetch(`${API_BASE}/settings/ocr`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceUrl, vlServiceUrl }) });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.settings) throw new Error(data.error || 'OCR 服务保存失败，请重试。');
+            saved = data.settings;
+        } catch (error) {
+            const message = error.code === 'CLIENT_REQUEST_TIMEOUT'
+                ? '保存请求超时，请刷新应用服务确认地址是否已保存。'
+                : error.message || 'OCR 服务保存失败，请重试。';
+            setStatus(message, 'is-error');
+            showToast(message, 'error');
+            return;
+        } finally {
+            button.disabled = false;
+            button.textContent = label;
+        }
+        const ocrEngineStatus = saved.serviceUrl === window.Pivot.ocrConfig?.serviceUrl ? window.Pivot.ocrEngineStatus : null;
+        if (status) status.textContent = '';
+        close();
+        showToast('OCR 识别服务配置已保存', 'success');
+        renderFromSettings({ ocrConfig: saved, ocrEngineStatus });
     }
     function leave() { ++sequence; controller?.abort(); controller = null; }
     async function load() {
@@ -64,5 +102,5 @@
             if (current() && status?.engines && settings.ocrConfig?.serviceUrl === data.ocrConfig?.serviceUrl) renderFromSettings({ ocrEngineStatus: status.engines });
         } catch (error) { if (!signal.aborted && current()) throw error; }
     }
-    window.Pivot.exposeModule('settings.applicationServices', { load, leave, renderFromSettings });
+    window.Pivot.exposeModule('settings.applicationServices', { load, leave, renderFromSettings, saveOcrSettings });
 })();

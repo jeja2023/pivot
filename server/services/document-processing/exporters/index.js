@@ -6,7 +6,7 @@ const XLSX = require('@e965/xlsx');
 const { queryOne } = require('../../../db/client');
 const { getBeijingTimestamp } = require('../../../time');
 const { getAppSettingValue } = require('../../app-settings');
-const { OUTPUT_TYPES } = require('../constants');
+const { OCR_MODES, OUTPUT_TYPES } = require('../constants');
 const { buildManagedPath, outputsRoot, resolveStoredDocumentPath, toProjectRelativePath } = require('../paths');
 
 function escapeHtml(value) {
@@ -127,8 +127,30 @@ function pagesToText(pages = []) {
         .trim();
 }
 
-function buildMarkdown({ file, text }) {
+function literalMarkdown(value) {
+    return String(value ?? '').replace(/([\\`*_{}\[\]()#+.!|~$=-])/g, '\\$1')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function buildMarkdown({ file, text, job = {}, pages = [] }) {
     const title = baseName(file?.original_name || file?.originalName || 'ocr-result');
+    const config = safeParseJson(job.config_json, job.config || {});
+    if (config.ocrMode === OCR_MODES.VL) {
+        const sections = pages.map((page, index) => {
+            const result = safeParseJson(page.result_json, page.result || {});
+            const pageNumber = Number(page.page_number || page.pageNumber || index + 1);
+            const state = page.processing_state || page.processingState || page.ocr_status || page.ocrStatus;
+            const revised = (page.alignment_status || page.alignmentStatus) === 'unaligned';
+            let body = result.markdown;
+            if (state === 'failed') body = '本页解析失败。';
+            else if (revised) body = `> 本页已修订，以下为修订后的文本。\n\n${literalMarkdown(page.text || '')}`;
+            else if (!body) body = literalMarkdown(page.text || '') || '本页没有可导出的内容。';
+            return `## 第 ${pageNumber} 页\n\n${body}`;
+        });
+        const omitted = safeParseJson(job.omitted_pages_json, job.omittedPages || []);
+        const note = Array.isArray(omitted) && omitted.length ? `\n\n> 未解析页：${omitted.map(Number).filter(Number.isSafeInteger).join('、')}` : '';
+        return `# ${literalMarkdown(title)}${note}\n\n${sections.join('\n\n')}\n`;
+    }
     return ['# ' + title, '', String(text || '').trim()].join('\n').trim() + '\n';
 }
 
@@ -487,7 +509,7 @@ async function createTextOutputs({ userId, file, job, text = '', pages = [], blo
     const outputs = [];
     for (const format of formats) {
         if (format === OUTPUT_TYPES.MARKDOWN) {
-            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText }), ...outputMeta }));
+            outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildMarkdown({ file, text: finalText, job, pages }), ...outputMeta }));
         } else if (format === OUTPUT_TYPES.JSON) {
             outputs.push(await writeOutputFile({ userId, fileId: file.id, jobId: job.id, originalName: file.original_name, outputType: format, content: buildJson({ file, job, pages, blocks }), ...outputMeta }));
         } else if (format === OUTPUT_TYPES.HTML) {

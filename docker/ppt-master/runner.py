@@ -329,13 +329,14 @@ def capture_progress(request):
     return result
 
 
-def build_project_archive(request: dict, delivery: Path, *, include_exports=False):
+def build_project_archive(request: dict, delivery: Path, *, include_exports=False, entries=None):
     maximum = 120 * 1024 * 1024
     limit = request.get("sourceBundleLimit", maximum)
     if type(limit) is not int or not 1024 <= limit <= maximum:
         raise ValueError("项目源包交付上限无效。")
     target = delivery / "project.zip"
-    entries = inventory()
+    if entries is None:
+        entries = inventory()
     with tempfile.NamedTemporaryFile(dir=delivery, delete=False) as stream:
         temporary = Path(stream.name)
     try:
@@ -432,11 +433,27 @@ def deliver_presentation(request: dict) -> dict:
     report["currentExportSha256"] = content_hash
     delivery = WORKSPACE / "delivery"
     delivery.mkdir(exist_ok=True)
-    bundle = build_project_archive(request, delivery)
-    (delivery / "presentation.pptx").write_bytes(data)
+    entries = None if request.get("skipSourcePackage") is True else inventory()
+    with tempfile.NamedTemporaryFile(dir=delivery, delete=False) as stream:
+        temporary = Path(stream.name)
+        try:
+            stream.write(data)
+            stream.close()
+            temporary.replace(delivery / "presentation.pptx")
+        finally:
+            temporary.unlink(missing_ok=True)
+    source = {"sourcePackageUnavailable": True}
+    if entries is None:
+        source["sourcePackageUnavailableReason"] = "timeout"
+    else:
+        try:
+            bundle = build_project_archive(request, delivery, entries=entries)
+            if bundle:
+                source = {"projectPath": "delivery/project.zip", "projectSha256": bundle[0]}
+        except OSError:
+            source["sourcePackageUnavailableReason"] = "storage"
     if preservation is not None:
         report["preservation"] = {"sha256": repair["sha256"], "pages": sorted(preservation[1])}
-    source = {"projectPath": "delivery/project.zip", "projectSha256": bundle[0]} if bundle else {"sourcePackageUnavailable": True}
     return {"path": "delivery/presentation.pptx", **source, "sha256": content_hash, "byteSize": len(data), "packageCheck": report}
 
 
@@ -458,7 +475,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "deliveryChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "selectedTemplateRecovery": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "optionalSourcePackage": 1, "deliveryChecklist": 1, "checklistDisplayEquivalence": 1, "checklistGroupedValues": 1, "expandedChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "selectedTemplateRecovery": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action == "inspect_export":
         return inspect_export(request)

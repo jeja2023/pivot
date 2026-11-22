@@ -72,9 +72,30 @@ test('项目校验的临时读取错误可原样复检，模板文件变化会�
     assert.deepEqual(pendingProjectValidation(state).actions, [action]);
 });
 
+test('旧检查点沿用项目校验中可公开的节、字段和页码，省去重新运行或读取规范', () => {
+    const { previousProjectFailure, projectPreparationGuidance } = require('../server/services/presentations/master/project-preparation');
+    const action = { action: 'run', tool: 'project', args: ['validate', project] };
+    const result = { exitCode: 1, stdout: '[ERROR]\n'
+        + "  - design_spec.md schema: 'Slide 02 - 私有标题' is missing field 'Relationships'\n"
+        + '  - Communication trace: spec_lock.md ## communication is missing key line(s): audience, objective.\n'
+        + "  - spec_lock.md schema: section 'communication' field 'consumption_mode' has illegal value '禁止公开内容'\n" };
+    const state = { managedProject: project, request: { operation: 'generate', profile: 'default', draftFirst: true },
+        engine: { tools: ['project'] }, review: { approvals: { design: { plan: { project } } } },
+        projectPreparation: { files: { 'design_spec.md': 'a', 'spec_lock.md': 'b' },
+            validation: { signature: 'a:b', exitCode: 1, kinds: ['design', 'lock', 'communication'], cacheable: true } },
+        messages: [message('assistant', { actions: [action] }), message('user', [{ action: 'run', result }]),
+            message('assistant', { actions: [action] }), message('user', [{ action: 'run', result: { exitCode: 1, cachedSpecFailure: true } }])] };
+    const guidance = projectPreparationGuidance(state);
+    assert.match(guidance, /design_spec\.md 的 Slide 02 缺少 Relationships/);
+    assert.match(guidance, /spec_lock\.md 的 communication 缺少 audience、objective/);
+    assert.match(guidance, /spec_lock\.md communication 中的 consumption_mode 取值或格式不符合规范/);
+    assert.doesNotMatch(guidance, /私有标题|禁止公开内容/);
+    assert.deepEqual(previousProjectFailure(state, action).projectDetails, state.projectPreparation.validation.details);
+});
+
 test('小窗口通过模板预检后可从清单进入首轮制稿，目录中的规范预算与固定运行包相符', async t => {
     if (!await fs.access(path.join(skill, 'SKILL.md')).then(() => true, () => false)) return t.skip('未准备固定运行包');
-    const model = { id: 1, context_window_tokens: 65536, max_tokens: 8192, max_input_tokens: 42000 };
+    const model = { id: 1, context_window_tokens: 32768, max_tokens: 8192, max_input_tokens: 24000 };
     for (const entry of catalog) {
         const text = await readDoc(entry.path + '/templates/design_spec.md');
         const selectedTemplateSpec = { id: entry.id, path: entry.path, text, digest: sha(text) };
@@ -84,7 +105,7 @@ test('小窗口通过模板预检后可从清单进入首轮制稿，目录中�
         const state = { request, steps: 0, usedTokens: 0 };
         initializeReview(state);
         const preflight = await checkModel(user, request, { loadModel: async () => model, probeModel: async () => {} });
-        assert.equal(preflight.inputBudget, 42000);
+        assert.equal(preflight.inputBudget, 24000);
         // 以实际字数估算不可移出的输入，不能让模板和长任务要求挤掉清单。
         await assert.rejects(checkModel(user, { ...request, instruction: '中'.repeat(16000),
             materials: Array.from({ length: 20 }, (_, index) => ({ id: String(index), title: '材'.repeat(230) })) }, {
@@ -93,8 +114,9 @@ test('小窗口通过模板预检后可从清单进入首轮制稿，目录中�
         let calls = 0;
         const rule = text.match(/- \*\*Page Message Discipline\*\*: ([^\n.]+\.)/)[1];
         const { normalizeTemplateUse } = require('../server/services/presentations/master/template-application');
-        assert.throws(() => normalizeTemplateUse({ request, templateSpec: selectedTemplateSpec },
-            { templateUse: { page: 1, rule: 'Evidence Obligation', visibleText: '季度汇报' } }, [{ title: '季度汇报', values: [] }]));
+        assert.deepEqual(normalizeTemplateUse({ request, templateSpec: selectedTemplateSpec },
+            { templateUse: { page: 1, rule: 'Evidence Obligation', visibleText: '季度汇报' } }, [{ title: '季度汇报', values: [] }]),
+        { id: entry.id, digest: selectedTemplateSpec.digest });
         const result = await drive(user, 'fixture', state, { ensureCurrent: async () => {}, checkpoint: async () => {} }, {
             resolveModel: async () => model,
             callModel: async (_model, messages) => {
@@ -164,6 +186,14 @@ test('标题的业务断言须匹配同页已核实原文，普通年份与页�
     delete page.titleSource;
     page.values = [];
     assert.equal((await normalizeStage(stage, state, async () => '')).plan.pages[0].values.length, 0);
+    for (const title of ['ISO 9001 质量管理体系', '信息安全标准 ISO/IEC 27001:2022', '质量管理执行GB/T 19001-2016', '机型 A100-2 使用说明']) {
+        page.title = title;
+        assert.equal((await normalizeStage(stage, state, async () => '')).plan.pages[0].title, title);
+    }
+    for (const title of ['ISO 9001 认证成本35万元', '机型 A100 交付120台', '型号10台已交付', 'ISO 9001%增长']) {
+        page.title = title;
+        await assert.rejects(normalizeStage(stage, state, async () => ''), error => error.citationIssues?.[0]?.page === 1);
+    }
 });
 
 test('预检返回有界等待的专用诊断并释放请求，超时不登记为协议不兼容', async t => {
@@ -180,11 +210,26 @@ test('预检返回有界等待的专用诊断并释放请求，超时不登记�
         require('../server/services/agent-model').AGENT_MODEL_REQUEST_TIMEOUT_MS));
 });
 
+test('视觉预检接受完整围栏 JSON 与等义颜色，仍拒绝错误颜色', async t => {
+    const axios = require('axios');
+    const model = { id: 7782, model_name: 'preflight-vision', url: 'http://127.0.0.1:1/v1', context_window_tokens: 32768,
+        max_tokens: 8192, supports_vision: 1 };
+    let color = '红';
+    t.mock.method(axios, 'post', async () => ({ data: { choices: [{ message: {
+        content: '\x60\x60\x60json\n' + JSON.stringify({ result: 'PPT_MASTER_PREFLIGHT_V1', color }) + '\n\x60\x60\x60'
+    } }] } }));
+    const probe = () => checkModel({}, { modelId: '7782', operation: 'generate' }, { loadModel: async () => model, visionRequired: true });
+    await assert.rejects(probe(), { code: 'PPT_MASTER_MODEL_PREFLIGHT_FAILED' });
+    color = '蓝色';
+    assert.equal((await probe()).vision, true);
+});
+
 test('独立服务打包核对模板恢复与输入快照能力，支持已有镜像的预检', () => {
     const health = { serviceProtocol: 1, runtimeId: 'sha256:' + 'a'.repeat(64), deliveryChecklist: 1, currentExport: 1, pageRepair: 1,
-        progressSnapshots: 1, managedProject: 1, boundedSourceBundle: 1, selectedTemplateRecovery: 1, atomicInputSnapshots: 1 };
+        progressSnapshots: 1, managedProject: 1, boundedSourceBundle: 1, selectedTemplateRecovery: 1, atomicInputSnapshots: 1,
+        checklistDisplayEquivalence: 1, checklistGroupedValues: 1, optionalSourcePackage: 1, expandedChecklist: 1, startupHealthTimeoutSeconds: 300 };
     assert.doesNotThrow(() => assertServiceCapabilities(health));
-    for (const key of ['selectedTemplateRecovery', 'atomicInputSnapshots']) {
+    for (const key of ['selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist', 'startupHealthTimeoutSeconds']) {
         assert.throws(() => assertServiceCapabilities({ ...health, [key]: undefined }), new RegExp(key));
     }
 });

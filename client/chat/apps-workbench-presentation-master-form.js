@@ -239,6 +239,8 @@
         const supplementField = field('补充文字材料（可选）', 'material', 'textarea');
         supplementField.classList.add('presentation-master-material-field');
         sources.append(materialFiles, supplementField, fileField('原稿与图片、音视频', 'source', '.pptx,.png,.jpg,.jpeg,.webp,.wav,.mp3,.ogg,.mp4', '可选，支持 1 份原稿及最多 20 个补充素材。图片和音视频也可作为制作素材。', '支持 PPTX 原稿、图片 (PNG/JPG/WEBP)、音视频 (WAV/MP3/MP4)'));
+        const imagePurpose = field('补充图片用途', 'image-purpose', 'text', { evidence: '读取图片内容', decorative: '仅作排版素材' });
+        sources.appendChild(imagePurpose);
 
         columns.append(requirements, sources);
 

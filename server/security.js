@@ -325,7 +325,7 @@ function createSafeHttpAgents(options = {}) {
     };
 }
 
-async function assertSafeOutboundHost(hostname, options = {}) {
+function assertSafeOutboundHostname(hostname, options = {}) {
     if (process.env.ALLOW_SENSITIVE_OUTBOUND_URLS === 'true') return;
     const blockPrivate = options.blockPrivate === true;
     const allowExplicitLoopback = options.allowExplicitLoopback === true && isLoopbackHost(hostname);
@@ -337,7 +337,11 @@ async function assertSafeOutboundHost(hostname, options = {}) {
         throw buildUnsafeOutboundError();
     }
 
-    if (net.isIP(hostname)) return;
+}
+
+async function assertSafeOutboundHost(hostname, options = {}) {
+    assertSafeOutboundHostname(hostname, options);
+    if (process.env.ALLOW_SENSITIVE_OUTBOUND_URLS === 'true' || net.isIP(hostname)) return;
 
     let records = [];
     try {
@@ -352,10 +356,7 @@ async function assertSafeOutboundHost(hostname, options = {}) {
     }
 
     try {
-        records.forEach(record => assertSafeResolvedAddress(hostname, record.address, {
-            blockPrivate,
-            allowExplicitLoopback
-        }));
+        records.forEach(record => assertSafeResolvedAddress(hostname, record.address, options));
     } catch (e) {
         throw new Error('出站 URL 解析到敏感的本地、链路本地或云元数据地址。');
     }
@@ -707,6 +708,7 @@ module.exports = {
     assertSafeOutboundUrl,
     assertSafeMcpOutboundUrl,
     assertSafeOutboundHost,
+    assertSafeOutboundHostname,
     createSafeHttpAgents,
     createSafeHttpAgentsForUser,
     createSafeLookup,

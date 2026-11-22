@@ -783,7 +783,7 @@
     function mountTaskDiagnostics(panel, value, node) {
         if (value.workflowProgress?.goal && ['working', 'failed', 'expired'].includes(value.status)) {
             const { goal, calls, limit } = value.workflowProgress;
-            panel.appendChild(node('p', 'presentation-master-task-summary', `当前目标 ${goal}，本阶段已用 ${calls} / ${limit} 轮。`));
+            panel.appendChild(node('p', 'presentation-master-task-summary', `当前目标 ${goal}，本阶段已发起 ${calls} / ${limit} 次模型请求。`));
         }
         if (value.imageCoverage?.total) panel.appendChild(node('p', 'presentation-master-task-summary', `已发送 ${value.imageCoverage.read} / ${value.imageCoverage.total} 张图片给模型。`));
         if (value.actionRetries) {

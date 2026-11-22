@@ -10,7 +10,7 @@ const {
     refreshAppSettingsCache,
     setAppSettingAsync
 } = require('../services/app-settings');
-const { assertSafeOutboundUrl } = require('../security');
+const { assertSafeOutboundHostname, assertSafeOutboundUrl, getSafeOutboundOptionsForUser, validateModelUrl } = require('../security');
 const {
     RAG_CONFIG_KEYS,
     getPublicEmbeddingConfig,
@@ -63,8 +63,22 @@ const {
 const {
     getDocumentProcessingSettings,
     updateDocumentProcessingSettings,
-    getOcrEngineStatus
+    getOcrEngineStatus,
+    getOcrVlStatus
 } = require('../services/document-processing');
+const { OCR_MODES, normalizeOcrServiceUrl } = require('../services/document-processing/constants');
+
+function validateOcrSettingsUrl(value, user) {
+    try {
+        const url = normalizeOcrServiceUrl(value);
+        const parsed = validateModelUrl(url, user);
+        assertSafeOutboundHostname(parsed.hostname, getSafeOutboundOptionsForUser(user, { allowExplicitLoopbackForAdmin: true }));
+        return url;
+    } catch (error) {
+        error.status = 400;
+        throw error;
+    }
+}
 
 const allowedSettings = new Set([
     'default_model_id',
@@ -211,7 +225,9 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
             pptMasterConfig: await pptMasterSettings.publicConfig({ administrator: isSuperAdmin(req.user) }),
             ocrConfig: {
                 engine: ocrSettings.engine || 'http',
-                serviceUrl: ocrSettings.serviceUrl || ''
+                serviceUrl: ocrSettings.serviceUrl || '',
+                vlConfigured: Boolean(ocrSettings.vlServiceUrl),
+                ...(isSuperAdmin(req.user) ? { vlServiceUrl: ocrSettings.vlServiceUrl } : {})
             },
             uploadLimits: {
                 maxAttachmentsPerMessage: uploadRuntimeConfig.maxAttachmentsPerMessage,
@@ -268,29 +284,35 @@ function createSettingsRouter({ authMiddleware, adminMiddleware, logAction }) {
 
     router.put('/settings/ocr', authMiddleware, asyncHandler(async (req, res) => {
         if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '只有最高管理员可配置 OCR 识别服务' });
-        const { serviceUrl } = req.body || {};
-        if (serviceUrl) {
-            await assertSafeOutboundUrl(serviceUrl, req.user);
+        const body = req.body || {};
+        const patch = {};
+        for (const key of ['serviceUrl', 'vlServiceUrl']) {
+            if (!Object.hasOwn(body, key)) continue;
+            if (typeof body[key] !== 'string') return res.status(400).json({ error: 'OCR 服务地址格式不正确' });
+            const value = body[key].trim();
+            patch[key] = value ? validateOcrSettingsUrl(value, req.user) : '';
         }
         const updated = await updateDocumentProcessingSettings({
-            patch: { serviceUrl },
+            patch,
             userId: req.user.id
         });
-        logAction(req, '修改系统 OCR 识别服务设置', `服务地址: ${updated.serviceUrl}`);
-        return res.json({
-            success: true,
-            settings: updated,
-            engines: await getOcrEngineStatus()
-        });
+        logAction(req, '修改系统 OCR 识别服务设置', `文字识别${updated.serviceUrl ? '已配置' : '未配置'}，文档解析（VL）${updated.vlServiceUrl ? '已配置' : '未配置'}`);
+        return res.json({ success: true, settings: updated });
     }));
 
     router.post('/settings/ocr-test', authMiddleware, asyncHandler(async (req, res) => {
         const rawUrl = String(req.body?.serviceUrl || '').trim();
         const testOptions = {};
+        if (req.body?.ocrMode === OCR_MODES.VL && !isSuperAdmin(req.user)) {
+            return res.status(403).json({ error: '只有最高管理员可测试文档解析服务地址' });
+        }
         if (rawUrl && rawUrl !== '********') {
             if (!isSuperAdmin(req.user)) return res.status(403).json({ error: '权限不足：只有管理员可指定新的服务地址进行测试' });
-            await assertSafeOutboundUrl(rawUrl, req.user);
-            testOptions.serviceUrl = rawUrl;
+            testOptions.serviceUrl = validateOcrSettingsUrl(rawUrl, req.user);
+        }
+        if (req.body?.ocrMode === OCR_MODES.VL) {
+            const vl = await getOcrVlStatus(testOptions);
+            return res.json({ success: vl.available, message: vl.available ? '文档解析（VL）服务连接成功' : vl.error });
         }
         const engines = await getOcrEngineStatus(testOptions);
         const httpEngine = engines.http || {};

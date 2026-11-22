@@ -18,13 +18,29 @@ function createInspectionProgress(messages, phaseFrom = 0) {
     const restorations = new Map();
     const written = new Map();
     let visibleMessages, inspectionRounds = 0, repeatedRounds = 0, failedRounds = 0;
+    const failedChecks = new Map();
 
     function observe(actions, observations, historical = false) {
-        let productive = false, failed = false, repeated;
+        let productive = false, failed = false, failedCheck = false, projectImproved = false, repeated;
         for (const [index, observation] of observations.entries()) {
             const action = actions[index];
             if (!action || action.action !== observation?.action) continue;
-            if (failedObservation(observation)) { failed = true; continue; }
+            if (failedObservation(observation)) {
+                failed = true;
+                const key = action.tool === 'project' && action.args?.[0] === 'validate' ? JSON.stringify(action.args) : '';
+                const keys = observation.projectErrorKeys;
+                if (!historical && key && keys?.length) {
+                    const signature = digest(keys);
+                    const previous = failedChecks.get(key);
+                    projectImproved = Boolean(previous && keys.length < previous.keys.length && keys.every(value => previous.keys.includes(value)));
+                    failedCheck = true;
+                    failedChecks.set(key, { signature, keys, count: previous?.signature === signature ? previous.count + 1 : 1 });
+                }
+                continue;
+            }
+            if (!historical && action.tool === 'project' && action.args?.[0] === 'validate' && observation.result?.exitCode === 0) {
+                failedChecks.delete(JSON.stringify(action.args));
+            }
             if (isInspection(action) || !observation.result) continue;
             if (action.action === 'write') {
                 const receipt = confirmedWrite(action, observation);
@@ -44,7 +60,7 @@ function createInspectionProgress(messages, phaseFrom = 0) {
                 known.clear();
                 restorations.clear();
             }
-            return { progressed: true, productive };
+            return { progressed: true, productive, ...(failedCheck ? { failed } : {}) };
         }
         let foundNew = false;
         for (const [index, observation] of observations.entries()) {
@@ -83,7 +99,7 @@ function createInspectionProgress(messages, phaseFrom = 0) {
         }
         if (!historical) {
             inspectionRounds++;
-            failedRounds = failed ? failedRounds + 1 : 0;
+            failedRounds = failed && !projectImproved ? failedRounds + 1 : 0;
             repeatedRounds = failed || foundNew ? 0 : repeatedRounds + 1;
         }
         return { progressed: foundNew, productive, failed, repeated };
@@ -110,7 +126,7 @@ function createInspectionProgress(messages, phaseFrom = 0) {
         evaluate: observe,
         syncVisibleObservations,
         stalled: () => repeatedRounds >= 3,
-        failed: () => failedRounds >= 3,
+        failed: () => failedRounds >= 3 || [...failedChecks.values()].some(failure => failure.count >= 3),
         guidance() {
             if (failedRounds) return '最近的制作操作执行失败。请根据工具回执修正参数或文件后重试；若缺少事实、文件或能力，请提出明确的补充问题。';
             if (inspectionRounds < 6 && !repeatedRounds) return '';

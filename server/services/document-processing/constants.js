@@ -31,11 +31,13 @@ const TEXT_LIKE_EXTENSIONS = new Set(['.txt', '.md', '.csv', '.json', '.html', '
 const OFFICE_EXTENSIONS = new Set(['.doc', '.docx', '.xls', '.xlsx', '.ofd']);
 
 const DEFAULT_OCR_SERVICE_URL = 'http://ocr-service:9100';
+const OCR_MODES = Object.freeze({ TEXT: 'text', VL: 'document_vl' });
 const { readTypedEnv } = require('../../config/env-registry');
 
 const DOCUMENT_PROCESSING_SETTING_KEYS = Object.freeze({
     engine: 'document_processing_ocr_engine',
     serviceUrl: 'document_processing_ocr_service_url',
+    vlServiceUrl: 'document_processing_ocr_vl_service_url',
     maxRenderPages: 'document_processing_max_render_pages',
     maxOcrPages: 'document_processing_max_ocr_pages',
     confidenceThreshold: 'document_processing_confidence_threshold',
@@ -114,6 +116,7 @@ module.exports = {
     JOB_STATUSES,
     JOB_TYPES,
     OFFICE_EXTENSIONS,
+    OCR_MODES,
     OUTPUT_TYPES,
     PDF_EXTENSIONS,
     TEXT_LIKE_EXTENSIONS,

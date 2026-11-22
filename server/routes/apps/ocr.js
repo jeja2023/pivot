@@ -2,6 +2,9 @@ const express = require('express');
 const { asyncHandler } = require('../../http');
 const { isSuperAdmin } = require('../../permissions');
 const { removeUploadedFile } = require('../../upload');
+const { OCR_MODES, isImageExtension, isPdfExtension } = require('../../services/document-processing/constants');
+const { requireOcrVlServiceUrl } = require('../../services/document-processing/ocr/vl');
+const path = require('path');
 const {
     cancelJob,
     getExportRequest,
@@ -43,8 +46,15 @@ function requireOcrAdmin(req, res) {
 }
 
 function readOcrConfig(body = {}, user = null) {
+    const ocrMode = body.ocrMode;
+    if (ocrMode !== undefined && !Object.values(OCR_MODES).includes(ocrMode)) {
+        const error = new Error('请选择有效的文档处理模式。');
+        error.status = 400;
+        throw error;
+    }
     return {
         language: body.language,
+        ocrMode,
         engine: isSuperAdmin(user) ? body.engine : undefined,
         dpi: body.dpi,
         maxRenderPages: body.maxRenderPages,
@@ -54,6 +64,26 @@ function readOcrConfig(body = {}, user = null) {
         timeoutMs: body.timeoutMs,
         password: body.password
     };
+}
+
+function readOcrUploadConfig(body, user, files) {
+    const config = readOcrConfig(body, user);
+    if (config.ocrMode !== OCR_MODES.VL) return config;
+    requireOcrVlServiceUrl();
+    if (files.some(file => {
+        const extension = path.extname(file.originalname || file.filename || '').toLowerCase();
+        return extension === '.gif' || (!isImageExtension(extension) && !isPdfExtension(extension));
+    })) {
+        const error = new Error('文档解析（VL）支持 PDF、PNG、JPG、WebP 和 BMP 文件。');
+        error.status = 400;
+        throw error;
+    }
+    return config;
+}
+
+function sendOcrUploadError(error, res) {
+    if (error.status !== 400 && error.code !== 'OCR_VL_NOT_CONFIGURED') throw error;
+    return res.status(error.status).json({ error: error.message, ...(error.code ? { code: error.code } : {}) });
 }
 
 function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
@@ -103,8 +133,10 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     router.post('/preflight', authMiddleware, uploadLimiter, receiveOcrFiles, asyncHandler(async (req, res) => {
         const files = Array.isArray(req.files) && req.files.length ? req.files : (req.file ? [req.file] : []);
         try {
-            const preflight = await preflightOcrUploads({ files, config: readOcrConfig(req.body || {}, req.user) });
+            const preflight = await preflightOcrUploads({ files, config: readOcrUploadConfig(req.body || {}, req.user, files) });
             return res.json({ preflight });
+        } catch (error) {
+            return sendOcrUploadError(error, res);
         } finally {
             await Promise.all(files.map(file => removeUploadedFile(file)));
         }
@@ -124,7 +156,13 @@ function createOcrRouter({ authMiddleware, uploadLimiter, upload, logAction }) {
     router.post('/jobs', authMiddleware, uploadLimiter, receiveOcrFiles, asyncHandler(async (req, res) => {
         const files = Array.isArray(req.files) && req.files.length ? req.files : (req.file ? [req.file] : []);
         if (!files.length) return res.status(400).json({ error: '请上传图片或 PDF 文件' });
-        const config = readOcrConfig(req.body || {}, req.user);
+        let config;
+        try {
+            config = readOcrUploadConfig(req.body || {}, req.user, files);
+        } catch (error) {
+            await Promise.all(files.map(file => removeUploadedFile(file)));
+            return sendOcrUploadError(error, res);
+        }
         if (files.length > 1) {
             const batch = await createOcrBatchFromUploads({
                 user: req.user,

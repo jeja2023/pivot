@@ -1,4 +1,5 @@
 const http = require('./adapters/http');
+const { OCR_MODES } = require('../constants');
 
 const ADAPTERS = Object.freeze({
     http
@@ -62,11 +63,19 @@ async function getOcrEngineStatus(options = {}) {
     return Object.fromEntries(entries);
 }
 
+function getOcrVlStatus(options = {}) {
+    return http.checkAvailability({ ...options, ocrMode: OCR_MODES.VL });
+}
+
 async function getOcrCapabilities({ includeServiceUrl = false } = {}) {
-    const engines = await getOcrEngineStatus();
+    const [engines, vl] = await Promise.all([
+        getOcrEngineStatus(),
+        getOcrVlStatus()
+    ]);
     const active = engines[normalizeEngine()] || {};
     const response = {
         protocolVersion: '1',
+        modes: { [OCR_MODES.VL]: { configured: vl.configured === true, available: vl.available === true } },
         input: {
             formats: ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'bmp'],
             languages: ['ch', 'en', 'mixed'],
@@ -95,6 +104,7 @@ async function getOcrCapabilities({ includeServiceUrl = false } = {}) {
 
 module.exports = {
     getOcrEngineStatus,
+    getOcrVlStatus,
     getOcrCapabilities,
     normalizeEngine,
     recognizePage

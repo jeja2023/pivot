@@ -591,11 +591,15 @@ function openRetrievalModelConfigSection(section) {
     if (safeSection === 'ocr') {
         const input = document.getElementById('setting-ocr-service-url');
         if (input) input.value = window.Pivot?.ocrConfig?.serviceUrl || 'http://ocr-service:9100';
+        const vlInput = document.getElementById('setting-ocr-vl-service-url');
+        if (vlInput) vlInput.value = window.Pivot?.ocrConfig?.vlServiceUrl || '';
         const statusEl = document.getElementById('setting-ocr-test-status');
         if (statusEl) {
             statusEl.textContent = '';
             statusEl.className = 'model-modal-desc retrieval-config-status';
         }
+        const saveStatus = document.getElementById('setting-ocr-save-status');
+        if (saveStatus && !modal.querySelector('[data-retrieval-config-save="ocr"]')?.disabled) saveStatus.textContent = '';
     }
     setRetrievalModelModalVisibility(modal, true, { focusSelector: config.focusSelector });
     return true;
@@ -642,7 +646,10 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
     const config = RETRIEVAL_CONFIG_SECTIONS[section];
     const modal = document.getElementById(config.modalId);
     const saveBtn = modal?.querySelector(`[data-retrieval-config-save="${section}"]`);
-    if (!modal) return;
+    if (!modal || saveBtn?.disabled) return;
+    if (section === 'ocr') {
+        return window.Pivot.moduleApi('settings.applicationServices', {}).saveOcrSettings?.(saveBtn, () => setRetrievalModelModalVisibility(modal, false));
+    }
     if (saveBtn) saveBtn.disabled = true;
     try {
         const scoreInput = document.getElementById('setting-rag-score-threshold');
@@ -654,26 +661,6 @@ async function saveEmbeddingSettings(requestedSection = 'embedding') {
         if (section === 'policy') {
             updateRagChunkOverlapLimit();
             validateRagSettings();
-        }
-
-        if (section === 'ocr') {
-            const serviceUrlInput = document.getElementById('setting-ocr-service-url');
-            const serviceUrl = serviceUrlInput?.value.trim() || '';
-            const res = await apiFetch(`${API_BASE}/settings/ocr`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serviceUrl }) });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(data.error || 'OCR 服务保存失败');
-            window.Pivot.ocrConfig = data.settings || { serviceUrl, engine: 'http' };
-            if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
-            const currentSettings = await apiFetch(`${API_BASE}/settings`, { headers: authHeaders() }).then(r => r.json()).catch(() => ({}));
-            (window.Pivot.getModule?.('models.retrieval')?.renderRetrievalModelServices || window.Pivot.legacy.renderRetrievalModelServices)?.({
-                ...currentSettings,
-                ocrConfig: window.Pivot.ocrConfig,
-                ocrEngineStatus: window.Pivot.ocrEngineStatus
-            });
-            window.Pivot.moduleApi('settings.applicationServices', {}).renderFromSettings?.({ ocrConfig: window.Pivot.ocrConfig, ocrEngineStatus: window.Pivot.ocrEngineStatus });
-            showToast('OCR 识别服务配置已保存', 'success');
-            setRetrievalModelModalVisibility(modal, false);
-            return;
         }
 
         const payload = {};
@@ -832,40 +819,41 @@ async function testRerankConnection(options = {}) {
 }
 
 async function testOcrConnection(options = {}) {
-    const { fromCard = false } = options;
-    const rawUrl = document.getElementById('setting-ocr-service-url')?.value.trim() || '';
-    let serviceUrl = fromCard ? '' : (rawUrl === '********' ? '' : rawUrl);
+    const { fromCard = false, documentVl = false } = options;
+    const serviceLabel = documentVl ? '文档解析（VL）服务' : 'OCR 服务';
+    const rawUrl = document.getElementById(documentVl ? 'setting-ocr-vl-service-url' : 'setting-ocr-service-url')?.value.trim() || '';
+    const serviceUrl = fromCard || rawUrl === '********' ? '' : rawUrl;
     const statusEl = document.getElementById('setting-ocr-test-status');
-    if (!fromCard && !rawUrl) return showToast('请先填写 OCR 服务地址', 'error');
+    if (!fromCard && !rawUrl) return showToast(`请先填写${serviceLabel}地址`, 'error');
 
-    await runRetrievalTest(options, 'ocr-service-test-btn', async () => {
+    await runRetrievalTest(options, documentVl ? 'ocr-vl-service-test-btn' : 'ocr-service-test-btn', async () => {
         if (statusEl) {
             statusEl.className = 'model-modal-desc retrieval-config-status is-loading';
-            statusEl.textContent = '正在检测外部 OCR 服务连接，请稍候…';
+            statusEl.textContent = `正在检测${serviceLabel}连接，请稍候…`;
         }
-        showToast('正在检测 OCR 服务连接…', 'info');
+        showToast(`正在检测${serviceLabel}连接…`, 'info');
         try {
             const res = await apiFetch(`${API_BASE}/settings/ocr-test`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ serviceUrl })
+                body: JSON.stringify({ serviceUrl, ...(documentVl ? { ocrMode: 'document_vl' } : {}) })
             });
             const data = await res.json().catch(() => ({}));
             if (data.engines) window.Pivot.ocrEngineStatus = data.engines;
             if (!res.ok || data.success !== true) throw new Error(data.message || data.error || 'OCR 服务连接失败');
             if (statusEl) {
                 statusEl.className = 'model-modal-desc retrieval-config-status is-success';
-                statusEl.textContent = '连接成功：外部 OCR 服务状态正常，已支持 HTTP 识别接口。';
+                statusEl.textContent = `${serviceLabel}连接成功。`;
             }
-            showToast('OCR 服务连接成功', 'success');
-            updateRetrievalCardStatus('ocr', true, '服务可用 · 连通测试成功');
+            showToast(`${serviceLabel}连接成功`, 'success');
+            if (!documentVl) updateRetrievalCardStatus('ocr', true, '服务可用 · 连通测试成功');
         } catch (error) {
             if (statusEl) {
                 statusEl.className = 'model-modal-desc retrieval-config-status is-error';
                 statusEl.textContent = `连接失败：${error.message}`;
             }
             showToast(error.message || 'OCR 服务连接失败', 'error');
-            updateRetrievalCardStatus('ocr', false, `不可用：${error.message}`);
+            if (!documentVl) updateRetrievalCardStatus('ocr', false, `不可用：${error.message}`);
         }
     });
 }
@@ -875,6 +863,7 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     const testBtn = document.getElementById('rag-embedding-test-btn');
     const rerankTestBtn = document.getElementById('rag-rerank-test-btn');
     const ocrTestBtn = document.getElementById('ocr-service-test-btn');
+    const ocrVlTestBtn = document.getElementById('ocr-vl-service-test-btn');
     const fetchModelsBtn = document.getElementById('rag-embedding-fetch-models-btn');
     const embeddingModelSelect = document.getElementById('setting-rag-embedding-model-select');
     const embeddingModelInput = document.getElementById('setting-rag-embedding-model');
@@ -930,6 +919,7 @@ window.Pivot.legacy.bindEmbeddingModalEvents = function() {
     if (testBtn) testBtn.onclick = () => testEmbeddingConnection();
     if (rerankTestBtn) rerankTestBtn.onclick = () => testRerankConnection();
     if (ocrTestBtn) ocrTestBtn.onclick = () => testOcrConnection();
+    if (ocrVlTestBtn) ocrVlTestBtn.onclick = () => testOcrConnection({ documentVl: true });
     if (fetchModelsBtn) fetchModelsBtn.onclick = () => fetchEmbeddingModels();
     if (embeddingModelSelect) embeddingModelSelect.onchange = (e) => { if (embeddingModelInput && e.target.value) embeddingModelInput.value = e.target.value; };
     const bindPasswordToggle = (toggleId, inputId) => {

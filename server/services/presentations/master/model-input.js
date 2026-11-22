@@ -4,7 +4,8 @@ const sharp = require('sharp');
 const { modelSupportsVision } = require('../../models');
 const { MAX_IMAGE_UPLOAD_BYTES, MAX_IMAGE_INPUT_PIXELS, MAX_IMAGE_OUTPUT_BYTES, IMAGE_OUTPUT_SIZE, getMaxImagesPerMessage } = require('../../../image-safety');
 const runtime = require('./runtime');
-const imagePaths = state => (state.request.inputFiles || []).map(file => file.path).filter(path => /\.(?:png|jpe?g|webp)$/i.test(path || ''));
+const imagePaths = state => (state.request.inputFiles || []).filter(file => file.imageRole !== 'decorative')
+    .map(file => file.path).filter(path => /\.(?:png|jpe?g|webp)$/i.test(path || ''));
 const imageCoverage = state => {
     const paths = imagePaths(state), seen = new Set(state.seenImages || []);
     const nextOffset = paths.findIndex(path => !seen.has(path));

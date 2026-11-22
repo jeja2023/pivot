@@ -13,7 +13,7 @@ const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
 const csrf = async context => ({ 'x-csrf-token': (await context.cookies()).find(cookie => cookie.name === 'pivot_csrf_token')?.value });
 const post = async (page, url, data) => page.request.post(url, { headers: await csrf(page.context()), data });
 
-async function member(page, browser, models, engine = false) {
+async function member(page, browser, models, engine = false, modelLimits = {}) {
     expect((await post(page, '/api/auth/login', { username: 'admin', password: process.env.DEFAULT_ADMIN_PASSWORD })).ok()).toBeTruthy();
     if (engine) {
         const { config } = await (await page.request.get('/api/settings/ppt-master')).json();
@@ -35,7 +35,7 @@ async function member(page, browser, models, engine = false) {
     expect(created.ok(), await created.text()).toBeTruthy();
     for (const name of models) {
         const response = await post(page, '/api/models', { name, url: process.env.E2E_MODEL_URL, model_name: name,
-            scope: 'global', context_window_tokens: 256000, max_tokens: 16000 });
+            scope: 'global', context_window_tokens: 256000, max_tokens: 16000, ...modelLimits });
         expect(response.ok(), await response.text()).toBeTruthy();
     }
     const config = (await (await page.request.get('/api/models?limit=100')).json()).data;
@@ -57,10 +57,12 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
     test(name + '模板确认后自动修正错误金额，下载修订稿', async ({ page, browser }) => {
         test.setTimeout(240000);
         test.skip(!process.env.PIVOT_E2E_PPT_MASTER_SERVICE_URL, '需要本地独立 PPT Master 服务');
-        const { user, ids } = await member(page, browser, ['ppt-master-automatic-e2e-' + style], true);
+        const { user, ids } = await member(page, browser, ['ppt-master-automatic-e2e-' + style], true,
+            style === 'academic-research' ? { context_window_tokens: 32768, max_tokens: 8192 } : {});
         const info = await user.request.get(API + '/master/info');
         expect(info.ok()).toBeTruthy();
-        expect((await info.json()).engine).toMatchObject({
+        const engine = (await info.json()).engine;
+        expect(engine).toMatchObject({
             revision: engineLock.revision, version: engineLock.skillVersion, currentExportReady: true, pageRepairReady: true
         });
         await user.getByRole('button', { name: '模板库', exact: true }).click();
@@ -76,6 +78,11 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         await user.locator('#presentation-master-material').fill(fixture.pages.map(item => item.fact).join('\n'));
         await user.locator('#presentation-master-pages').fill('3');
         await user.locator('#presentation-master-model').selectOption(ids[0]);
+        if (style === 'consulting-decision') {
+            const logo = await require('sharp')({ create: { width: 64, height: 64, channels: 3, background: '#164bcc' } }).png().toBuffer();
+            await user.locator('#presentation-master-source').setInputFiles({ name: 'logo.png', mimeType: 'image/png', buffer: logo });
+            await user.getByLabel('补充图片用途').selectOption('decorative');
+        }
         const starting = user.waitForResponse(r => r.url().endsWith('/master/tasks') && r.request().method() === 'POST');
         await user.locator('#presentation-master-start').click();
         const started = await starting;
@@ -100,13 +107,29 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         const done = await read();
         expect(done.status, done.error?.message || done.inputRequest?.question).toBe('completed');
         expect(done.milestones.firstApproval).toBeUndefined();
+        if (style === 'consulting-decision') {
+            expect(done.imageCoverage).toEqual({ total: 0, read: 0, nextOffset: null });
+            const actions = done.usageDiagnostics.flatMap(item => item.actions || []);
+            const invalid = actions.findIndex(item => item.tool === 'project' && item.subcommand === 'validate' && item.failed);
+            expect(invalid).toBeGreaterThan(-1);
+            expect(actions[invalid].projectDetails).toEqual(expect.arrayContaining([
+                'design_spec.md 缺少节 visual_theme', 'spec_lock.md communication 中的 objective 缺失',
+                'design_spec.md 的 Slide 01 缺少 Audience move'
+            ]));
+            const listing = actions.findIndex((item, index) => index > invalid && item.action === 'list' && item.fileCount > 0 && !item.failed);
+            const valid = actions.findIndex((item, index) => index > listing && item.tool === 'project' && item.subcommand === 'validate' && !item.failed);
+            expect(listing).toBeGreaterThan(invalid);
+            expect(valid).toBeGreaterThan(listing);
+        }
         const fieldIssues = done.usageDiagnostics.filter(item => item.correctionKind === 'action_fields');
         expect(fieldIssues.map(issue => issue.outcome)).toEqual(style === 'academic-research' ? ['retry', 'failed'] : ['retry']);
         for (const issue of fieldIssues) expect(issue).toMatchObject({ actionType: 'write', actionIndex: 1,
             rejectedFields: ['encoding'], fieldMessage: expect.stringContaining('请移除或修正 encoding') });
         expect(done.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 3, preservation: {
             pages: [2], sha256: expect.stringMatching(/^[a-f0-9]{64}$/)
-        }, templateSpecDigest: expect.any(String), templateApplication: { page: 1, visibleText: title, styleReview: 'manual' } });
+        }, templateSpecDigest: expect.any(String), templateApplication: style === 'academic-research' ? { styleReview: 'manual' }
+            : { page: 1, visibleText: title, styleReview: 'manual' } });
+        if (style === 'academic-research') expect(done.result.checks.templateApplication.page).toBeUndefined();
         await expect(panel).toContainText('风格规则需人工复核');
         async function download(label) {
             const event = user.waitForEvent('download');
@@ -123,7 +146,14 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         expect(sha256(bytes)).toBe(done.result.checks.currentExportSha256);
         expect(sha256(bytes)).not.toBe(done.result.checks.preservation.sha256);
         const finalFile = await Zip.loadAsync(bytes);
-        expect(await finalFile.file('ppt/slides/slide1.xml').async('string')).toContain(title);
+        const first = await finalFile.file('ppt/slides/slide1.xml').async('string');
+        if (style === 'consulting-decision' && engine.checklistDisplayEquivalence) {
+            expect(first).toContain('收入已核定，');
+            expect(first).toContain('成本仍待复核');
+            expect(first).toContain('年度确认收入');
+            expect(first).toContain('1,205,000元');
+            if (engine.checklistGroupedValues) expect(first).not.toContain('年度确认收入1,205,000元');
+        } else expect(first).toContain(title);
         const repaired = await finalFile.file('ppt/slides/slide2.xml').async('string');
         expect(repaired).toContain('全年核定成本80.25万元');
         expect(repaired).not.toContain('全年核定成本90.25万元');
@@ -293,6 +323,7 @@ test('普通用户补充必要事实后，仍无法核对的引文用占位文�
     const result = await read();
     expect(result.draftCitationIssues).toEqual([expect.objectContaining({ page: 2, item: 1 })]);
     expect(result.result.checks).toMatchObject({ checkedPages: 3, checkedValues: 4 });
+    await expect(panel.getByText('1 页有 1 处待核对')).toBeVisible();
     const download = user.waitForEvent('download');
     await panel.getByRole('button', { name: '下载初稿（.pptx）' }).click();
     const file = await Zip.loadAsync(await fs.readFile(await (await download).path()));

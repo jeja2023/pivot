@@ -160,7 +160,7 @@ class Jobs:
                 raise ServiceError("输入快照不存在或过大。", 404)
             return file.read_bytes()
 
-    def execute(self, key, request_id, expected, operation):
+    def execute(self, key, request_id, expected, operation, *, startup_timeout=None):
         if not REQUEST.fullmatch(request_id) or expected != self.runtime_id:
             raise ServiceError("制作服务身份已变化，请重新查询并创建任务。", 409, "PPT_SERVICE_RUNTIME_CHANGED")
         if not isinstance(operation, dict) or operation.get("action") not in ACTIONS:
@@ -206,7 +206,7 @@ class Jobs:
                 try:
                     if (root / ("cancel-" + request_id)).exists():
                         self.kill(child)
-                    output, error = child.communicate(encoded, timeout=self.timeout)
+                    output, error = child.communicate(encoded, timeout=self.timeout if startup_timeout is None else startup_timeout)
                     if child.returncode and any(marker in error.decode('utf-8', errors='replace') for marker in ['Landlock', '目录隔离', '网络隔离', '隔离组件']):
                         raise ServiceError("动作隔离未能启用，请检查Linux内核Landlock及镜像libseccomp组件。", 503, "PPT_SERVICE_SANDBOX_UNAVAILABLE")
                     if len(output) > 1024**2 or child.returncode or self.stop.is_set() or (root / ("cancel-" + request_id)).exists():
@@ -222,6 +222,8 @@ class Jobs:
                 except subprocess.TimeoutExpired:
                     self.kill(child)
                     child.communicate()
+                    if startup_timeout is not None:
+                        raise ServiceError("执行器启动自检超时，请检查运行包所在磁盘的读取速度及容器资源。", 503, "PPT_SERVICE_STARTUP_TIMEOUT") from None
                     raise ServiceError("制作动作超时，请缩小任务后重试。", 504, "PPT_SERVICE_TIMEOUT") from None
                 finally:
                     self.kill(child)

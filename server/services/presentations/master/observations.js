@@ -132,6 +132,7 @@ function summarizeTurnAction(action, observation) {
         action: type,
         ...pageDiagnostics(observation),
         ...(Array.isArray(observation?.projectIssues) ? { projectIssues: observation.projectIssues.filter(kind => PROJECT_ISSUES.has(kind)) } : {}),
+        ...(observation?.projectDetails?.length ? { projectDetails: observation.projectDetails } : {}),
         ...(type === 'read' && observation?.result?.unavailable === true ? { unavailable: true } : {}),
         ...(tool ? { tool } : {}),
         ...(subcommand ? { subcommand } : {}),
@@ -194,7 +195,7 @@ function sanitizeTurnSummary(summary) {
     if (SAFE_ERROR_CODE.test(summary.errorCode || '')) out.errorCode = summary.errorCode;
     if (Number.isInteger(summary.exitCode) && summary.exitCode !== 0) out.exitCode = summary.exitCode;
     if (Number.isSafeInteger(summary.citationCount) && summary.citationCount > 0) out.citationCount = summary.citationCount;
-    if (Number.isSafeInteger(summary.citationPatchIgnored) && summary.citationPatchIgnored > 0) out.citationPatchIgnored = Math.min(120, summary.citationPatchIgnored);
+    if (Number.isSafeInteger(summary.citationPatchIgnored) && summary.citationPatchIgnored > 0) out.citationPatchIgnored = Math.min(480, summary.citationPatchIgnored);
     if (['citation_patch', 'plan_page_count', 'action_fields'].includes(summary.correctionKind)) out.correctionKind = summary.correctionKind;
     if (typeof summary.actionType === 'string' && Object.hasOwn(actionFields, summary.actionType)
         && Number.isInteger(summary.actionIndex) && summary.actionIndex >= 1 && summary.actionIndex <= 6) {
@@ -202,6 +203,13 @@ function sanitizeTurnSummary(summary) {
         out.actionType = summary.actionType;
         const rejected = publicFieldLabels(summary.rejectedFields);
         if (out.correctionKind === 'action_fields' && rejected.length) out.rejectedFields = rejected;
+    }
+    if (out.correctionKind === 'action_fields' && Array.isArray(summary.actionFieldIssues)) {
+        out.actionFieldIssues = summary.actionFieldIssues.slice(0, 6).flatMap(issue => {
+            if (!Number.isInteger(issue?.actionIndex) || issue.actionIndex < 1 || issue.actionIndex > 6
+                || !Object.hasOwn(actionFields, issue.actionType)) return [];
+            return [{ actionIndex: issue.actionIndex, actionType: issue.actionType, rejectedFields: publicFieldLabels(issue.rejectedFields) }];
+        });
     }
     if (['connection_reset', 'gateway_error', 'local_timeout', 'upstream_timeout', 'transport_timeout'].includes(summary.modelFailureKind)) {
         out.modelFailureKind = summary.modelFailureKind;
@@ -267,7 +275,8 @@ function usageDiagnosticsView(state, taskError) {
             }
         }
         if (summary?.correctionKind === 'action_fields' && summary.rejectedFields?.length) {
-            summary.fieldMessage = fieldMessage(summary.actionType, summary.actionIndex, summary.rejectedFields);
+            const issues = summary.actionFieldIssues?.length ? summary.actionFieldIssues : [summary];
+            summary.fieldMessage = issues.map(issue => fieldMessage(issue.actionType, issue.actionIndex, issue.rejectedFields)).join(' ');
         }
         return summary ? { ...base, ...summary } : base;
     });

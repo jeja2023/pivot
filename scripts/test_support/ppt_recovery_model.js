@@ -66,6 +66,32 @@ function master(messages, finish, citations = false, automatic = false) {
     });
     const request = observations.find(value => Array.isArray(value?.sources)) || { sources: [] };
     const next = fixture.turn(request, messages, assistant);
+    const consulting = automatic && observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-consulting-decision');
+    const academic = automatic && observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-academic-research');
+    if (academic && next.requestInput?.stage === 'design') delete next.requestInput.plan.templateUse;
+    const approvedPlan = designTurns.at(-1)?.requestInput.plan;
+    if (consulting && approvedPlan) {
+        const project = approvedPlan.project;
+        const designPath = project + '/design_spec.md', lockPath = project + '/spec_lock.md';
+        const spec = next.actions?.find(item => item.path === designPath);
+        const lock = next.actions?.find(item => item.path === lockPath);
+        if (spec && lock) {
+            spec.text = spec.text.replace('## III. Visual Theme', '## Visual Theme').replace(/^- \*\*Audience move\*\*:.*\n/m, '');
+            lock.text = lock.text.replace(/^- objective:.*\n/m, '');
+        } else if (system.includes('design_spec.md 缺少节 visual_theme') && system.includes('spec_lock.md communication 中的 objective 缺失')) {
+            const listed = observations.flat().find(item => item?.action === 'list' && item.result?.path === project);
+            if (!listed) return { actions: [{ action: 'list', path: project }] };
+            const files = listed.result.files.map(file => file.path);
+            if (!files.includes(designPath) || !files.includes(lockPath) || files.some(path => !path.startsWith(project + '/'))) {
+                throw new Error('任务目录盘点没有返回匹配目录的规范文件');
+            }
+            const pages = fixture.pages.map((page, index) => ({ ...page, title: approvedPlan.pages[index].title }));
+            return { actions: [
+                { action: 'write', path: designPath, text: fixture.spec(pages, approvedPlan.templateUse) },
+                { action: 'write', path: lockPath, text: fixture.lock() }
+            ] };
+        }
+    }
     if (citations && next.requestInput?.stage === 'design') {
         if (!assistant.some(turn => turn.requestInput?.kind === 'clarification')) {
             return { requestInput: { kind: 'clarification', question: '请补充项目预算及其单位。' } };
@@ -80,9 +106,16 @@ function master(messages, finish, citations = false, automatic = false) {
         else values.push(extra);
     }
     const firstPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_01.svg'));
+    if (consulting && firstPage && system.includes('需要分排标题时')) {
+        const amount = system.includes('拆排指标名和数值时')
+            ? '年度确认收入</text><text x="360" y="310" font-family="Noto Sans CJK SC" font-size="32" fill="#17324D">1,205,000元'
+            : '年度确认收入1,205,000元';
+        firstPage.text = firstPage.text.replace('y="128"', 'y="105"').replace('font-size="44"', 'font-size="36"')
+            .replace('收入已核定，成本仍待复核', '收入已核定，</text><text x="88" y="150" font-family="Noto Sans CJK SC" font-size="36" fill="#17324D">成本仍待复核')
+            .replace(fixture.pages[0].fact, amount);
+    }
     if (automatic && firstPage) {
         // 咨询模板在单次纠正后继续，学术模板模拟连续两次失败并经真实检查点续跑。
-        const academic = observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-academic-research');
         const resumed = messages.some(item => item.role === 'user' && typeof item.content === 'string'
             && item.content.startsWith('宿主中断后从已保存检查点继续。') && item.content.includes('上次回复在写入前被拒绝'));
         firstPage.encoding = (academic ? resumed : system.includes('请移除或修正 encoding')) ? 'UTF-8' : 'UTF-16LE';
@@ -90,9 +123,10 @@ function master(messages, finish, citations = false, automatic = false) {
     if (citations && firstPage) firstPage.text = firstPage.text.replace('</g></svg>',
         '<text x="128" y="375" font-family="Noto Sans CJK SC" font-size="32" fill="#17324D">' + budget + '</text></g></svg>');
     const secondPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_02.svg'));
-    // SVG 的同一个 text 对象内有完整数据，实际导出会拆开独立坐标的 tspan。
+    // SVG 内是完整文本，导出会拆成不同对象。核验不能把分开的数字拼回一个值。
     if (secondPage) secondPage.text = fixture.slide(fixture.pages[1]).replace(fixture.pages[1].fact,
-        '<tspan>全年核定成本</tspan><tspan x="280" y="362">80.25万元</tspan>');
+        '<tspan>全年核定成本80</tspan><tspan x="360" y="362">.25万元</tspan>');
+    if (consulting && firstPage && system.includes('请移除或修正 encoding') && system.includes('repairAction')) return { repairAction: firstPage };
     return next;
 }
 

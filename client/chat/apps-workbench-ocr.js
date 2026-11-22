@@ -2,6 +2,7 @@
     if (window.Pivot.legacy.PivotOcr?.ready) return;
 
     const API = '/api/apps/ocr';
+    const VL_MODE = 'document_vl';
     const state = {
         jobs: [],
         detail: null,
@@ -150,10 +151,11 @@
                             <input id="ocr-file-input" class="form-input" type="file" accept=".pdf,.ofd,.png,.jpg,.jpeg,.gif,.webp,.bmp" multiple required>
                         </label>
                         <div class="doc-tool-field-row">
-                            <label class="doc-tool-field ocr-engine-admin-only hidden">
-                                <span>识别引擎</span>
-                                <select id="ocr-engine-select" class="form-input">
-                                    <option value="http">外部 OCR 服务</option>
+                            <label class="doc-tool-field">
+                                <span>处理模式</span>
+                                <select id="ocr-mode-select" class="form-input" aria-describedby="ocr-mode-hint">
+                                    <option value="text">文字识别</option>
+                                    <option value="${VL_MODE}" disabled>文档解析（VL）</option>
                                 </select>
                             </label>
                             <label class="doc-tool-field">
@@ -165,6 +167,7 @@
                                 </select>
                             </label>
                         </div>
+                        <small id="ocr-mode-hint" class="retrieval-field-hint" aria-live="polite"></small>
                         <div class="doc-tool-field-row">
                             <label class="doc-tool-field">
                                 <span title="PDF 或多页文档渲染为图像时的清晰度（每英寸点数），默认 220">图像分辨率（DPI）</span>
@@ -307,6 +310,10 @@
         renderEngineConfigVisibility();
         const alertBox = document.getElementById('ocr-service-alert');
         if (!alertBox) return;
+        if (document.getElementById('ocr-mode-select')?.value === VL_MODE) {
+            alertBox.classList.add('hidden');
+            return;
+        }
         const entries = Object.entries(state.engines || {});
         if (!entries.length) {
             alertBox.classList.add('hidden');
@@ -366,7 +373,9 @@
         const offset = (state.page - 1) * state.limit;
         const showEngineConfig = canViewOcrEngineConfig();
         html.setHtml(tbody, state.jobs.map((item, index) => {
-            const engine = item.config?.engine || item.config?.ocrEngine || '-';
+            const vlJob = item.config?.ocrMode === VL_MODE;
+            const engine = vlJob ? '文档解析（VL）' : item.config?.engine || item.config?.ocrEngine || '-';
+            const fileTitle = [item.file?.originalName, vlJob ? '文档解析（VL）' : ''].filter(Boolean).join(' · ');
             const language = item.config?.language || item.config?.lang || '';
             const engineCell = showEngineConfig
                 ? `<td title="${esc([engine, language].filter(Boolean).join(' / '))}">${esc(engine)}${language ? '<span class="doc-tool-file-meta">' + esc(language) + '</span>' : ''}</td>`
@@ -374,7 +383,7 @@
             return `
                 <tr class="doc-tool-row ${String(item.id) === String(state.activeJobId) ? 'is-active' : ''}" data-ocr-job-id="${esc(item.id)}">
                     <td class="text-center">${offset + index + 1}</td>
-                    <td title="${esc(item.file?.originalName || '')}">
+                    <td title="${esc(fileTitle)}">
                         <strong class="doc-tool-file-title">${esc(item.file?.originalName || `任务 ${item.id}`)}</strong>
                         <span class="doc-tool-file-meta">${esc(item.file?.fileExt || '')} · ${formatBytes(item.file?.fileSize)}</span>
                     </td>
@@ -433,6 +442,7 @@
             return;
         }
         const job = detail.job;
+        const vlJob = job.config?.ocrMode === VL_MODE;
         setDetailHeader(detail);
         const page = activePage();
         const review = page ? reviewForPage(page.id) : null;
@@ -447,6 +457,7 @@
             <section class="ocr-detail-head">
                 <div>
                     <strong>${esc(detail.file?.originalName || `任务 ${job.id}`)}</strong>
+                    ${vlJob ? '<span>文档解析（VL）</span>' : ''}
                     <span class="doc-tool-badge ${statusTone(job.status)}">${statusLabel(job.status)}</span>
                     <span>${Number(job.progress || 0)}%</span>
                     ${coverage ? `<span class="ocr-coverage-summary">${esc(coverage)}</span>` : ''}
@@ -513,6 +524,7 @@
                     ${reviewViews.renderPagePreview(page)}
                 </div>
                 <div class="ocr-text-pane">
+                    ${vlJob ? `<div class="ocr-text-head"><strong>${page ? `第 ${page.pageNumber} 页排版` : '页面排版'}</strong></div><div id="ocr-vl-preview" class="ocr-vl-preview"></div>` : ''}
                     <div class="ocr-text-head">
                         <strong>${page ? `第 ${page.pageNumber} 页文本` : '页面文本'}</strong>
                         <span>${page?.textLength || 0} 字</span>
@@ -531,10 +543,12 @@
                 </div>
             </section>
         `);
+        if (vlJob) reviewViews.renderVlPreview(document.getElementById('ocr-vl-preview'), page);
     }
 
     function render() {
         renderEngines();
+        ocrActions.renderModes(VL_MODE);
         renderJobs();
         renderDetail();
         renderSettings();
@@ -576,6 +590,7 @@
         try {
             const data = await requestJson(`${API}/capabilities`);
             state.capabilities = data.capabilities || null;
+            ocrActions.renderModes(VL_MODE);
             const limit = Number(state.capabilities?.limits?.maxOcrPages || 0);
             const input = document.getElementById('ocr-pages-input');
             if (input && limit) {
@@ -587,6 +602,7 @@
             return state.capabilities;
         } catch (error) {
             state.capabilities = null;
+            ocrActions.renderModes(VL_MODE);
             return null;
         }
     }
@@ -631,7 +647,7 @@
         return data;
     }
 
-    async function submitUpload(form, suppliedFiles = null) {
+    async function submitUpload(form, suppliedFiles = null, { ocrMode } = {}) {
         const files = suppliedFiles ? Array.from(suppliedFiles) : Array.from(document.getElementById('ocr-file-input')?.files || []);
         if (!files.length) {
             toast('请选择文件', 'warning');
@@ -640,8 +656,8 @@
         const data = new FormData(form);
         data.delete('files');
         files.forEach(file => data.append('files', file));
-        if (canViewOcrEngineConfig()) data.set('engine', document.getElementById('ocr-engine-select')?.value || 'http');
-        else data.delete('engine');
+        const mode = ocrMode || document.getElementById('ocr-mode-select')?.value || 'text';
+        data.set('ocrMode', mode);
         data.set('language', document.getElementById('ocr-language-select')?.value || 'ch');
         data.set('dpi', document.getElementById('ocr-dpi-input')?.value || '220');
         data.set('maxRenderPages', document.getElementById('ocr-pages-input')?.value || '10');
@@ -667,9 +683,12 @@
             state.activeJobId = String(created.job?.id || '');
             state.activePageId = '';
             form.reset();
+            ocrActions.renderModes(VL_MODE);
+            renderEngines();
             document.getElementById('ocr-dpi-input').value = '220';
             document.getElementById('ocr-pages-input').value = '10';
-            toast(created.batch ? `已创建 ${created.batch.acceptedFiles} 个文字识别任务` : '文字识别任务已创建', 'success');
+            const label = mode === VL_MODE ? '文档解析（VL）' : '文字识别';
+            toast(created.batch ? `已创建 ${created.batch.acceptedFiles} 个${label}任务` : `${label}任务已创建`, 'success');
             await loadJobs({ keepActive: true });
         } finally {
             if (btn) {
@@ -786,7 +805,8 @@
                 state.page = 1;
                 loadJobs({ keepActive: false }).catch(e => toast(e.message || '任务加载失败', 'error'));
             }
-            if (event.target?.id === 'ocr-engine-select') {
+            if (event.target?.id === 'ocr-mode-select') {
+                ocrActions.renderModes(VL_MODE);
                 renderEngines();
             }
             if (event.target?.id === 'ocr-service-url-input') {

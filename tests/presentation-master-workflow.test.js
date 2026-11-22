@@ -5,13 +5,68 @@ const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const directory = '../server/services/presentations/master/';
 const { drive } = require(directory + 'driver');
-const { allocateWorkflowCall, prepareManagedProject } = require(directory + 'workflow-progress');
+const { workflowGuidance, progressFor, prepareManagedProject, recordFirstPageProgress } = require(directory + 'workflow-progress');
+const { runModelTurn } = require(directory + 'model-turn');
 const { createInspectionProgress } = require(directory + 'inspection-progress');
 const { recordCheck, requireChecks } = require(directory + 'tool-checks');
-const { normalizeStage } = require(directory + 'review-plan');
+const { requirePageSource, withFirstPageCheck, recordPageProof, requireAuthoringPages } = require(directory + 'authoring-pages');
+const { normalizeStage, recordDraftPlan } = require(directory + 'review-plan');
+const { validateTurn } = require(directory + 'actions');
 const { deliverWithRecovery } = require(directory + 'delivery-recovery');
 const runtime = require(directory + 'runtime');
 const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+
+test('新版执行器允许同组拆行标题和等值金额，隐藏、跨组和拼接数字仍不通过', () => {
+    const state = { managedProject: 'report', request: { operation: 'generate', profile: 'default', draftFirst: true },
+        engine: { tools: ['check_svg'], checklistDisplayEquivalence: 1 }, review: { approvals: { design: { plan: {
+            project: 'report', pages: [{ title: '2026经营复盘', values: [{ text: '年度收入80万元' }] }]
+        } } } } };
+    const verify = (title, value = '年度收入800,000元') => requirePageSource(state, { action: 'write', path: 'report/svg_output/slide_01.svg',
+        text: `<svg xmlns="http://www.w3.org/2000/svg">${title}<text>${value}</text></svg>` });
+    const split = '<g><text>2026经营</text>\n<text>复盘</text></g>';
+    assert.doesNotThrow(() => verify(split));
+    for (const title of ['<g><text>2026经营</text></g><g><text>复盘</text></g>', '<g><text>2026经营</text><text visibility="hidden">复盘</text></g>',
+        '<g><text>20</text><text>26经营复盘</text></g>']) assert.throws(() => verify(title), /完整标题/);
+    assert.throws(() => verify(split, '年度收入800,001元'), /第 1 项正文/);
+    const splitValue = '<g><text>年度收入</text><text>800,000元</text></g>';
+    const withValue = value => requirePageSource(state, { action: 'write', path: 'report/svg_output/slide_01.svg',
+        text: `<svg xmlns="http://www.w3.org/2000/svg">${split}${value}</svg>` });
+    assert.throws(() => withValue(splitValue), /第 1 项正文/);
+    state.engine.checklistGroupedValues = 1;
+    assert.doesNotThrow(() => withValue(splitValue));
+    for (const value of ['<g><text>年度收入</text></g><g><text>800,000元</text></g>',
+        '<g><text>年度收入</text><text opacity="0">800,000元</text></g>', '<g><text>年度收入80</text><text>0,000元</text></g>']) {
+        assert.throws(() => withValue(value), /第 1 项正文/);
+    }
+    delete state.engine.checklistDisplayEquivalence;
+    assert.throws(() => verify(split), /完整标题/);
+});
+
+test('首张正确复检覆盖临时失败，页序按上游文件名数字分段核对', () => {
+    const project = 'report', state = { managedProject: project, request: { operation: 'generate', profile: 'default', draftFirst: true },
+        engine: { tools: ['project', 'check_svg'] }, review: { approvals: { design: { plan: { project,
+            pages: Array.from({ length: 10 }, (_, index) => ({ title: '标题 ' + (index + 1), values: [] })) } } } } };
+    const write = (page, filename = `slide_${page}.svg`) => ({ action: 'write', path: project + '/svg_output/' + filename,
+        text: `<svg xmlns="http://www.w3.org/2000/svg"><text>标题 ${page}</text></svg>` });
+    const first = write(1);
+    requirePageSource(state, first);
+    const receipt = item => ({ action: 'write', result: { path: item.path, sha256: createHash('sha256').update(item.text).digest('hex') } });
+    recordPageProof(state, first, receipt(first));
+    const check = withFirstPageCheck(state, { actions: [first] }).actions[1];
+    recordPageProof(state, check, { action: 'run', error: '执行端临时失败' });
+    const passed = { action: 'run', result: { exitCode: 0 } };
+    recordPageProof(state, { ...check, args: [project, '--stage', 'page', '--page', 'slide_2.svg', '--canonical-authoring'] }, passed);
+    assert.throws(() => requirePageSource(state, write(2)), /第 1 页检查/);
+    recordPageProof(state, { ...check, args: [project, '--page', 'slide_1.svg', '--canonical-authoring', '--stage', 'page', '--json'] }, passed);
+    for (let page = 2; page <= 10; page++) {
+        const action = write(page);
+        requirePageSource(state, action);
+        recordPageProof(state, action, receipt(action));
+    }
+    assert.doesNotThrow(() => requireAuthoringPages(state, project));
+    assert.throws(() => requirePageSource(state, write(10, 'slide_010.svg')), /沿用已写入的文件名/);
+    assert.throws(() => requirePageSource(state, write(11)), /带页码/);
+});
 
 test('首案阶段持续读取不同指引仍在阶段上限暂停，续跑保留累计进度', async () => {
     const current = { request: { operation: 'generate', profile: 'default', inputFiles: [], maxSteps: 80, tokenBudget: 0 },
@@ -27,9 +82,9 @@ test('首案阶段持续读取不同指引仍在阶段上限暂停，续跑保�
     assert.ok(current.usedTokens > 0);
     assert.deepEqual(current.workflowProgress, { phase: 'design', calls: 18 });
     current.review.approvals.design = { plan: { project: 'draft' } };
-    assert.match(allocateWorkflowCall(current), /第一张页面 SVG/);
+    assert.match(workflowGuidance(current), /第一张页面 SVG/);
     current.milestones = { firstPageWrite: { steps: 13 } };
-    assert.equal(allocateWorkflowCall(current), '');
+    assert.equal(workflowGuidance(current), '');
 });
 
 test('只读图表检索不会重置制作阶段进展', () => {
@@ -61,7 +116,7 @@ test('首张页面阶段识别运行包资料，已有检查点的连续只读�
             calls++;
             if (calls === 1) return { actions: [{ action: 'read_runtime', path: 'references/modes/_index.md' }] };
             if (calls === 2) {
-                assert.match(messages[0].content, /已达到首张页面的连续只读轮次/);
+                assert.match(messages[0].content, /当前阶段目标/);
                 return { actions: [
                     { action: 'read', path: 'references/executor-base.md', offset: 24000 },
                     { action: 'write', path: source, text: '<svg/>' }
@@ -77,14 +132,14 @@ test('首张页面阶段识别运行包资料，已有检查点的连续只读�
     });
     await run({ id: 1 });
     assert.deepEqual(executed.map(({ action, path, offset }) => [action, path, offset]), [
+        ['read_runtime', 'references/modes/_index.md', undefined],
         ['read_runtime', 'references/executor-base.md', 24000], ['write', source, undefined]
     ]);
-    assert.equal(state.milestones.firstPageWrite.steps, 10);
-    assert.equal(state.firstPageInspectionRounds, undefined);
-    assert.equal(state.usageDiagnostics[0].turnSummary.errorCode, 'PPT_MASTER_AUTHORING_READ_LIMIT');
+    assert.equal(state.milestones.firstPageWrite.steps, 11);
+    assert.equal(state.usageDiagnostics[0].turnSummary.outcome, 'progressed');
 });
 
-test('不同指引的连续只读请求达到首张页面阈值后停止执行并保留检查点', async () => {
+test('不同的有效指引可继续读取，无阶段成果时仍有十六轮保护', async () => {
     const state = { bootstrapped: true, managedProject: 'report', steps: 0, usedTokens: 0,
         request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 80, tokenBudget: 0 },
         review: { approvals: { design: { plan: { project: 'report' } } } }, messages: [{ role: 'system', content: '测试' }] };
@@ -93,10 +148,81 @@ test('不同指引的连续只读请求达到首张页面阈值后停止执行�
         resolveModel: async () => ({ context_window_tokens: 256000 }),
         callModel: async () => ({ actions: [{ action: 'read_runtime', path: 'references/page-' + ++calls + '.md' }] }),
         execute: async (_user, _id, action) => { reads++; return { path: action.path, text: '指引', nextOffset: null }; }
-    }), { code: 'PPT_MASTER_AUTHORING_READ_LIMIT', message: /仍没有写入首张页面/ });
-    assert.equal(calls, 8);
-    assert.equal(reads, 6);
+    }), { code: 'PPT_MASTER_PHASE_LIMIT' });
+    assert.equal(calls, 16);
+    assert.equal(reads, 16);
     assert.equal(state.milestones?.firstPageWrite, undefined);
+});
+
+test('首张阶段只计已发起的模型请求，里程碑提供一次有界收尾机会', async () => {
+    const project = 'report';
+    const state = { managedProject: project, steps: 90, usedTokens: 123,
+        request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 160, tokenBudget: 0 },
+        review: { approvals: { design: { plan: { project } } } }, workflowProgress: { phase: 'first_page', calls: 15 },
+        messages: [{ role: 'system', content: '输入材料'.repeat(20000) }] };
+    const local = { context_window_tokens: 65536, max_input_tokens: 30000, max_tokens: 8000 };
+    let sent = 0;
+    const deps = { callModel: async () => { sent++; return {}; } };
+    await assert.rejects(runModelTurn({ id: 1 }, 'case', state, local, hooks, deps, workflowGuidance(state)), { code: 'PPT_MASTER_CONTEXT_LIMIT' });
+    assert.equal(sent, 0);
+    assert.equal(progressFor(state).calls, 15);
+    state.messages[0].content = '首张制作';
+    await runModelTurn({ id: 1 }, 'case', state, local, hooks, deps, workflowGuidance(state));
+    assert.equal(progressFor(state).calls, 16);
+    assert.throws(() => workflowGuidance(state), { code: 'PPT_MASTER_PHASE_LIMIT' });
+    state.projectPreparation = { files: { 'design_spec.md': 'a', 'spec_lock.md': 'b' } };
+    recordFirstPageProgress(state);
+    assert.equal(progressFor(state).limit, 20);
+    state.workflowProgress.calls = 19;
+    state.projectPreparation.files['spec_lock.md'] = 'c';
+    recordFirstPageProgress(state);
+    assert.equal(progressFor(state).limit, 20);
+    state.projectPreparation.validation = { signature: 'a:c', exitCode: 0 };
+    recordFirstPageProgress(state);
+    assert.equal(progressFor(state).limit, 23);
+});
+
+test('改写规范后校验仍报告同一问题，读取新资料不会掩盖重复失败', () => {
+    const progress = createInspectionProgress([]);
+    const { projectErrorKeys, projectValidationDetails } = require(directory + 'project-validation-diagnostics');
+    const validate = { action: 'run', tool: 'project', args: ['validate', 'report'] };
+    for (const [i, sections] of [['a','b','c'], ['b','c'], ['c'], ['c'], ['c']].entries()) {
+        const write = { action: 'write', path: 'report/spec_lock.md', text: '修订 ' + i };
+        const result = { exitCode: 1, stdout: '[ERROR]\n' + sections.map(section => "  - spec_lock.md schema: unknown section '" + section + "'").join('\n') };
+        progress.evaluate([write, validate], [{ action: 'write', result: { path: write.path, sha256: createHash('sha256').update(write.text).digest('hex') } },
+            { action: 'run', error: '校验未通过', projectDetails: projectValidationDetails(result), projectErrorKeys: projectErrorKeys(result), result }]);
+        assert.equal(progress.failed(), i === 4);
+        if (i < 2) progress.evaluate([{ action: 'list' }], [{ action: 'list', result: { files: [{ path: '目录' + i }] } }]);
+    }
+    assert.equal(progress.failed(), true);
+    progress.evaluate([validate], [{ action: 'run', result: { exitCode: 0 } }]);
+    assert.equal(progress.failed(), false);
+});
+
+test('末步成功导出后宿主直接核验交付，仍检查回执且不额外消耗步骤', async () => {
+    const project = 'report', path = project + '/exports/final.pptx';
+    for (const verified of [true, false]) {
+        const state = { bootstrapped: true, steps: 4, usedTokens: 0, engine: { tools: ['export'] }, messages: [],
+            request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 5, tokenBudget: 0 }, review: { approvals: {} } };
+        recordDraftPlan(state, { project, summary: '汇报', pages: [{ title: '首页', values: [] }] });
+        const operations = [];
+        const execution = drive({ id: 1 }, 'case', state, hooks, {
+            resolveModel: async () => ({ context_window_tokens: 32768 }),
+            callModel: async () => ({ actions: [{ action: 'run', tool: 'export', args: [project, '-o', path] }] }),
+            execute: async (_user, _id, action) => {
+                operations.push(action.tool || action.action);
+                if (action.action === 'run') return { exitCode: 0, progressExport: path };
+                assert.equal(action.path, path);
+                return { packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 0,
+                    checklistDigest: verified ? require(directory + 'review-plan').exportReview(state, project).checklistDigest : 'stale' } };
+            }
+        });
+        if (verified) assert.ok((await execution).receipt);
+        else await assert.rejects(execution, { code: 'PPT_MASTER_CHECKLIST_UNVERIFIED' });
+        assert.deepEqual(operations, ['export', 'deliver']);
+        assert.equal(state.steps, 5);
+        assert.equal(state.usageDiagnostics.length, 1);
+    }
 });
 
 test('首张 SVG 先核对可见文字再走执行器版式检查，失败会拦住同批后续页', async () => {
@@ -186,15 +312,17 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
         messages: [{ role: 'system', content: '测试' }] };
     const writePage = { action: 'write', path: page, text: '<svg xmlns="http://www.w3.org/2000/svg"><text>首页</text></svg>' };
     const validate = { action: 'run', tool: 'project', args: ['validate', project] };
+    const copy = { action: 'copy', source: 'selected-template/templates/cover.svg', path: project + '/templates/cover.svg' };
     const replies = [
         { actions: [{ ...writePage, unsupported: '私有内容' }] },
         { actions: [
             { action: 'read', path: project + '/validation/text_calibration.json' },
             { action: 'write', file_path: spec, content: '设计规范', encoding: 'UTF-8', append: false, offset: 0, description: '只用于显示' },
             { action: 'write', path: lock, text: '错误执行锁' },
+            copy,
             writePage
         ] },
-        { actions: [validate, writePage] },
+        { actions: [{ action: 'list', path: project }, validate, writePage] },
         { actions: [{ action: 'write', path: lock, text: '修好的执行锁' }, writePage] },
         { requestInput: { kind: 'clarification', question: '验收完成' } }
     ];
@@ -209,14 +337,26 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
                 assert.ok(messages[0].content.includes(require('../server/services/presentations/master/action-parameters').writeExample));
                 assert.doesNotMatch(messages[0].content, /私有内容/);
             }
-            if (replies.length === 3) assert.match(messages[0].content, /执行锁的结构/);
+            if (replies.length === 3 || replies.length === 2) {
+                assert.match(messages[0].content, /spec_lock\.md communication 中的 objective 缺失/);
+                assert.match(messages[0].content, /templates\/scaffolds\/spec_lock\.md/);
+                assert.doesNotMatch(messages[0].content, /客户私有章节/);
+            }
             return replies.shift();
         },
         execute: async (_user, _id, action) => {
-            ran.push(action.path || action.tool);
+            ran.push(action.path || action.tool || action.action);
             if (action.action === 'read') throw runtime.error('任务文件不存在。', 'PPT_MASTER_OPERATION_FAILED', 422);
+            if (action.action === 'list') {
+                assert.deepEqual(action, { action: 'list' });
+                return { files: [{ path: lock, bytes: 40 }, { path: 'report-other/spec_lock.md', bytes: 80 }] };
+            }
+            if (action.action === 'copy') return { path: action.path, bytes: 320 };
             if (action.tool === 'project') {
-                if (++validations === 1) return { exitCode: 1, stdout: 'Project validation\n[ERROR]\n  - spec_lock.md schema: unknown section\n\n[WARN]\n  - detail\n' };
+                assert.ok(ran.includes(copy.path), '应先完成同批附件和规范的写入，再校验');
+                if (++validations === 1) return { exitCode: 1, stdout: 'Project validation\n[ERROR]\n'
+                    + "  - spec_lock.md schema: section 'communication' is missing field 'objective'\n"
+                    + "  - spec_lock.md schema: unknown section '客户私有章节'\n\n[WARN]\n  - detail\n" };
                 return { exitCode: 0 };
             }
             if (action.tool === 'check_svg') return { exitCode: 0 };
@@ -227,17 +367,20 @@ test('规范写入兼容正文别名，缺失的可选记录不会阻断本批�
             return { path: action.path, sha256: createHash('sha256').update(action.text).digest('hex') };
         }
     });
-    assert.deepEqual(ran, [project + '/validation/text_calibration.json', spec, lock, 'project', lock, 'project', page, 'check_svg']);
+    assert.deepEqual(ran, [project + '/validation/text_calibration.json', spec, lock, copy.path, 'project', 'list', lock, 'project', page, 'check_svg']);
     assert.equal(state.authoringPages.first, 'passed');
     assert.equal(state.usageDiagnostics[0].turnSummary.actionType, 'write');
     assert.equal(state.usageDiagnostics[1].turnSummary.actions[0].unavailable, true);
     assert.deepEqual(state.usageDiagnostics[1].turnSummary.actions.at(-1).projectIssues, ['lock']);
-    assert.deepEqual(state.usageDiagnostics[2].turnSummary.actions[0].projectIssues, ['lock']);
+    assert.equal(state.usageDiagnostics[2].turnSummary.actions[0].fileCount, 1);
+    assert.deepEqual(state.usageDiagnostics[2].turnSummary.actions[1].projectIssues, ['lock']);
+    assert.deepEqual(state.usageDiagnostics[2].turnSummary.actions[1].projectDetails, state.usageDiagnostics[1].turnSummary.actions.at(-1).projectDetails);
+    assert.doesNotMatch(JSON.stringify(state.usageDiagnostics), /客户私有章节/);
 });
 
 test('最终复检覆盖同一项目的旧检查，成功的单页检查不能代替整稿复检', () => {
     const action = args => ({ action: 'run', tool: 'check_svg', args: ['deck', '--quick-generate', ...args] });
-    const current = {};
+    const current = { request: { profile: 'quick' } };
     const invalid = action(['--stage', 'draft']);
     const final = action(['--stage', 'final', '--canonical-authoring', '--json']);
     recordCheck(current, invalid, { exitCode: 1 });
@@ -247,6 +390,38 @@ test('最终复检覆盖同一项目的旧检查，成功的单页检查不能�
     recordCheck(current, final, { exitCode: 0 });
     requireChecks(current, 'deck');
     assert.equal(current.failedChecks, undefined);
+});
+
+test('正式导出只受当前项目和导出模式的检查约束，创建模板仍核验选定类型', () => {
+    const state = {}, project = 'report';
+    const trial = { action: 'run', tool: 'check_svg', args: [project, '--quick-generate', '--canonical-authoring', '--stage', 'final'] };
+    const candidate = { action: 'validate_template', path: project + '/templates/candidate', kind: 'style' };
+    const styleCheck = { ...candidate, path: project };
+    for (const action of [trial, candidate, styleCheck]) recordCheck(state, action, { exitCode: 1 });
+    requireChecks(state, project, [], { exportArgs: [project] });
+    assert.throws(() => requireChecks(state, project, [], { exportArgs: [project, '--quick-generate'] }), /重新通过/);
+    assert.throws(() => requireChecks(state, project, [], { templateKind: 'style' }), /重新通过/);
+    requireChecks(state, project, [], { templateKind: 'layout' });
+    const formal = { ...trial, args: trial.args.filter(flag => flag !== '--quick-generate') };
+    recordCheck(state, formal, { exitCode: 1 });
+    assert.throws(() => requireChecks(state, project, [], { exportArgs: [project] }), /重新通过/);
+    requireChecks(state, project, [formal], { exportArgs: [project] });
+    recordCheck(state, formal, { exitCode: 0 });
+    requireChecks(state, project, [], { exportArgs: [project] });
+});
+
+test('同批修复资源后插入的项目复检可解开旧失败，导出仍须通过实际复检', async () => {
+    const managedProject = 'report', validation = { action: 'run', tool: 'project', args: ['validate', managedProject] };
+    const current = { managedProject, request: { operation: 'generate', profile: 'default', draftFirst: true },
+        review: { approvals: {} }, engine: { tools: ['project', 'export'] },
+        projectPreparation: { files: { 'design_spec.md': 'a', 'spec_lock.md': 'b' }, validation: { signature: 'a:b', exitCode: 1, details: [] } } };
+    recordDraftPlan(current, { project: managedProject, summary: '验收', pages: [{ title: '首页', values: [] }] });
+    recordCheck(current, validation, { exitCode: 1 });
+    const exportDeck = { action: 'run', tool: 'export', args: [managedProject] };
+    const copy = { action: 'copy', path: 'report/templates/cover.svg', source: 'selected-template/cover.svg' };
+    await assert.rejects(validateTurn({ actions: [exportDeck] }, current), /重新通过已失败的检查/);
+    assert.deepEqual((await validateTurn({ actions: [copy, exportDeck] }, current)).actions, [copy, validation, exportDeck]);
+    assert.throws(() => requireChecks(current, managedProject), /重新通过已失败的检查/);
 });
 
 test('空引文只能用明确来源的唯一原文补齐，未知来源进入逐项修复', async () => {
@@ -274,6 +449,22 @@ test('当前导出回执失效时只自动复检和重试一次，失败后保�
     assert.deepEqual(actions, ['deliver', 'check_svg', 'export', 'deliver']);
     await assert.rejects(deliverWithRecovery(state, delivery, async () => { throw stale; }, hooks), stale);
     assert.match(state.messages.at(-1).content, /导出回执已失效/);
+});
+
+test('交付超时可无源包复验同一份 PPTX，旧执行器或模板源包仍保留原错误', async () => {
+    const state = { engine: { optionalSourcePackage: 1 } }, delivery = { action: 'deliver', path: 'report/exports/final.pptx', checklist: [['首页', []]] };
+    const timeout = runtime.error('请求超时', 'PPT_SERVICE_TIMEOUT', 504);
+    const actions = [];
+    const execute = async action => {
+        actions.push(action);
+        if (!action.skipSourcePackage) throw timeout;
+        return { sourcePackageUnavailable: true, sha256: 'test' };
+    };
+    const result = await deliverWithRecovery(state, delivery, execute, hooks);
+    assert.equal(result.sourcePackageUnavailable, true);
+    assert.deepEqual(actions, [delivery, { ...delivery, skipSourcePackage: true }]);
+    await assert.rejects(deliverWithRecovery({}, delivery, execute, hooks), { code: timeout.code });
+    await assert.rejects(deliverWithRecovery(state, { action: 'deliver_template', path: 'report' }, execute, hooks), { code: timeout.code });
 });
 
 test('模型预检和创建可共享按操作划分的旧引擎能力门禁', () => {

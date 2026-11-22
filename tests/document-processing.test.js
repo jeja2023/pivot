@@ -55,6 +55,8 @@ const { extractOfdText } = require('../server/document-text');
 const { extractPdfTextWithPageFallback } = require('../server/services/document-processing/text-extraction');
 const { DOCUMENT_PROCESSING_SETTING_KEYS } = require('../server/services/document-processing/constants');
 const { createOcrRouter } = require('../server/routes/apps/ocr');
+const { createSettingsRouter } = require('../server/routes/settings');
+const { normalizeVlResult } = require('../server/services/document-processing/ocr/vl');
 const { deleteAppSettingAsync, refreshAppSettingsCache, setAppSettingAsync } = require('../server/services/app-settings');
 
 async function waitForDocumentJob(userId, jobId, timeoutMs = 60000) {
@@ -1392,6 +1394,139 @@ test('OCR 失败页重试只补处理失败页面并保留已完成页面', asyn
         cleanupDocumentProcessingRows(userId);
         db.prepare('DELETE FROM users WHERE id = ?').run(userId);
         removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('VL PDF 按任务路由、保留页排版，重试后导出新版本并尊重复核修订', async () => {
+    const suffix = Date.now().toString(36);
+    const userId = db.prepare("INSERT INTO users (username, password_hash, nickname, unit, role, status, created_at) VALUES (?, 'hash', '版面解析', 'QA', 'user', 'active', now())").run(`ocr_vl_${suffix}`).lastInsertRowid;
+    const tempDir = path.join(uploadRoot, 'ocr-vl-test', String(userId));
+    const sourcePath = path.join(tempDir, 'layout.pdf');
+    fs.mkdirSync(tempDir, { recursive: true });
+    await createSamplePdf(sourcePath, ['Page one', 'Page two']);
+    const requests = [];
+    const server = nodeHttp.createServer(async (req, res) => {
+        res.setHeader('Content-Type', 'application/json');
+        if (req.url === '/health') return res.end(JSON.stringify({ engine: 'paddleocr-vl', ready: true }));
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+        requests.push(payload);
+        if (requests.length === 2) {
+            res.statusCode = 503;
+            return res.end(JSON.stringify({ detail: '模拟 VL 第二页失败' }));
+        }
+        const text = requests.length === 1 ? '识别第一页' : '补处理第二页';
+        return res.end(JSON.stringify({
+            text, confidence: 0.92,
+            raw: { engine: 'paddleocr-vl', markdown: `### ${text}\n\n<table><tr><td colspan="2">表头</td></tr></table>\n\n<img src="https://invalid.example/test.png">`, json: [{ ignored: true }] }
+        }));
+    });
+    await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+    const key = DOCUMENT_PROCESSING_SETTING_KEYS.vlServiceUrl;
+    try {
+        await preserveAppSetting(key, async () => {
+            const vlServiceUrl = `http://127.0.0.1:${server.address().port}`;
+            await refreshAppSettingsCache();
+            const regularUrl = getDocumentProcessingSettings().serviceUrl;
+            const settingsRouter = createSettingsRouter({ authMiddleware: (_req, _res, next) => next(), adminMiddleware: (_req, _res, next) => next(), logAction: () => {} });
+            const settingsRoute = settingsRouter.stack.find(layer => layer.route?.path === '/settings/ocr' && layer.route.methods.put);
+            const saved = createJsonResponse();
+            await runExpressHandlers(settingsRoute.route.stack.map(layer => layer.handle), { user: { id: 1, username: 'admin', role: 'admin' }, body: { vlServiceUrl }, headers: {} }, saved);
+            assert.equal(saved.body.settings.vlServiceUrl, vlServiceUrl);
+            assert.equal(saved.body.settings.serviceUrl, regularUrl);
+            const capability = await getOcrCapabilities();
+            assert.deepEqual(capability.modes.document_vl, { configured: true, available: true });
+            assert.ok(!JSON.stringify(capability).includes(vlServiceUrl));
+            const router = createOcrRouter({ authMiddleware: (_req, _res, next) => next(), uploadLimiter: (_req, _res, next) => next(), upload: { array: () => (_req, _res, next) => next() } });
+            const create = router.stack.find(layer => layer.route?.path === '/jobs' && layer.route.methods.post);
+            const response = createJsonResponse();
+            await runExpressHandlers(create.route.stack.map(layer => layer.handle), {
+                user: { id: userId, username: `ocr_vl_${suffix}`, role: 'user' },
+                files: [{ path: sourcePath, originalname: 'layout.pdf', mimetype: 'application/pdf', size: fs.statSync(sourcePath).size }],
+                body: { ocrMode: 'document_vl', pages: '1-2', maxOcrPages: 2, maxRenderPages: 2, dpi: 72 }, headers: {}
+            }, response);
+            const jobId = response.body.job.id;
+            const partial = await waitForDocumentJob(userId, jobId);
+            assert.equal(partial.job.status, 'partial_success');
+            assert.equal(partial.pages[1].processingState, 'failed');
+            assert.match(partial.pages[0].result.markdown, /<td colspan="2">/);
+            assert.doesNotMatch(partial.pages[0].result.markdown, /<img/);
+            assert.equal(partial.pages[0].result.json, undefined);
+            const readMarkdown = async output => fs.readFileSync((await getOutputDownload({ userId, outputId: output.id, sourceModule: 'ocr_app' })).filePath, 'utf8');
+            const firstOutput = partial.outputs.find(output => output.outputType === 'markdown');
+            assert.match(await readMarkdown(firstOutput), /本页解析失败/);
+
+            await retryJob({ userId, jobId, sourceModule: 'ocr_app', retryFailedPages: true });
+            const recovered = await waitForDocumentJob(userId, jobId);
+            assert.equal(recovered.job.config.ocrMode, 'document_vl');
+            assert.ok(recovered.job.contentRevision > partial.job.contentRevision);
+            assert.equal(recovered.job.coverageComplete, true);
+            assert.equal(recovered.pages[0].result.markdown, partial.pages[0].result.markdown);
+            assert.deepEqual(requests.map(payload => payload.engine), Array(3).fill('paddleocr-vl'));
+            const latest = recovered.outputs.find(output => output.outputType === 'markdown' && output.quality.contentRevision === recovered.job.contentRevision);
+            assert.match(await readMarkdown(latest), /## 第 2 页\n\n### 补处理第二页/);
+
+            await savePageReview({ userId, pageId: recovered.pages[0].id, revisedText: '修订后的正文', expectedRevision: recovered.job.contentRevision, sourceModule: 'ocr_app' });
+            const output = await createJobExport({ userId, jobId, format: 'markdown', sourceModule: 'ocr_app' });
+            const revised = await readMarkdown(output);
+            assert.match(revised, /修订后的正文/);
+            assert.doesNotMatch(revised, /### 识别第一页/);
+            assert.match(revised, /### 补处理第二页/);
+        });
+    } finally {
+        await refreshAppSettingsCache();
+        await new Promise(resolve => server.close(resolve));
+        cleanupDocumentProcessingRows(userId);
+        db.prepare('DELETE FROM users WHERE id = ?').run(userId);
+        removeTestPath(tempDir, { recursive: true });
+    }
+});
+
+test('VL 解析拒绝错误引擎及超大 Markdown，保留公式和安全表格标签', () => {
+    assert.throws(() => normalizeVlResult({ raw: { engine: 'paddleocr', markdown: '普通文本' } }), { code: 'OCR_VL_INVALID_RESULT' });
+    assert.throws(() => normalizeVlResult({ raw: { engine: 'paddleocr-vl', markdown: '字'.repeat(50_000) } }), { code: 'OCR_VL_RESULT_TOO_LARGE' });
+    const markdown = '$ x < 2 $\n\n<table><tr><td rowspan="2">信息</td></tr></table>';
+    assert.equal(normalizeVlResult({ raw: { engine: 'paddleocr-vl', markdown } }).markdown, markdown);
+});
+
+test('OCR 保存两个地址时无需 DNS 或健康检查，连接测试仍校验解析后的目标', async context => {
+    const router = createSettingsRouter({ authMiddleware: (_req, _res, next) => next(), adminMiddleware: (_req, _res, next) => next(), logAction: () => {} });
+    const admin = { id: 1, username: 'admin', role: 'admin' };
+    const invoke = async (path, method, body) => {
+        const route = router.stack.find(layer => layer.route?.path === path && layer.route.methods[method]);
+        const response = createJsonResponse();
+        await runExpressHandlers(route.route.stack.map(layer => layer.handle), { user: admin, body, headers: {} }, response);
+        return response.body;
+    };
+    const dns = require('node:dns/promises');
+    const lookup = dns.lookup;
+    const domains = ['ocr-pending.example', 'ocr-vl-pending.example'];
+    const lookedUp = [];
+    const probe = context.mock.method(dns, 'lookup', (host, ...args) => {
+        if (!domains.includes(host)) return lookup(host, ...args);
+        lookedUp.push(host);
+        return Promise.resolve([{ address: '169.254.169.254', family: 4 }]);
+    });
+    const { serviceUrl: serviceKey, vlServiceUrl: vlKey } = DOCUMENT_PROCESSING_SETTING_KEYS;
+    try {
+        await preserveAppSetting(serviceKey, () => preserveAppSetting(vlKey, async () => {
+            const body = { serviceUrl: `http://${domains[0]}:9100/`, vlServiceUrl: `http://${domains[1]}:9100` };
+            const saved = await invoke('/settings/ocr', 'put', body);
+            assert.equal(saved.success, true);
+            assert.equal(saved.settings.serviceUrl, body.serviceUrl.slice(0, -1));
+            assert.equal(saved.settings.vlServiceUrl, body.vlServiceUrl);
+            assert.deepEqual(lookedUp, []);
+            assert.equal(saved.engines, undefined);
+            await assert.rejects(invoke('/settings/ocr', 'put', { vlServiceUrl: 'http://169.254.169.254' }), { status: 400 });
+            const status = await invoke('/settings/ocr-test', 'post', { ocrMode: 'document_vl', serviceUrl: body.vlServiceUrl });
+            assert.equal(status.success, false);
+            assert.match(status.message, /敏感/);
+            assert.deepEqual(lookedUp, [domains[1]]);
+        }));
+    } finally {
+        probe.mock.restore();
+        await refreshAppSettingsCache();
     }
 });
 

@@ -816,6 +816,29 @@
     gap: 8px;
 }
 
+.ocr-vl-preview {
+    flex: 0 0 auto;
+    min-width: 0;
+    max-height: 60vh;
+    overflow: auto;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--text-main);
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+
+.ocr-vl-preview table {
+    border-collapse: collapse;
+}
+
+.ocr-vl-preview :is(td, th) {
+    padding: 4px 8px;
+    border: 1px solid var(--border);
+}
+
 .ocr-review-textarea {
     flex: 0 0 170px;
     min-height: 140px;

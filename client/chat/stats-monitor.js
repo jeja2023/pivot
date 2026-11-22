@@ -178,14 +178,14 @@ const loadMonitorSummary = async function(options = {}) {
                     </div>
                 </div>
             </div>`,
-            `<div class="monitor-row monitor-split-row">
+            `<div class="monitor-row monitor-split-row monitor-resource-usage-row">
                 <div>
                     <span>硬盘空间</span>
                     <div class="monitor-meter-cell" title="磁盘路径：${escapeHtml(disk.path || '默认')} ${formatBytes(disk.used || 0)} / ${formatBytes(disk.total || 0)} (${diskBarWidth}%)">
                         <strong>${diskAvailable ? `${formatBytes(disk.used)} / ${formatBytes(disk.total)} (${diskBarWidth}%)` : '暂无数据'}</strong>
-                        <div class="monitor-meter-track">
-                            <div class="monitor-meter-fill ${diskStatusClass}" data-meter-rate="${diskAvailable ? diskBarWidth : 0}"></div>
-                        </div>
+                        ${diskAvailable ? `<div class="monitor-meter-track" aria-hidden="true">
+                            <div class="monitor-meter-fill ${diskStatusClass}" data-meter-rate="${diskBarWidth}"></div>
+                        </div>` : ''}
                     </div>
                 </div>
                 <div>
@@ -193,7 +193,7 @@ const loadMonitorSummary = async function(options = {}) {
                     <strong title="磁盘路径：${escapeHtml(disk.path || '默认')}">${diskAvailable ? formatBytes(disk.free) : '暂无数据'}</strong>
                 </div>
             </div>`,
-            `<div class="monitor-row monitor-split-row monitor-single-row">
+            `<div class="monitor-row monitor-split-row monitor-resource-usage-row">
                 <div>
                     <span>CPU 累计耗时</span>
                     <strong title="用户态 ${Number(processInfo.cpuSeconds?.user || 0).toFixed(2)}s · 系统态 ${Number(processInfo.cpuSeconds?.system || 0).toFixed(2)}s">${Number(processInfo.cpuSeconds?.user || 0).toFixed(1)}s 用户 / ${Number(processInfo.cpuSeconds?.system || 0).toFixed(1)}s 系统</strong>

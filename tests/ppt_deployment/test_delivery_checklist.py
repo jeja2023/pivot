@@ -1,5 +1,6 @@
 """核对最终 OOXML 的物理页序、正文、备注隔离和图表关键数据。"""
 import io
+import errno
 import hashlib
 import json
 import sys
@@ -14,7 +15,7 @@ from delivery_checklist import A, C, P, R, REL, verify_checklist  # noqa: E402
 import runner  # noqa: E402
 
 
-def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"):
+def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00", front_extra=""):
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as archive:
         archive.writestr("ppt/presentation.xml", f'<p:presentation xmlns:p="{P}" xmlns:r="{R}"><p:sldIdLst>'
@@ -28,7 +29,7 @@ def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"
                             f'<p:cSld><p:spTree><p:sp><p:txBody><a:p><a:r><a:t>{title}</a:t></a:r></a:p>'
                             f'<a:p><a:r><a:t>{front_value if index == 2 else back_value}</a:t></a:r></a:p></p:txBody></p:sp>'
                             '<p:sp><p:nvSpPr><p:cNvPr hidden="1"/></p:nvSpPr><p:txBody><a:p><a:r><a:t>隐藏数据30</a:t></a:r></a:p></p:txBody></p:sp>'
-                            f'{chart}</p:spTree></p:cSld></p:sld>')
+                            f'{chart}{front_extra if index == 2 else ""}</p:spTree></p:cSld></p:sld>')
         archive.writestr("ppt/slides/_rels/slide2.xml.rels", f'<Relationships xmlns="{REL}"><Relationship Id="c1" Type="{R}/chart" Target="../charts/chart1.xml"/></Relationships>')
         archive.writestr("ppt/charts/chart1.xml", f'<c:chartSpace xmlns:c="{C}"><c:chart><c:plotArea><c:barChart><c:ser><c:tx><c:v>实际</c:v></c:tx>'
                         '<c:cat><c:strLit><c:pt idx="0"><c:v>一季度</c:v></c:pt></c:strLit></c:cat>'
@@ -38,6 +39,79 @@ def deck(back_value="成本1200", front_value="成本1200", chart_value="120.00"
 
 
 class DeliveryChecklistTests(unittest.TestCase):
+    def test_expanded_checklist_checks_every_value_and_keeps_a_hard_bound(self):
+        values = [f"指标{i}项" for i in range(1, 25)]
+        data = deck(front_value="，".join(values)).getvalue()
+        result = runner.package_report(data, [["首页", values], ["后页", []]])
+        self.assertEqual(result["checkedValues"], 24)
+        with self.assertRaises(runner.ChecklistMismatch):
+            runner.package_report(deck(front_value="，".join(values[:-1])).getvalue(), [["首页", values], ["后页", []]])
+        with self.assertRaisesRegex(ValueError, "关键数据清单无效"):
+            runner.package_report(data, [["首页", [*values, "指标25项"]], ["后页", []]])
+
+    def test_grouped_values_cannot_use_hidden_unrelated_or_split_digits(self):
+        def shape(text, properties=''):
+            return f'<p:sp>{properties}<p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>'
+
+        def grouped(*items):
+            return '<p:grpSp>' + ''.join(items) + '</p:grpSp>'
+
+        label = shape('累计交付')
+        amount = shape('120台')
+        checklist = [['首页', ['累计交付120台']], ['后页', []]]
+        valid = runner.package_report(deck(front_extra=grouped(label, amount)).getvalue(), checklist)
+        self.assertEqual(valid['checkedValues'], 1)
+        for example in [grouped(label) + grouped(amount), grouped(label, shape('120台', '<p:nvSpPr><p:cNvPr hidden="1"/></p:nvSpPr>')),
+                        grouped(shape('累计交付12'), shape('0台')), grouped(label, shape('1120台'))]:
+            with self.subTest(example=example), self.assertRaises(runner.ChecklistMismatch):
+                runner.package_report(deck(front_extra=example).getvalue(), checklist)
+
+    def test_optional_project_archive_io_failure_preserves_verified_pptx(self):
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, 'WORKSPACE', Path(directory)):
+            root = Path(directory)
+            path = 'project/exports/result.pptx'
+            export = root / path
+            export.parent.mkdir(parents=True)
+            data = deck().getvalue()
+            export.write_bytes(data)
+            expected = hashlib.sha256(data).hexdigest()
+            metadata = root / '.pivot'
+            metadata.mkdir()
+            (metadata / 'export.json').write_text(json.dumps({'sourceFingerprint': runner.source_fingerprint(),
+                'currentExports': {path: expected}}), encoding='utf-8')
+            request = {'path': path, 'checklist': [['首页', []], ['后页', ['成本1200']]]}
+            with patch.object(runner, 'build_project_archive', side_effect=OSError(errno.ENOSPC, 'ZIP 空间不足')):
+                result = runner.deliver_presentation(request)
+            self.assertEqual(result['sha256'], expected)
+            self.assertEqual(result['packageCheck']['status'], 'passed')
+            self.assertTrue(result['sourcePackageUnavailable'])
+            self.assertEqual(result['sourcePackageUnavailableReason'], 'storage')
+            self.assertEqual((root / 'delivery/presentation.pptx').read_bytes(), data)
+            self.assertFalse((root / 'delivery/project.zip').exists())
+            with patch.object(runner, 'build_project_archive') as zip_bundle:
+                recovered = runner.deliver_presentation({**request, 'skipSourcePackage': True})
+            zip_bundle.assert_not_called()
+            self.assertEqual(recovered['sourcePackageUnavailableReason'], 'timeout')
+            self.assertEqual(recovered['packageCheck'], result['packageCheck'])
+
+    def test_title_parts_and_exact_display_values_in_delivered_file(self):
+        def box(text, hidden=False):
+            properties = '<p:nvSpPr><p:cNvPr hidden="1"/></p:nvSpPr>' if hidden else ''
+            return f'<p:sp>{properties}<p:txBody><a:p><a:r><a:t>{text}</a:t></a:r></a:p></p:txBody></p:sp>'
+
+        parts = box("2026经营") + box("复盘")
+        grouped = f'<p:grpSp>{parts}</p:grpSp>'
+        expected = [["2026经营复盘", ["收入80万元", "增长5.00%"]], ["后页", []]]
+        report = runner.package_report(deck(front_value="收入800,000元，增长5%", front_extra=grouped).getvalue(), expected)
+        self.assertEqual(report["checkedValues"], 2)
+        for extra in [parts, f'<p:grpSp>{box("2026经营")}{box("复盘", hidden=True)}</p:grpSp>',
+                      f'<p:grpSp>{box("20")}{box("26经营复盘")}</p:grpSp>']:
+            with self.subTest(extra=extra), self.assertRaisesRegex(ValueError, "可见标题"):
+                runner.package_report(deck(front_extra=extra).getvalue(), expected)
+        for actual in ["收入800,001元，增长5%", "收入负800,000元，增长5%", "收入800,000美元，增长5%", "收入800,000元，增长5个百分点"]:
+            with self.subTest(value=actual), self.assertRaisesRegex(ValueError, "关键数据"):
+                runner.package_report(deck(front_value=actual, front_extra=grouped).getvalue(), expected)
+
     def test_revised_export_is_current_and_failed_repair_is_replayable(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(runner, "WORKSPACE", Path(directory)):
             root = Path(directory)

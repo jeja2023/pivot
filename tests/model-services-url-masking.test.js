@@ -26,6 +26,7 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
     });
     const settingsGetRoute = settingsRouter.stack.find(layer => layer.route?.path === '/settings' && layer.route?.methods?.get);
     const embeddingPutRoute = settingsRouter.stack.find(layer => layer.route?.path === '/settings/embedding' && layer.route?.methods?.put);
+    const ocrPutRoute = settingsRouter.stack.find(layer => layer.route?.path === '/settings/ocr' && layer.route?.methods?.put);
     const ocrTestRoute = settingsRouter.stack.find(layer => layer.route?.path === '/settings/ocr-test' && layer.route?.methods?.post);
 
     const embeddingTestRoute = ragRouter.stack.find(layer => layer.route?.path === '/settings/test-embedding' && layer.route?.methods?.post);
@@ -42,8 +43,10 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
     const routeHandler = route => route.route.stack.slice(-1).map(layer => layer.handle);
 
     let globalModelId = null;
+    const previousVlUrl = process.env.OCR_VL_SERVICE_URL;
 
     try {
+        process.env.OCR_VL_SERVICE_URL = 'http://127.0.0.1:9101';
         // 1. 系统管理员调用 GET /settings，能正常查看系统级服务真实 URL
         const adminRes = {
             statusCode: 200,
@@ -58,6 +61,7 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
         if (adminRes.body.ocrConfig?.serviceUrl) {
             assert.notEqual(adminRes.body.ocrConfig.serviceUrl, '********');
         }
+        assert.equal(adminRes.body.ocrConfig?.vlServiceUrl, process.env.OCR_VL_SERVICE_URL);
 
         // 2. 普通用户调用 GET /settings，未由该用户自己配置的模型/服务 URL 全部受控脱敏
         const regularRes = {
@@ -76,6 +80,8 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
         if (regularRes.body.ocrConfig?.serviceUrl) {
             assert.equal(regularRes.body.ocrConfig.serviceUrl, '********');
         }
+        assert.equal(regularRes.body.ocrConfig?.vlConfigured, true);
+        assert.equal(regularRes.body.ocrConfig?.vlServiceUrl, undefined);
         if (regularRes.body.rerankConfig?.apiUrl) {
             assert.equal(regularRes.body.rerankConfig.apiUrl, '********');
         }
@@ -118,6 +124,11 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
         };
         await runExpressHandlers(routeHandler(ocrTestRoute), { headers: {}, body: { serviceUrl: 'http://custom-untrusted-ocr.com' }, user: regularUser }, ocrCustomTestRes);
         assert.equal(ocrCustomTestRes.statusCode, 403, '普通用户测试自定义 OCR 地址必须被 403 阻断');
+        for (const [route, body] of [[ocrTestRoute, { ocrMode: 'document_vl' }], [ocrPutRoute, { vlServiceUrl: 'http://127.0.0.1:9101' }]]) {
+            const vlRes = { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(data) { this.body = data; return this; } };
+            await runExpressHandlers(routeHandler(route), { headers: {}, body, user: regularUser }, vlRes);
+            assert.equal(vlRes.statusCode, 403);
+        }
 
         // 5. 向量生成服务测试权限校验：普通用户测试已保存配置不应被403拒绝；测试新自定义URL必须被403拒绝
         const embedSavedTestRes = {
@@ -180,6 +191,8 @@ test('非系统管理员查看模型与服务配置时URL受控脱敏，且支�
             assert.notEqual(modelTestRes.body.error, '无权测试该模型或模型不存在');
         }
     } finally {
+        if (previousVlUrl === undefined) delete process.env.OCR_VL_SERVICE_URL;
+        else process.env.OCR_VL_SERVICE_URL = previousVlUrl;
         if (globalModelId) {
             await execute('DELETE FROM models WHERE id = ?', [globalModelId]);
         }

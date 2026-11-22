@@ -231,7 +231,8 @@ async function callModelJson(modelCfg, messages, options = {}) {
             headers: buildModelHeaders(modelCfg, { acceptJson: true }),
             data,
             timeout: resolveAgentFirstResponseTimeoutMs(options),
-            signal: options.signal || null
+            signal: options.signal || null,
+            beforeProviderRequest: options.beforeProviderRequest
         });
         const usage = response.data?.usage || response.data?.response?.usage || null;
         const promptCache = extractPromptCacheUsage(usage);

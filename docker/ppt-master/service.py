@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 
 from service_jobs import Jobs, ServiceError
 
+STARTUP_HEALTH_TIMEOUT = 300
 
 def runtime_identity():
     digest = hashlib.sha256()
@@ -173,10 +174,11 @@ def main():
     probe_key = "0" * 64
     jobs.open(probe_key)
     try:
-        health = jobs.execute(probe_key, "0" * 32, runtime, {"action": "health"})
+        health = jobs.execute(probe_key, "0" * 32, runtime, {"action": "health"}, startup_timeout=STARTUP_HEALTH_TIMEOUT)
         if not health.get("ok") or health.get("result", {}).get("status") != "ready":
             raise RuntimeError("制作运行包启动检查失败，请检查镜像。")
-        health = {**health["result"], "runtimeId": runtime, "serviceProtocol": 1, "atomicInputSnapshots": 1, "version": json.loads(Path("/runner/engine-lock.json").read_text())["skillVersion"],
+        health = {**health["result"], "runtimeId": runtime, "serviceProtocol": 1, "atomicInputSnapshots": 1,
+                  "startupHealthTimeoutSeconds": STARTUP_HEALTH_TIMEOUT, "version": json.loads(Path("/runner/engine-lock.json").read_text())["skillVersion"],
                   "capabilities": ["files", "operations", "cancel", "native", "templates"], "network": "worker_network_denied"}
     finally:
         jobs.delete(probe_key)

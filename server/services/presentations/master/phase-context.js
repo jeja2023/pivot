@@ -44,7 +44,10 @@ function validatedProject(state) {
 
 function phaseMessages(messages, state) {
     const project = validatedProject(state);
-    if (!project) return { messages, phase: 'full' };
+    const managed = state.managedProject;
+    const authoring = state.request?.draftFirst && state.request.operation === 'generate' && state.request.profile === 'default'
+        && managed && state.review?.approvals?.design?.plan?.project === managed && !state.confirmationRevisionPending;
+    if (!project && !authoring) return { messages, phase: 'full' };
     const ranges = new Map();
     const result = messages.map(message => {
         if (message.role !== 'user' || typeof message.content !== 'string') return message;
@@ -57,14 +60,16 @@ function phaseMessages(messages, state) {
         const start = item.text.indexOf(routing ? '## 2. Top-Level Route Matrix' : '### Step 1: Source Content Processing');
         const end = item.text.indexOf(routing ? '## 3. Generate PPTX Profiles and Stages' : '### Step 4: Strategist Phase');
         if (start < 0 || end <= start) return message;
+        const note = authoring ? '宿主已准备项目并登记页面清单。已收起完成的前置步骤；用 read_runtime 可查原文。'
+            : `已取得用户对最终方案的批准和当前项目校验回执，暂收起${routing ? '已完成的流程选路表' : '步骤1至3'}；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。`;
         const updated = { ...message, content: JSON.stringify({ ...item, text: item.text.slice(0, start)
-            + `\n[已取得用户对最终方案的批准和当前项目校验回执，暂收起${routing ? '已完成的流程选路表' : '步骤1至3'}；如需原文，用 read_runtime 重新读取 ${item.runtimeDocument}。项目：${project}]\n\n` + item.text.slice(end),
-        phase: 'validated_project', fullTextAvailable: true }) };
+            + `\n[${note}项目：${project || managed}]\n\n` + item.text.slice(end),
+        phase: project ? 'validated_project' : 'managed_authoring', fullTextAvailable: true }) };
         ranges.set(updated, [{ offset: 0, points: Array.from(item.text.slice(0, start)) },
             { offset: Array.from(item.text.slice(0, end)).length, points: Array.from(item.text.slice(end)) }]);
         return updated;
     });
-    return { messages: result, phase: 'validated_project', ranges };
+    return { messages: result, phase: project ? 'validated_project' : 'managed_authoring', ranges };
 }
 
 module.exports = { phaseMessages, validatedProject };

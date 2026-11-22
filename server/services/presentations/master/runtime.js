@@ -25,6 +25,9 @@ async function availability() {
             const generationReady = health.deliveryChecklist === 1 && health.currentExport === 1;
             return { enabled: true, transport: 'service', version: health.version, revision: health.revision, runtimeId: health.runtimeId,
                 checklistReady: health.deliveryChecklist === 1, currentExportReady: health.currentExport === 1, pageRepairReady: health.pageRepair === 1,
+                checklistDisplayEquivalence: health.checklistDisplayEquivalence === 1,
+                checklistGroupedValues: health.checklistGroupedValues === 1,
+                expandedChecklist: health.expandedChecklist === 1,
                 generationReady, templateReady: health.deliveryChecklist === 1, progressSnapshotsReady: health.progressSnapshots === 1,
                 message: generationReady ? '独立PPT制作服务可用。' : '独立服务已连接，生成或编辑 PPTX 需要更新镜像以启用完整导出核验。' };
         }

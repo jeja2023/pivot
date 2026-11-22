@@ -512,6 +512,8 @@
         clearFormError();
         const button = byId('presentation-master-start'), history = byId('presentation-master-history'), activeButton = byId('presentation-master-active');
         const template = selectedTemplate;
+        const decorativeImages = byId('presentation-master-image-purpose')?.value === 'decorative';
+        const profile = byId('presentation-master-profile').value;
         let title, instruction, modelId, tokenBudget, files, primaryFile, form, snapshot;
         try {
             title = byId('presentation-master-title').value.trim();
@@ -525,7 +527,8 @@
             if (oversized) throw new Error(`文件「${oversized.name}」超过完整制作的单文件上限 ${maxInputBytes / 1024 / 1024} MiB，请压缩后重新选择。`);
             const sourceDeck = files.find(file => /\.pptx$/i.test(file.name));
             if (template && sourceDeck) throw new Error('所选模板已确定原稿来源。请在文件列表移除 PPTX 原稿后继续，图片和音视频可以保留。');
-            primaryFile = template ? null : sourceDeck || files.find(file => /\.(?:png|jpe?g|webp)$/i.test(file.name));
+            primaryFile = template ? null : sourceDeck || (!decorativeImages || profile === 'image_to_pptx'
+                ? files.find(file => /\.(?:png|jpe?g|webp)$/i.test(file.name)) : null);
             if (files.length - Number(Boolean(primaryFile)) > 20) throw new Error('单次最多提供 20 个补充素材，请移除多余文件。');
             form = window.Pivot.moduleApi('apps.presentations.masterForm');
             snapshot = form.snapshot();
@@ -541,12 +544,12 @@
             const currentMaterial = active?.content ? { title: active.title || '当前文稿', text: JSON.stringify(active.content) } : null;
             const request = { title, instruction, modelId, operation: byId('presentation-master-operation').value,
                 productionProfile: window.Pivot.moduleApi('apps.presentations.goals').read('presentation-master', active?.content?.metadata?.productionProfile || {}),
-                profile: byId('presentation-master-profile').value, pageCount: Number(byId('presentation-master-pages').value), tokenBudget,
+                profile, pageCount: Number(byId('presentation-master-pages').value), tokenBudget, decorativeImages,
                 maxSteps: Number(byId('presentation-master-steps').value), presentationId: active?.id || '',
                 ...(template ? { template: { type: template.type, id: template.id, ...(template.version ? { version: template.version } : {}) } } : {}) };
             button.textContent = '正在预检模型…';
             await helpers.requestJson(API + '/model-preflight', { ...modelPost({ ...request,
-                visionRequired: files.some(file => /\.(?:png|jpe?g|webp)$/i.test(file.name)) }), signal: controller.signal });
+                visionRequired: files.some(file => (!decorativeImages || file === primaryFile) && /\.(?:png|jpe?g|webp)$/i.test(file.name)) }), signal: controller.signal });
             ensureCurrent();
             button.textContent = snapshot.files.length ? '正在读取材料…' : '正在准备制作…';
             byId('presentation-master-status').replaceChildren(node('p', 'presentation-master-task-message', snapshot.files.length ? '正在读取材料…' : '正在准备制作…'));
@@ -600,6 +603,9 @@
     function renderTask(value) {
         const panel = byId('presentation-master-status');
         const scroll = panel.closest('.workspace-modal-body')?.scrollTop || 0;
+        const diagnostics = window.Pivot.moduleApi('apps.presentations.masterPageReview');
+        const usage = window.Pivot.moduleApi('apps.presentations.masterUsage');
+        const citationDetailsOpen = usage?.citationDetailsOpen(panel, value.id);
         panel.dataset.taskId = String(value.id); panel.replaceChildren();
         const feedback = node('p', 'presentation-master-task-feedback'); feedback.setAttribute('role', 'alert');
         const head = node('div', 'presentation-master-task-head');
@@ -629,10 +635,8 @@
         const currentBudget = value.request?.tokenBudget;
         const budgetText = currentBudget === 0 ? '不限' : Number.isSafeInteger(currentBudget) ? `${currentBudget.toLocaleString('zh-CN')} 令牌` : '未记录';
         panel.appendChild(node('p', 'presentation-master-task-summary', `步骤 ${value.steps || 0}。已用约 ${Number(value.usedTokens || 0).toLocaleString('zh-CN')} 令牌。本任务累计预算 ${budgetText}。`));
-        window.Pivot.moduleApi('apps.presentations.masterPageReview')?.mountTaskDiagnostics(panel, value, node);
-        for (const issue of value.draftCitationIssues || []) {
-            panel.appendChild(node('p', 'presentation-master-task-summary', `第 ${issue.page} 页第 ${issue.item} 项待核对 · ${issue.reason}`));
-        }
+        diagnostics?.mountTaskDiagnostics(panel, value, node);
+        usage?.mountCitationDetails(panel, value.draftCitationIssues, citationDetailsOpen, node);
         const modal = historySession ? null : byId('presentation-master-modal');
         if (modal && (value.recoverable || value.status === 'input_required') && modal.dataset.modelTask !== String(value.id) && value.request?.modelId) {
             const model = byId('presentation-master-model'); if ([...model.options].some(option => option.value === String(value.request.modelId))) model.value = String(value.request.modelId);
@@ -822,8 +826,9 @@
         const actionRow = node('div', 'presentation-master-task-actions');
         const templateApplication = value.result?.checks?.templateApplication;
         if (templateApplication?.styleReview === 'manual') {
-            const note = node('p', 'presentation-master-task-summary', `第 ${templateApplication.page} 页已核对模板安装记录和对应文字「${templateApplication.visibleText}」。风格规则需人工复核。`);
-            note.title = templateApplication.rule;
+            const detail = templateApplication.page ? `，对应第 ${templateApplication.page} 页「${templateApplication.visibleText}」` : '';
+            const note = node('p', 'presentation-master-task-summary', `已核对模板安装记录${detail}。风格规则需人工复核。`);
+            if (templateApplication.rule) note.title = templateApplication.rule;
             panel.appendChild(note);
         }
         const openNative = source => {

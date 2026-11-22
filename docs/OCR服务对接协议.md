@@ -9,6 +9,7 @@ Pivot 不内置 OCR 引擎，也不维护 OCR 镜像、模型、缓存和具体�
 ```env
 DOCUMENT_PROCESSING_OCR_ENGINE=http
 OCR_SERVICE_URL=http://ocr-service:9100
+OCR_VL_SERVICE_URL=
 OCR_SERVICE_HEALTH_TIMEOUT_MS=3000
 OCR_SERVICE_MAX_IMAGE_BYTES=52428800
 DOCUMENT_PROCESSING_OCR_TIMEOUT_MS=120000
@@ -21,7 +22,9 @@ OCR_SERVICE_URL=http://ocr-service:9100
 OCR_SERVICE_URL=http://10.0.0.25:9100
 ```
 
-Pivot 的根目录 `docker-compose.yml` 只启动主应用，不包含 OCR 服务定义，也不再额外注入 `OCR_SERVICE_URL`。管理员也可以在 Pivot 前端“应用中心 > 文字识别”的服务地址中保存更新，保存后的数据库配置优先于 `.env` 默认值；清空并保存服务地址可恢复使用 `.env` 默认值。`DOCUMENT_PROCESSING_OCR_TIMEOUT_MS` 控制单页识别请求超时，`OCR_SERVICE_HEALTH_TIMEOUT_MS` 只控制健康检查，`OCR_SERVICE_MAX_IMAGE_BYTES` 控制单页图片发送给外部服务前的字节上限。
+Pivot 的根目录 `docker-compose.yml` 编排主应用，OCR 服务由独立项目运行。最高管理员在「系统设置 → 应用服务 → 文字识别 OCR → 配置」分别保存普通 OCR 和 VL 地址。数据库保存的配置优先，清空对应地址并保存可恢复使用 `.env` 默认值。`DOCUMENT_PROCESSING_OCR_TIMEOUT_MS` 控制单页识别请求超时，`OCR_SERVICE_HEALTH_TIMEOUT_MS` 控制健康检查，`OCR_SERVICE_MAX_IMAGE_BYTES` 控制单页图片发送给外部服务前的字节上限。
+
+保存地址时校验配置并写入数据库，服务是否可达通过「测试连接」和「测试 VL 连接」分别验证。Pivot 直接在本机 Node 中运行时，填写该机器可解析和访问的服务地址。如果 OCR 运行在另一台机器的容器里，可填写 OCR 宿主机的内网地址和各自映射的端口。
 
 ## 二、健康检查接口
 
@@ -51,6 +54,14 @@ GET /capabilities
 ```
 
 该接口应返回固定模型版本、支持语言、文字坐标、表格、公式、区域识别与输入限制。未声明的能力必须按“不支持”处理，不能把普通文字识别误认为结构化表格或公式已经可靠解析。
+
+## 文档解析（VL）
+
+最高管理员可在「系统设置 → 应用服务 → OCR」单独填写并测试 VL 地址。也可在部署环境设置 `OCR_VL_SERVICE_URL=http://ocr-service-vl:9100`。数据库保存的地址优先，留空且环境变量未配置时，工作台禁用 VL 模式。普通识别仍使用 `OCR_SERVICE_URL`。两个服务可部署在不同主机，Pivot 只需要访问对应地址。
+
+VL 服务的 `GET /health` 应返回 `engine: "paddleocr-vl"`，并可用 `ready: false` 标识模型文件未就绪。VL 任务按页调用 `POST /ocr`，请求增加 `engine: "paddleocr-vl"`，响应保留普通 OCR 的文本和文字块，并在 `raw.engine` 返回 `paddleocr-vl`、在 `raw.markdown` 返回本页 Markdown 字符串。空白页可以返回空字符串。单页 Markdown 入库上限为 128 KiB。Pivot 使用受限的排版 HTML 标签，不在预览中加载模型输出里的外部资源。
+
+任务选用 `ocrMode: "document_vl"` 后，预检和上传沿用图片/PDF 的页数限制。失败页重试使用保存在任务中的模式。Markdown 导出按原页码组织，保留解析失败提示，有人工文字修订的页面导出修订后的文本。复杂版式的原始外观以页面预览为准。
 
 ## 三、识别接口
 

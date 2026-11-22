@@ -74,6 +74,39 @@
             return '<div class="ocr-preview-canvas" data-ocr-preview-page="' + esc(page.id) + '" style="aspect-ratio:' + width + '/' + height + '"><img alt="页面预览" src="' + api + '/pages/' + encodeURIComponent(page.id) + '/image"><div class="ocr-overlay-layer">' + renderOverlayBlocks(page) + selectionHtml + '</div></div>';
         }
 
+        async function renderVlPreview(target, page) {
+            if (!target) return;
+            const markdown = page?.result?.markdown;
+            if (!markdown) {
+                target.textContent = page?.result?.errorMessage || (page?.text ? '本页只有纯文本，请在下方核对。' : '本页暂无排版结果。');
+                return;
+            }
+            const safeHtml = pivotLegacy.PivotSafeHtml;
+            const parser = globalThis.marked;
+            if (!safeHtml?.sanitizeHtml || !parser?.parse || !window.DOMPurify) {
+                target.textContent = markdown;
+                return;
+            }
+            try {
+                const vendors = window.Pivot.getModule?.('chat.markdownVendors');
+                await vendors?.ensureOptionalMarkdownVendors?.(markdown);
+                if (!target.isConnected) return;
+                const options = {
+                    FORBID_TAGS: ['img', 'picture', 'source', 'audio', 'video', 'iframe', 'svg', 'object', 'embed'],
+                    FORBID_ATTR: ['href', 'xlink:href', 'src', 'srcset', 'poster']
+                };
+                const rendered = parser.parse(markdown, { gfm: true });
+                safeHtml.setHtml(target, safeHtml.sanitizeHtml(rendered, options), options);
+                if (page.alignmentStatus === 'unaligned') {
+                    const note = document.createElement('p');
+                    note.textContent = '此排版来自模型初稿。Markdown 导出将使用已保存的修订文本。';
+                    target.prepend(note);
+                }
+            } catch (_) {
+                target.textContent = markdown;
+            }
+        }
+
         function renderBlocks(pageId) {
             const blocks = blocksForPage(pageId);
             if (!blocks.length) return '<div class="doc-tool-empty-small">暂无文本块</div>';
@@ -140,7 +173,7 @@
             ].join('');
         }
 
-        return { coverageSummary, renderBlocks, renderPageList, renderPagePreview, renderReviewerPanel };
+        return { coverageSummary, renderBlocks, renderPageList, renderPagePreview, renderReviewerPanel, renderVlPreview };
     }
 
     pivotLegacy.PivotOcrReviewViews = { create };

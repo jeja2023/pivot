@@ -509,13 +509,18 @@
                             <span class="retrieval-field-hint">默认 http://ocr-service:9100</span>
                         </label>
                         <input type="url" id="setting-ocr-service-url" class="form-input" placeholder="例如：http://ocr-service:9100 或 http://127.0.0.1:9100">
+                        <label class="retrieval-field-label" for="setting-ocr-vl-service-url">文档解析（VL）服务地址</label>
+                        <input type="url" id="setting-ocr-vl-service-url" class="form-input" placeholder="例如 http://ocr-service-vl:9100" aria-describedby="setting-ocr-vl-service-hint">
+                        <span id="setting-ocr-vl-service-hint" class="retrieval-field-hint">选填。清空并保存后使用部署环境的地址，环境未配置时关闭此模式。</span>
                     </div>
                     <div id="setting-ocr-test-status" class="model-modal-desc retrieval-config-status"></div>
+                    <div id="setting-ocr-save-status" class="model-modal-desc retrieval-config-status" role="status"></div>
                 </section>
                 <div class="model-modal-actions retrieval-config-actions">
                     <div class="retrieval-actions-right">
                         <button class="btn-secondary" type="button" data-retrieval-modal-cancel="ocr" data-knowledge-modal-close>取消</button>
                         <button id="ocr-service-test-btn" class="btn-secondary" type="button">测试连接</button>
+                        <button id="ocr-vl-service-test-btn" class="btn-secondary" type="button">测试 VL 连接</button>
                         <button class="btn-primary" type="button" data-retrieval-config-save="ocr">保存 OCR 服务</button>
                     </div>
                 </div>

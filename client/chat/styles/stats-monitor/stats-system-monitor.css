@@ -433,6 +433,23 @@
     flex: 0 1 auto;
 }
 
+#tab-content-monitor .monitor-resource-usage-row {
+    grid-template-columns: repeat(auto-fit, minmax(min(15rem, 100%), 1fr));
+    align-items: start;
+}
+
+#tab-content-monitor .monitor-resource-usage-row > div {
+    align-items: baseline;
+}
+
+#monitor-resource-list .monitor-resource-usage-row > div > span {
+    max-width: none;
+}
+
+#tab-content-monitor .monitor-resource-usage-row strong {
+    white-space: normal;
+}
+
 /* 进度条组件 */
 #tab-content-monitor .monitor-meter-cell {
     display: flex;

@@ -52,21 +52,27 @@ function compactReads(messages, phaseRanges) {
     });
 }
 
-function fitReferenceMessages(messages, budget, phaseRanges) {
-    let view = compactReads(messages, phaseRanges), estimate = estimateMessagesTokens(view);
+function fitReferenceMessages(messages, budget, phaseRanges, focusPreparation = false) {
+    const focused = focusPreparation ? messages.map(message => {
+        const item = jsonMessage(message, '{"runtimeDocument":');
+        if (!['SKILL.md', 'workflows/routing.md', 'workflows/generate-pptx.md'].includes(item?.runtimeDocument) || typeof item.text !== 'string') return message;
+        const { text: _text, ...metadata } = item;
+        return { ...message, content: JSON.stringify({ ...metadata, note: '按当前制稿步骤定向使用 read_runtime 回读本指引。宿主保留原文。' }) };
+    }) : messages;
+    let view = compactReads(focused, phaseRanges), estimate = estimateMessagesTokens(view);
     if (estimate <= budget) return view;
     // 可分页回读的宿主文档按需发送。始终从原观察重算，避免已折叠的分页失去唯一可见正文。
     const priority = doc => doc.runtimeDocument === 'workflows/routing.md' ? 0 : doc.runtimeDocument === 'SKILL.md' ? 1 : 2;
-    const candidates = messages.map((message, index) => ({ index, doc: jsonMessage(message, '{') }))
+    const candidates = focused.map((message, index) => ({ index, doc: jsonMessage(message, '{') }))
         .filter(({ doc }) => doc?.runtimeDocument && typeof doc.text === 'string')
         .sort((a, b) => priority(a.doc) - priority(b.doc) || b.doc.text.length - a.doc.text.length);
-    const prepared = [...messages];
+    const prepared = [...focused];
     for (const { index, doc } of candidates) {
         const { text: _text, ...metadata } = doc;
-        prepared[index] = { ...messages[index], content: JSON.stringify({ ...metadata,
+        prepared[index] = { ...focused[index], content: JSON.stringify({ ...metadata,
             note: '按本轮窗口暂收起指引正文。需要本阶段步骤时使用 read_runtime 按路径和字符偏移分页读取。' }) };
         const next = compactReads(prepared, phaseRanges), size = estimateMessagesTokens(next);
-        if (size >= estimate) { prepared[index] = messages[index]; continue; }
+        if (size >= estimate) { prepared[index] = focused[index]; continue; }
         view = next;
         estimate = size;
         if (size <= budget) break;

@@ -10,10 +10,12 @@ test('forwardChatCompletion 缺少 modelCfg 或 url 时直接抛错', async () =
 
 test('forwardChatCompletion 在发请求前对非法协议 URL 做安全校验并拒绝', async () => {
     // ftp 协议会在 validateModelUrl 阶段被拒，证明安全校验先于 axios 发起。
+    let attempted = 0;
     await assert.rejects(
-        () => forwardChatCompletion({ modelCfg: { id: 1, user_id: null }, url: 'ftp://evil.example/x' }),
+        () => forwardChatCompletion({ modelCfg: { id: 1, user_id: null }, url: 'ftp://evil.example/x', beforeProviderRequest: () => attempted++ }),
         /HTTP or HTTPS|必须使用 HTTP 或 HTTPS/
     );
+    assert.equal(attempted, 0);
 });
 
 test('forwardChatCompletion 导出默认超时常量', () => {

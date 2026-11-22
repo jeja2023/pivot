@@ -42,12 +42,15 @@ function normalize(input = {}) {
     }
     if (input.sourceAssetId !== undefined && !/^[1-9]\d{0,14}$/.test(String(input.sourceAssetId))) throw error('源文件标识无效。');
     if (input.assetIds !== undefined && (!Array.isArray(input.assetIds) || input.assetIds.length > 20 || input.assetIds.some(id => !/^[1-9]\d{0,14}$/.test(String(id))))) throw error('补充素材标识无效或超过二十个。');
+    if (input.decorativeImages !== undefined && typeof input.decorativeImages !== 'boolean') throw error('补充图片用途无效。');
     if (operation === 'edit_native' && !input.sourceAssetId && template?.type !== 'organization') throw error('编辑原稿需要提供已上传的PPTX文件。');
     if (['beautify', 'image_to_pptx'].includes(profile) && !input.sourceAssetId) throw error('美化或图片重建需要提供已上传的源文件。');
     const maxSteps = Number(input.maxSteps || 80), tokenBudget = normalizeTokenBudget(input.tokenBudget);
     if (!Number.isInteger(maxSteps) || maxSteps < 5 || maxSteps > 160) throw error('执行步骤或模型用量预算无效。');
     return { operation, profile, title, instruction, modelId, pageCount, materials, productionProfile, template, sourceAssetId: input.sourceAssetId ? String(input.sourceAssetId) : '',
-        presentationId: text(input.presentationId, 96, '源稿标识'), assetIds: [...new Set((input.assetIds || []).map(String))], maxSteps, tokenBudget,
-        sourceDigest: sha256(JSON.stringify({ instruction, materials, sourceAssetId: input.sourceAssetId || '', template, productionProfile })) };
+        presentationId: text(input.presentationId, 96, '源稿标识'), assetIds: [...new Set((input.assetIds || []).map(String))],
+        ...(input.decorativeImages ? { decorativeImages: true } : {}), maxSteps, tokenBudget,
+        sourceDigest: sha256(JSON.stringify({ instruction, materials, sourceAssetId: input.sourceAssetId || '', template, productionProfile,
+            ...(input.decorativeImages ? { decorativeImages: true } : {}) })) };
 }
 module.exports = { normalize, normalizeTokenBudget };

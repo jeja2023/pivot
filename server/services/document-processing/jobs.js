@@ -774,16 +774,16 @@ async function retryJob({ userId, jobId, sourceModule = '', password = '', outpu
         config.pageRanges = retryPages;
         await execute(`
             UPDATE document_jobs
-            SET status = ?, progress = 0, error_message = '', cancelled_at = NULL, completed_at = NULL,
+            SET status = ?, progress = 0, error_message = '', cancelled_at = NULL, completed_at = NULL, content_revision = content_revision + 1,
                 attempt_token = ?, config_json = ?, result_json = ?, updated_at = ?
             WHERE id = ? AND user_id = ?
         `, [JOB_STATUSES.QUEUED, crypto.randomUUID(), safeJson(normalizeConfig(config)), safeJson({ ...parseJson(job.result_json, {}), retryFailedPages: true, retriedPages: failedRows.map(row => Number(row.page_number)) }), getBeijingTimestamp(), job.id, userId]);
         enqueueJob(job.id);
         return await getJobDetail({ userId, jobId: job.id });
     }
-    await execute(`
-        UPDATE document_jobs
-        SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, attempt_token = ?, updated_at = ?
+    await execute(`UPDATE document_jobs
+        SET status = ?, progress = 0, error_message = '', result_json = '{}', cancelled_at = NULL, completed_at = NULL, attempt_token = ?, updated_at = ?,
+            content_revision = CASE WHEN job_type = 'ocr' THEN content_revision + 1 ELSE content_revision END
         WHERE id = ? AND user_id = ?
     `, [JOB_STATUSES.QUEUED, crypto.randomUUID(), getBeijingTimestamp(), job.id, userId]);
     enqueueJob(job.id);

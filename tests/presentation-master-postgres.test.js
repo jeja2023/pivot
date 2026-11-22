@@ -260,6 +260,39 @@ test('旧阶段上限与新引文暂停均可在补充原文后续作并保留�
     }
 });
 
+test('普通续跑附言保留清单和草稿，明确要求调整时才重新打开确认', { skip: !process.env.DATABASE_URL }, async () => {
+    const { resume } = require('../server/services/presentations/master/tasks');
+    const { recordDraftPlan } = require('../server/services/presentations/master/review-plan');
+    const { identity } = require('../server/services/presentations/master/runtime');
+    const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
+    const request = { presentationId: '', operation: 'generate', profile: 'default', draftFirst: true, modelId: '1', tokenBudget: 0, maxSteps: 5 };
+    const plan = { summary: '既有方案', project: 'report', pages: [{ title: '首页', values: [] }] };
+    for (const revisePlan of [false, true]) {
+        const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: request });
+        const state = { request, usedTokens: 310000, steps: 5, prepared: true, bootstrapped: true, runtimeImage: await identity(),
+            managedProject: 'report', review: { version: 1, approvals: {} }, messages: [], workflowProgress: { phase: 'first_page', calls: 16 } };
+        recordDraftPlan(state, plan);
+        state.reviewDraft = { sha256: 'a'.repeat(64), byteSize: 100 };
+        try {
+            await taskStore.complete(task.id, user, { state }, { failed: true, errorCode: 'PPT_MASTER_ACTION_INVALID' });
+            await resume(user, task.id, { resumeNote: '请修正设计规范', revisePlan });
+            let row;
+            for (let attempt = 0; attempt < 100; attempt++) {
+                row = await repository.read(user, task.id);
+                if (row.status === 'failed' && !row.result_json._lease) break;
+                await delay(20);
+            }
+            const saved = row.result_json.state;
+            assert.equal(row.error_code, 'PPT_MASTER_STEP_LIMIT');
+            assert.equal(saved.usedTokens, 310000);
+            assert.equal(saved.workflowProgress, undefined);
+            assert.deepEqual(saved.review.approvals.design?.plan, revisePlan ? undefined : plan);
+            assert.deepEqual(saved.reviewDraft, revisePlan ? undefined : state.reviewDraft);
+            assert.equal(saved.userSupplements[0].text, '请修正设计规范');
+        } finally { await execute('DELETE FROM tool_tasks WHERE id=? AND user_id=?', [task.id, user.id]); }
+    }
+});
+
 test('活动制作可以跨文稿查询，过期读请求不会撤销刚延长的截止时间', { skip: !process.env.DATABASE_URL }, async () => {
     const user = await queryOne('SELECT * FROM users ORDER BY id LIMIT 1');
     const task = await taskStore.create({ user, toolName: repository.TOOL, inputRequest: { presentationId: 'previous-document' } });
@@ -299,6 +332,8 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
     t.mock.method(runtime, 'readOutput', async (_user, _id, file) => {
         if (file === 'presentation.pptx') return pptx;
         if (broken === 'large') throw runtime.error('超过大小上限', 'PPT_SERVICE_RESPONSE_TOO_LARGE', 502);
+        if (broken === 'missing') throw runtime.error('源包不可用', 'PPT_SERVICE_OUTPUT_MISSING', 404);
+        if (broken === 'changed') return Buffer.from('另一份源包');
         if (broken) throw new Error('模拟源包传输失败');
         return zip;
     });
@@ -306,10 +341,14 @@ test('PPT 交付事务中断不留下产物，重试同一回执原子提交并�
         assert.ok(await repository.claim(user, task.id, lease));
         await assert.rejects(prepareDelivery(user, task.id, request, receipt, deliveryContext), /传输失败/);
         assert.equal((await artifacts()).length, 0);
-        broken = 'large';
-        const withoutBundle = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
-        assert.deepEqual(withoutBundle.files.map(file => file.format), ['pptx']);
-        assert.match(withoutBundle.sourcePackageWarning, /完整项目源包/);
+        for (const trouble of ['large', 'missing', 'changed']) {
+            broken = trouble;
+            const withoutBundle = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
+            assert.deepEqual(withoutBundle.files.map(file => file.format), ['pptx']);
+            assert.match(withoutBundle.sourcePackageWarning, /完整项目源包/);
+        }
+        broken = 'missing';
+        await assert.rejects(prepareDelivery(user, task.id, request, { ...receipt, templateOnly: true }, deliveryContext), { code: 'PPT_SERVICE_OUTPUT_MISSING' });
         broken = false;
         const prepared = await prepareDelivery(user, task.id, request, receipt, deliveryContext);
         await assert.rejects(repository.withExecution(user, task.id, lease, async executor => {

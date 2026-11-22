@@ -22,7 +22,8 @@ async function forwardChatCompletion({
     headers,
     stream = false,
     timeout = DEFAULT_FORWARD_TIMEOUT_MS,
-    signal = null
+    signal = null,
+    beforeProviderRequest
 } = {}) {
     if (!modelCfg) throw new Error('模型转发失败：缺少必需的 modelCfg 配置');
     if (!url) throw new Error('模型转发失败：缺少必需的 url 地址');
@@ -34,6 +35,8 @@ async function forwardChatCompletion({
     }
     assertJsonOnlyPayload(providerData);
     const agents = createSafeModelHttpAgents(modelCfg, user);
+    signal?.throwIfAborted?.();
+    beforeProviderRequest?.();
     return axios.post(url, providerData, {
         headers,
         responseType: stream ? 'stream' : 'json',

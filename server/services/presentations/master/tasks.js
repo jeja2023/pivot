@@ -51,7 +51,7 @@ async function ensureAccess(user, request, { forCreation = false } = {}) {
         const item = await service.getPresentationAsset(user, id, { metadataOnly: true });
         if (!item) throw runtime.error('源文件或补充素材已不存在或无权访问。', 'PPT_MASTER_SOURCE_FORBIDDEN', 403);
         if (forCreation) checkInputSize(item.asset.filename, item.asset.byteSize);
-        if (/^image\/(?:png|jpeg|webp)$/.test(item.asset?.mimeType || '')) visionRequired = true;
+        if (/^image\/(?:png|jpeg|webp)$/.test(item.asset?.mimeType || '') && (id === request.sourceAssetId || !request.decorativeImages)) visionRequired = true;
     }
     return visionRequired;
 }
@@ -162,7 +162,9 @@ async function prepareInputs(user, id, request, deps = {}) {
             'video/mp4': '.mp4', 'font/ttf': '.ttf', 'font/otf': '.otf', 'application/vnd.openxmlformats-officedocument.presentationml.presentation': '.pptx' })[loaded.asset.mimeType];
         if (!extension) throw runtime.error('补充素材格式尚未支持，请使用图片、音频、视频、字体或PPTX。');
         const file = await input(user, id, 'asset-' + assetId + extension, loaded.buffer);
-        inputFiles.push({ path: file, title: loaded.asset.filename, kind: loaded.asset.mimeType }); inputDigests.push(crypto.createHash('sha256').update(loaded.buffer).digest('hex'));
+        inputFiles.push({ path: file, title: loaded.asset.filename, kind: loaded.asset.mimeType,
+            ...(request.decorativeImages && /^image\/(?:png|jpeg|webp)$/.test(loaded.asset.mimeType) ? { imageRole: 'decorative' } : {}) });
+        inputDigests.push(crypto.createHash('sha256').update(loaded.buffer).digest('hex'));
     }
     return { ...request, inputFiles, inputDigests, materials: request.materials.map(({ text: _text, ...material }) => material) };
 }
@@ -405,18 +407,20 @@ async function resume(user, id, input = {}) {
     if (resumeNote) {
         const source = registerSupplement(state, resumeNote, 'resume');
         resetCitationRepair(state, { allowRevision: input.revisePlan === true });
-        reopenReview(state);
+        if (input.revisePlan === true) reopenReview(state);
         state.messages ||= [];
         state.messages.push({ role: 'user', content: '用户在检查点补充说明 [引用来源 ' + source + ']：' + resumeNote });
     } else if (paused && changedModel) resetCitationRepair(state);
     const stalled = ['PPT_MASTER_NO_PROGRESS', 'PPT_MASTER_AUTHORING_READ_LIMIT'].includes(row.error_code);
-    if (stalled || row.error_code === 'PPT_MASTER_PHASE_LIMIT' || paused && workflow && workflow.calls >= workflow.limit) delete state.workflowProgress;
+    if (stalled || row.error_code === 'PPT_MASTER_PHASE_LIMIT' || workflow && workflow.calls >= workflow.limit) delete state.workflowProgress;
+    delete state.firstPageInspectionRounds;
     if (stalled || state.inspectionRepairPending) delete state.focusModelHistory;
     state.inspectionRepairAttempts = 0;
     delete state.inspectionRepairPending;
     delete state.inspectionDiagnostic;
-    // 旧检查点可能只保存了转发超时或带超时原因的熔断错误。
-    if (['PPT_MASTER_MODEL_TIMEOUT', 'PPT_MASTER_MODEL_CONNECTION', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
+    // 首张制稿续跑及模型连接问题优先发送当前证据，旧指引仍可按路径查阅。
+    if (workflow?.phase === 'first_page' && row.error_code && input.revisePlan !== true
+        || ['PPT_MASTER_MODEL_TIMEOUT', 'PPT_MASTER_MODEL_CONNECTION', 'ECONNABORTED', 'ETIMEDOUT'].includes(row.error_code)
         || row.error_code === 'AI_ENDPOINT_CIRCUIT_OPEN' && /timeout of \d+ms exceeded/i.test(row.error_message || '')) {
         state.focusModelHistory = true;
     }

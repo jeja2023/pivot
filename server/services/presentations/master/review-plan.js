@@ -4,9 +4,10 @@ const { createHash } = require('node:crypto');
 const { canonicalJson } = require('../../canonical-json');
 const { error } = require('./runtime');
 const { getSupplement } = require('./user-supplements');
-const { compact, containsValue, locateCitation, verifiedCorrection, originalLine, extendCitation, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
+const { compact, containsValue, matchesDisplayedValue, matchesChartNumber, locateCitation, verifiedCorrection, originalLine, extendCitation, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
+const { checklistLimits } = require('./checklist-limits');
 const { normalizeTemplateUse } = require('./template-application');
-const { writeCorrection } = require('./action-parameters');
+const { writeCorrection, listGuidance } = require('./action-parameters');
 const { missingTitleClaims } = require('./title-evidence');
 
 const digest = value => createHash('sha256').update(JSON.stringify(value), 'utf8').digest('hex');
@@ -109,11 +110,12 @@ async function normalizeStage(input, state, verifySource) {
         }
         return sources.get(path);
     };
+    const { perPage, total } = checklistLimits(state);
     let totalValues = 0;
     for (const [pageIndex, page] of pages.entries()) {
         const title = valueText(page?.title, 180, '页面标题');
-        if (!Array.isArray(page.values) || page.values.length > 8 || (totalValues += page.values.length) > 120) {
-            throw invalid('每页最多核验八项关键数据，全稿最多一百二十项。没有关键数据的页面请明确提交空数组。');
+        if (!Array.isArray(page.values) || page.values.length > perPage || (totalValues += page.values.length) > total) {
+            throw invalid(`每页最多核验 ${perPage} 项关键数据，全稿最多 ${total} 项。请将密集数据分布到适当页面，没有关键数据的页面填空数组。`);
         }
         const values = [];
         for (const [valueIndex, entry] of page.values.entries()) {
@@ -124,9 +126,9 @@ async function normalizeStage(input, state, verifySource) {
                 const category = valueText(entry.chart?.category, 120, '图表分类');
                 const number = valueText(entry.chart?.number, 48, '图表数字');
                 const numericLiteral = /^[+-]?[0-9]+(?:\.[0-9]+)?$/.test(number)
-                    && containsValue(text, number);
+                    && matchesChartNumber(text, number);
                 if (!numericLiteral) {
-                    throw invalid('图表数据须提供原文中出现的十进制数字、系列和分类。');
+                    throw invalid('图表数据须提供与清单文字同单位的等值十进制数，以及系列和分类。');
                 }
                 value.chart = { series, category, number };
             }
@@ -164,7 +166,7 @@ async function normalizeStage(input, state, verifySource) {
             value.source = { path, quote };
             const normalizedQuote = compact(quote);
             const quoteFound = containsValue(source.normalized, normalizedQuote);
-            const containsText = containsValue(normalizedQuote, text);
+            const containsText = matchesDisplayedValue(normalizedQuote, text);
             const original = !quoteFound && containsText ? originalLine(source, text)
                 : quoteFound && !containsText ? extendCitation(source, quote, text) : '';
             if (original) {
@@ -206,8 +208,10 @@ async function normalizeStage(input, state, verifySource) {
             for (const claim of new Set(missing)) {
                 if (failures.some(f => f.page === pageIndex + 1 && f.text === claim)) continue;
                 let position = values.findIndex(value => value.text === claim);
-                if (claim.length > 120 || position < 0 && (values.length >= 8 || totalValues >= 120)) {
-                    throw invalid(`第 ${pageIndex + 1} 页标题含未核对的业务数字。请用 titleSource 的 path 和 quote 提供连续原文，或修改标题。`);
+                if (claim.length > 120 || position < 0 && (values.length >= perPage || totalValues >= total)) {
+                    failures.push({ key: citationKey({ text: claim }), page: pageIndex + 1, title, text: claim, path: '', titleClaim: true,
+                        reason: '标题中的业务数字需要对应指标、单位及原文依据。可补充 titleSource 或删除该分句。' });
+                    continue;
                 }
                 if (position < 0) {
                     position = values.push({ text: claim }) - 1;
@@ -238,8 +242,9 @@ async function normalizeStage(input, state, verifySource) {
     const templateUse = normalizeTemplateUse(state, input.plan, normalized);
     if (templateUse) plan.templateUse = templateUse;
     if (failures.length) {
-        const citationIssues = failures.map(({ page, item, path, title, text, reason, excerpt, missing }) => ({
-            location: `第 ${page} 页第 ${item} 项（${sourceLabel(path)}）`, page, item, title, text, path, reason,
+        const citationIssues = failures.map(({ page, item, path, title, text, reason, excerpt, missing, titleClaim }) => ({
+            location: `第 ${page} 页${titleClaim ? '标题' : '第 ' + item + ' 项'}（${sourceLabel(path)}）`, page, item, title, text, path, reason,
+            ...(titleClaim ? { titleClaim: true } : {}),
             ...(excerpt ? { excerpt } : {}), ...(missing ? { missing: true } : {})
         }));
         const detail = citationIssues.slice(0, 4).map(({ location, reason }) => `${location}的${reason}`).join('');
@@ -340,7 +345,8 @@ function exportReview(state, project, templateOnly = false) {
         throw checklistError('请重新提交采用所选模板的最终清单并取得确认，再执行导出。');
     }
     const checklist = templateOnly ? null : checklistFor(approval.plan);
-    return { checklist, checklistDigest: checklist && digest(checklist), ...(approval.plan.templateUse ? { templateUse: approval.plan.templateUse } : {}) };
+    const templateUse = !templateOnly && normalizeTemplateUse(state, approval.plan, approval.plan.pages);
+    return { checklist, checklistDigest: checklist && digest(checklist), ...(templateUse ? { templateUse } : {}) };
 }
 
 function verifyReceipt(receipt, expected) {
@@ -356,6 +362,7 @@ function verifyReceipt(receipt, expected) {
     }
     const use = expected.templateUse;
     if (!use) return undefined;
+    if (!use.rule) return { styleReview: 'manual' };
     const page = expected.checklist[use.page - 1];
     if (!page || use.visibleText !== page[0] && !page[1].includes(use.visibleText)) {
         throw error('交付缺少模板规则对应页的已核验内容，请重新核对清单。', 'PPT_MASTER_CHECKLIST_UNVERIFIED', 422);
@@ -419,6 +426,9 @@ function reviewGuidance(state) {
 function reviewRecoveryGuidance(state, code, message) {
     const reason = String(message || '').slice(0, 500);
     if (code === 'PPT_MASTER_ACTION_INVALID' && reason) {
+        if (/^同批第 [1-6] 项 list 含不支持的参数。(?:请移除或修正 path。)?请仅提交 action。$/u.test(reason)) {
+            return '\n上次文件盘点在执行前被拒绝。' + listGuidance + '如已掌握所需文件，按最近一次项目校验诊断继续修正。';
+        }
         if (/^同批第 [1-6] 项 write 含不支持的参数/u.test(reason)) {
             return '\n上次回复在写入前被拒绝。' + reason + writeCorrection + '沿用已保存的清单和有效写入回执，按最近的项目校验结果继续。';
         }

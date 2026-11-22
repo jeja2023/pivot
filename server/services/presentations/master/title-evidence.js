@@ -1,13 +1,17 @@
 'use strict';
 
-const { compact, containsValue } = require('./citation-repair');
+const { matchesDisplayedValue } = require('./citation-repair');
+const clauseBoundary = /[。；;！？!?\n]|,(?!\d{3}(?:\D|$))/u;
+const standardId = /(?<![A-Z\d])(?:ISO(?:\s*\/\s*IEC)?|IEC|GB(?:\s*\/\s*T)?|IEEE|ASTM\s*[A-Z]?)[ \t]*\d{2,6}(?:[.\-:]\d{1,6})*(?![\d.%‰]|万?元|个?百分点)/giu;
+const labelledModel = /(?:型号|机型|机种)[ \t]*:?[ \t]*[A-Z][A-Z\d]*\d[A-Z\d]*(?:[._-][A-Z\d]+)*(?![A-Z\d]|[%‰]|万?元|个?百分点)/giu;
 
 // 保留原句核对指标及单位。年份、日期、季度和章节编号本身不构成业务数字。
 function quantitativeClauses(title) {
     const normalized = String(title || '').normalize('NFKC');
-    const clauses = normalized.split(/[。；;！？!?\n]|,(?!\d{3}(?:\D|$))/u).map(s => s.trim());
+    const clauses = normalized.split(clauseBoundary).map(s => s.trim());
     const claims = clauses.filter(clause => {
-        const body = clause.replace(/(?:19|20)\d{2}\s*[-–—至/]\s*(?:19|20)\d{2}(?:\s*年)?(?![\d%万亿元])/gu, '')
+        const body = clause.replace(standardId, ' ').replace(labelledModel, ' ')
+            .replace(/(?:19|20)\d{2}\s*[-–—至/]\s*(?:19|20)\d{2}(?:\s*年)?(?![\d%万亿元])/gu, '')
             .replace(/(?<!\d)(?:19|20)\d{2}(?:\s*年(?:度|\d{1,2}月(?:\d{1,2}日)?)?|[-/]\d{1,2}(?:[-/]\d{1,2})?|(?=Q[1-4]))/giu, '')
             .replace(/第\s*[\d一二三四五六七八九十]+\s*(?:页|章|节|季|部分)|\bQ[1-4]\b/giu, '')
             .replace(/^\s*(?:FY\s*)?(?:19|20)\d{2}(?=\s|$)/iu, '')
@@ -26,7 +30,16 @@ function quantitativeClauses(title) {
 
 function missingTitleClaims(page) {
     return quantitativeClauses(page.title).filter(claim => ![page.titleSource, ...(page.values || []).map(value => value.source)]
-        .some(source => typeof source?.quote === 'string' && containsValue(compact(source.quote), claim)));
+        .some(source => typeof source?.quote === 'string' && matchesDisplayedValue(source.quote, claim)));
 }
 
-module.exports = { missingTitleClaims };
+function titleWithoutUnverifiedClaims(page, unresolvedText) {
+    const blocked = missingTitleClaims(page);
+    const normalized = page.title.normalize('NFKC');
+    if (blocked.includes(normalized)) return '';
+    const title = normalized.split(clauseBoundary).map(clause => clause.trim()).filter(clause => clause
+        && !blocked.includes(clause) && !(unresolvedText && matchesDisplayedValue(clause, unresolvedText))).join('，');
+    return title && missingTitleClaims({ ...page, title }).length === 0 ? title : '';
+}
+
+module.exports = { missingTitleClaims, titleWithoutUnverifiedClaims };

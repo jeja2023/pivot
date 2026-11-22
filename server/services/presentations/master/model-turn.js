@@ -14,6 +14,7 @@ const { phaseMessages } = require('./phase-context');
 const { ensureModelQuota } = require('../../model-daily-quota');
 const { getBeijingTimestamp } = require('../../../time');
 const { recordTurnDiagnostic } = require('./observations');
+const { assertWorkflowCapacity, recordWorkflowCall } = require('./workflow-progress');
 const { hostGuidance, currentHostPrompt } = require('./host-protocol');
 const { citationId } = require('./citation-repair');
 
@@ -55,7 +56,7 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
     const makeView = async () => {
         const original = await (deps.messagesForModel || messagesForModel)(user, id, state, model);
         const compacted = compactMessages(original, { forModel: true });
-        const { messages: prepared, ranges } = phaseMessages(compacted.messages, state);
+        const { messages: prepared, ranges, phase } = phaseMessages(compacted.messages, state);
         // 清单阶段使用宿主协议、所选模板和材料。绘制指引在制稿阶段恢复。
         const planning = state.request.draftFirst && state.managedProject && state.review?.approvals && !state.review.approvals.design;
         const visible = (planning || citationIssues?.length) ? prepared.filter(message => !(message.role === 'user'
@@ -68,11 +69,13 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
         }
         if (citationIssues?.length) {
             visible.push({ role: 'user', content: JSON.stringify({
-                citationRepairEvidence: citationIssues.map(issue => ({ ...issue, ...(!issue.missing ? { id: citationId(issue) } : {}) })),
+                citationRepairEvidence: citationIssues.map(issue => ({ ...issue, ...(!issue.missing && !issue.titleClaim ? { id: citationId(issue) } : {}) })),
                 ...(state.citationDraft?.plan ? { savedCitationPlan: state.citationDraft.plan } : {})
             }) });
         }
-        const messages = fitReferenceMessages(visible, limits.fullOutputInputBudget, ranges);
+        const validation = state.projectPreparation?.validation;
+        const focusPreparation = phase === 'managed_authoring' && (state.focusModelHistory || validation && validation.exitCode !== 0);
+        const messages = fitReferenceMessages(visible, limits.fullOutputInputBudget, ranges, focusPreparation);
         return { original, messages, compactedWrites: compacted.compactedWrites, inputEstimate: estimateMessagesTokens(messages) };
     };
     const archive = async options => {
@@ -94,6 +97,7 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
     if (view.inputEstimate > limits.fullOutputInputBudget && await archive({ force: true, recentTurns: 1 })) view = await makeView();
 
     const send = async () => {
+        assertWorkflowCapacity(state);
         state.modelRequest = { contextWindow: limits.contextWindow, configuredInputLimit: limits.configuredInputLimit,
             inputEstimate: view.inputEstimate, timeoutSeconds: Math.ceil(AGENT_MODEL_REQUEST_TIMEOUT_MS / 1000) };
         const remainingTokens = state.request.tokenBudget === 0 ? Infinity : state.request.tokenBudget - state.usedTokens;
@@ -105,15 +109,18 @@ async function runModelTurn(user, id, state, model, hooks, deps, progressGuidanc
         const usageRef = {};
         let output, releaseQuota = () => {};
         let startedAt, turnStartMs;
+        const beforeProviderRequest = () => recordWorkflowCall(state);
         const finishTiming = () => ({ startedAt, durationMs: Math.round(performance.now() - turnStartMs) });
         try {
             if (!deps.callModel) releaseQuota = await ensureModelQuota(user, model, view.messages, plan.maxTokens, { signal: hooks.signal, inputEstimate: plan.inputEstimate });
             startedAt = getBeijingTimestamp();
             turnStartMs = performance.now();
+            if (deps.callModel) beforeProviderRequest();
             // 非流式调用使用该选项设置 HTTP 等待时限。PPT 必须等完整 JSON，再校验和执行动作。
             output = await (deps.callModel || callModelJson)(model, view.messages, { user, signal: hooks.signal, maxTokens: plan.maxTokens,
                 firstResponseTimeoutMs: AGENT_MODEL_REQUEST_TIMEOUT_MS,
-                temperature: 0.2, usageRef, quotaManaged: true, enableThinking: false, budget: deps.budget, responseFormat: { type: 'json_object' } });
+                temperature: 0.2, usageRef, quotaManaged: true, enableThinking: false, budget: deps.budget, beforeProviderRequest,
+                responseFormat: { type: 'json_object' } });
         } catch (error) {
             const timing = turnStartMs === undefined ? null : finishTiming();
             releaseQuota();

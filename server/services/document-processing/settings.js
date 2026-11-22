@@ -6,9 +6,11 @@ const {
     DEFAULT_DOCUMENT_PROCESSING_CONFIG,
     DEFAULT_OCR_SERVICE_URL,
     DOCUMENT_PROCESSING_SETTING_KEYS,
+    OCR_MODES,
     normalizeOcrServiceUrl
 } = require('./constants');
 const { normalizeEngine } = require('./ocr');
+const { getOcrVlServiceUrl } = require('./ocr/vl');
 const { parseJson } = require('./files');
 
 function settingInt(key, fallback, min, max) {
@@ -27,6 +29,7 @@ function getDocumentProcessingSettings() {
     return {
         engine: normalizeEngine(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.engine) || process.env.DOCUMENT_PROCESSING_OCR_ENGINE || 'http'),
         serviceUrl: normalizeOcrServiceUrl(getAppSettingValue(DOCUMENT_PROCESSING_SETTING_KEYS.serviceUrl) || process.env.OCR_SERVICE_URL || DEFAULT_OCR_SERVICE_URL),
+        vlServiceUrl: getOcrVlServiceUrl(),
         maxRenderPages: settingInt(DOCUMENT_PROCESSING_SETTING_KEYS.maxRenderPages, DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxRenderPages, 1, 100),
         maxOcrPages: settingInt(DOCUMENT_PROCESSING_SETTING_KEYS.maxOcrPages, DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxOcrPages, 1, 100),
         confidenceThreshold: settingFloat(DOCUMENT_PROCESSING_SETTING_KEYS.confidenceThreshold, DEFAULT_DOCUMENT_PROCESSING_CONFIG.confidenceThreshold, 0, 1),
@@ -40,6 +43,7 @@ async function updateDocumentProcessingSettings({ patch = {}, userId = null } = 
     const allowed = {
         engine: value => normalizeEngine(value),
         serviceUrl: value => normalizeOcrServiceUrl(value),
+        vlServiceUrl: value => normalizeOcrServiceUrl(value),
         maxRenderPages: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxRenderPages, 1), 100),
         maxOcrPages: value => Math.min(Math.max(Number.parseInt(value, 10) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.maxOcrPages, 1), 100),
         confidenceThreshold: value => Math.min(Math.max(Number.parseFloat(value) || DEFAULT_DOCUMENT_PROCESSING_CONFIG.confidenceThreshold, 0), 1),
@@ -50,7 +54,7 @@ async function updateDocumentProcessingSettings({ patch = {}, userId = null } = 
     const updates = Object.entries(allowed).flatMap(([name, normalize]) => {
         if (!Object.prototype.hasOwnProperty.call(patch, name)) return [];
         const key = DOCUMENT_PROCESSING_SETTING_KEYS[name];
-        if (name === 'serviceUrl' && String(patch[name] ?? '').trim() === '') {
+        if ((name === 'serviceUrl' || name === 'vlServiceUrl') && String(patch[name] ?? '').trim() === '') {
             return [{ key, remove: true }];
         }
         return [{ key, value: String(normalize(patch[name])) }];
@@ -141,6 +145,7 @@ function normalizeConfig(config = {}) {
         configVersion: 3,
         language: String(safe.language || safe.lang || 'ch').slice(0, 24),
         engine: normalizeEngine(safe.engine || defaults.engine || 'http'),
+        ...(safe.ocrMode === OCR_MODES.VL ? { ocrMode: OCR_MODES.VL } : {}),
         dpi: Math.min(Math.max(Number.parseInt(safe.dpi, 10) || 220, 72), 600),
         maxRenderPages: Math.min(Math.max(Number.isFinite(requestedRenderPages) ? requestedRenderPages : defaults.maxRenderPages, 1), defaults.maxRenderPages),
         maxOcrPages: Math.min(Math.max(Number.isFinite(requestedOcrPages) ? requestedOcrPages : defaults.maxOcrPages, 1), defaults.maxOcrPages),

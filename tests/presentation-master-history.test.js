@@ -407,6 +407,14 @@ test('已确认且同一项目的设计文件经校验回执后仅收起固定�
     assert.equal(phaseMessages(changedLock, { ...state, messages: changedLock }).messages[1], changedLock[1]);
     const resumed = [...original, { role: 'user', content: '宿主中断后从已保存检查点继续。先核对文件。' }, { role: 'assistant', content: '{}' }];
     assert.equal(phaseMessages(resumed, { ...state, messages: resumed }).messages[1], resumed[1]);
+    const managed = { ...state, managedProject: 'project', request: { ...state.request, draftFirst: true },
+        messages: resumed, projectPreparation: { validation: { exitCode: 1 } } };
+    const recovery = phaseMessages(resumed, managed);
+    assert.equal(recovery.phase, 'managed_authoring');
+    const focused = fitReferenceMessages(recovery.messages, Infinity, recovery.ranges, true);
+    assert.equal(JSON.parse(focused[1].content).text, undefined);
+    assert.match(JSON.parse(focused[1].content).note, /read_runtime/);
+    assert.equal(JSON.parse(original[1].content).text, text);
     const answered = [...original, { role: 'user', content: '用户对本次确认问题的实际答复：请调整方案' }];
     assert.equal(phaseMessages(answered, { ...state, messages: answered }).messages[1], answered[1]);
 });

@@ -58,7 +58,8 @@
         const project = (item.actions || []).find(entry => entry.projectIssues?.length);
         if (project) {
             const labels = { design: '设计规范', lock: '执行锁', communication: '沟通字段', layout: '模板版式或资源引用', other: '项目结构' };
-            return '项目校验未通过。请核对' + project.projectIssues.map(kind => labels[kind]).filter(Boolean).join('、') + '。';
+            const summary = '项目校验未通过。请核对' + project.projectIssues.map(kind => labels[kind]).filter(Boolean).join('、') + '。';
+            return project.projectDetails?.length ? summary + project.projectDetails.join('；') + '。' : summary;
         }
         if (item.correctionKind === 'citation_patch' && item.outcome !== 'citation_placeholder') return '引文修正未命中当前待核对项，请使用当前条目标识与原文。';
         if (item.correctionKind === 'plan_page_count' && item.outcome !== 'citation_placeholder') return '模型提交的清单页数不足或超出制作要求。';
@@ -89,5 +90,23 @@
         return `预计输入 ${item.inputEstimate}${parts}，收敛前预计 ${item.originalEstimate}，压缩 ${item.compactedWrites} 条历史写入。`;
     }
 
-    window.Pivot.exposeModule('apps.presentations.masterUsage', { timingLabel, formatMetrics, formatModelError, preparationDiagnostic, observationStatus, contextLabel });
+    function citationDetailsOpen(panel, id) {
+        return panel.dataset.taskId === String(id) && panel.querySelector('.presentation-master-citation-details')?.open === true;
+    }
+
+    function mountCitationDetails(panel, citations, open, node) {
+        if (!citations?.length) return;
+        const issues = node('details', 'presentation-master-task-summary presentation-master-citation-details');
+        issues.open = Boolean(open);
+        const pages = new Set(citations.map(issue => issue.page));
+        issues.appendChild(node('summary', '', `${pages.size} 页有 ${citations.length} 处待核对，已在初稿清单中标记。`));
+        for (const issue of citations) {
+            const label = issue.titleClaim ? '标题' : '第 ' + issue.item + ' 项';
+            issues.appendChild(node('p', '', `第 ${issue.page} 页${label} · ${issue.reason}`));
+        }
+        panel.appendChild(issues);
+    }
+
+    window.Pivot.exposeModule('apps.presentations.masterUsage', { timingLabel, formatMetrics, formatModelError, preparationDiagnostic,
+        observationStatus, contextLabel, citationDetailsOpen, mountCitationDetails });
 })();

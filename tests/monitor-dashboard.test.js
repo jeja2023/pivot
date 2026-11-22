@@ -1,8 +1,10 @@
+/* global window */
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const { chromium, expect } = require('@playwright/test');
 const source = fs.readFileSync(path.join(__dirname, '../client/chat/monitor-dashboard.js'), 'utf8');
 
 function fixture(fetch) {
@@ -50,6 +52,75 @@ test('空 HTTP 样本和不可用运行探针不会显示成正常的零延迟�
     assert.match(elements.get('monitor-runtime-pressure').html, /等待数据库连接<\/span><strong>暂无数据/);
     assert.match(elements.get('monitor-task-queue').html, /暂不可用/);
     assert.match(elements.get('monitor-routing-quality').html, /路由平均耗时<\/span><strong>暂无数据/);
+});
+
+test('系统资源的磁盘与进程指标按卡片宽度从双列切换到单列', { timeout: 60000 }, async () => {
+    const client = path.resolve(__dirname, '../client');
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+        const template = fs.readFileSync(path.join(client, 'chat/partials/settings/monitor.html'), 'utf8');
+        await page.setContent(`<style>.hidden{display:none!important}</style><main class="settings-workspace-view">${template}</main>`);
+        for (const style of ['common/styles/theme.css', 'chat/styles/stats-monitor/stats-monitor-common.css', 'chat/styles/stats-monitor/stats-system-monitor.css']) {
+            await page.addStyleTag({ path: path.join(client, style) });
+        }
+        await page.evaluate(() => {
+            const document = window.document;
+            document.getElementById('tab-content-monitor').classList.remove('hidden');
+            document.getElementById('monitor-overview-panel').classList.add('hidden');
+            document.getElementById('monitor-services-panel').classList.remove('hidden');
+            window.isAdminUser = () => true;
+            window.API_BASE = '/api';
+            window.formatDateToCN = () => '';
+            window.formatTokenCount = String;
+            window.showToast = () => {};
+            window.monitorSummaryFixture = {
+                system: { disk: { total: 1024 ** 3, used: 0.8 * 1024 ** 3, free: 0.2 * 1024 ** 3 } },
+                process: { cpuSeconds: { user: 12345.6, system: 789.1 }, memory: { rss: 248.8 * 1024 ** 2 } },
+                http: {}
+            };
+            window.apiFetch = async () => ({ ok: true, json: async () => window.monitorSummaryFixture });
+        });
+        for (const script of ['chat/pivot-core.js', 'common/vendor/purify.min.js', 'chat/safe-html.js', 'chat/monitor-dashboard.js', 'chat/stats-monitor-utils.js', 'chat/stats-monitor.js']) {
+            await page.addScriptTag({ path: path.join(client, script) });
+        }
+        await page.evaluate(async () => {
+            window.escapeHtml = window.Pivot.html.escapeHtml;
+            await window.Pivot.moduleApi('settings.monitor').loadMonitorSummary({ propagateErrors: true });
+        });
+
+        const disk = page.locator('#monitor-resource-list .monitor-row').filter({ hasText: '硬盘空间' });
+        const process = page.locator('#monitor-resource-list .monitor-row').filter({ hasText: 'CPU 累计耗时' });
+        await expect(process).toContainText('进程常驻内存');
+        await expect(process).toContainText('248.8 MB');
+        await expect(disk.locator('.monitor-meter-fill')).toHaveAttribute('data-meter-rate', '80');
+
+        const positions = row => row.locator(':scope > div').evaluateAll(cells => cells.map(cell => ({ x: cell.offsetLeft, y: cell.offsetTop })));
+        for (const row of [disk, process]) {
+            const [left, right] = await positions(row);
+            assert.equal(left.y, right.y);
+            assert.ok(right.x > left.x);
+        }
+
+        for (const width of [950, 390]) {
+            await page.setViewportSize({ width, height: 900 });
+            for (const row of [disk, process]) {
+                const [first, second] = await positions(row);
+                assert.equal(first.x, second.x);
+                assert.ok(second.y > first.y);
+                assert.ok(await row.evaluate(element => element.scrollWidth <= element.clientWidth));
+            }
+        }
+
+        await page.evaluate(async () => {
+            window.monitorSummaryFixture.system.disk = {};
+            await window.Pivot.moduleApi('settings.monitor').loadMonitorSummary({ propagateErrors: true });
+        });
+        await expect(disk.locator('.monitor-meter-track')).toHaveCount(0);
+        await expect(disk.getByText('暂无数据')).toHaveCount(2);
+    } finally {
+        await browser.close();
+    }
 });
 
 test('HTTP 延迟超出直方图范围与明确故障保留可见状态', () => {

@@ -17,14 +17,19 @@ async function loadTemplateSpec(state, execute) {
 
 function normalizeTemplateUse(state, plan, pages) {
     if (state.request.template?.type !== 'runtime') return undefined;
+    const spec = state.templateSpec;
+    if (!spec || spec.id !== state.request.template.id || !/^[a-f0-9]{64}$/.test(spec.digest || '')) {
+        throw error('当前模板规范缺少有效的版本记录，请重新载入所选模板。', 'PPT_MASTER_ACTION_INVALID', 422);
+    }
+    const binding = { id: spec.id, digest: spec.digest };
     const { page, rule, visibleText } = plan.templateUse || {};
     const target = Number.isInteger(page) && pages[page - 1];
     if (!target || typeof rule !== 'string' || rule.trim() !== rule || rule.length < 12 || rule.length > 350
-        || !quotedDesignRule(state.templateSpec?.text, rule)
+        || !quotedDesignRule(spec.text, rule)
         || !(visibleText === target.title || target.values.some(value => !value.chart && value.text === visibleText))) {
-        throw error('请从所选模板第 II 至 VII 节的正文逐字引用一条设计规则（12 至 350 字符），并指定对应页码及该页清单中的可见标题或数据。', 'PPT_MASTER_ACTION_INVALID', 422);
+        return binding;
     }
-    return { id: state.templateSpec.id, digest: state.templateSpec.digest, rule, page, visibleText };
+    return { ...binding, rule, page, visibleText };
 }
 
 function quotedDesignRule(spec, rule) {

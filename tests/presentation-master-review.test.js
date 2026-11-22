@@ -29,6 +29,24 @@ function approve(state) {
     state.response = parseDecision({ decision: 'approve', promptId: pending.promptId }, pending);
 }
 
+test('金额和百分比可按精确等值展示，引文仍须是原材料原文', async () => {
+    const state = makeState(), turn = globalThis.structuredClone(design);
+    const source = '原始收入120万元，增长率5.00%。';
+    state.request.instruction = source;
+    state.request.draftFirst = true;
+    const page = turn.requestInput.plan.pages[0];
+    page.title = '原始收入1,200,000元';
+    page.values = ['收入1,200,000元', '增长率5%'].map(text => ({ text, source: { path: 'instruction', quote: source } }));
+    const read = async () => source;
+    const accepted = await validateTurn(globalThis.structuredClone(turn), state, read);
+    assert.deepEqual(accepted.requestInput.plan.pages[0], page);
+    page.values[0].source.quote = '原始收入1,200,000元，增长率5%。';
+    await assert.rejects(validateTurn(globalThis.structuredClone(turn), state, read), /引文/);
+    page.values[0].source.quote = source;
+    page.values[1].text = '增长率5.01%';
+    await assert.rejects(validateTurn(turn, state, read), /引文/);
+});
+
 test('同一来源唯一可核对的未批准错数允许更正并展示差异，歧义和符号冲突仍拒绝', async () => {
     const state = makeState('quick'), wrong = globalThis.structuredClone(design);
     const actual = '收入120万元。';
@@ -392,9 +410,31 @@ test('同一条唯一原文可补齐过短引文，其他行的同名数据不�
     const run = raw => validateTurn(globalThis.structuredClone(proposal), state, async () => raw);
     const verified = await run('费用80万元。\n收入 １２０ 万元。');
     assert.equal(verified.requestInput.plan.pages[0].values[0].source.quote, '收入 １２０ 万元。');
-    for (const raw of ['收入120亿元。\n收入120万元。', '预计收入120万元。', '收入120万元以上。']) {
+    const paragraph = await run('场景说明。收入120万元。回顾完成。');
+    assert.equal(paragraph.requestInput.plan.pages[0].values[0].source.quote, '收入120万元。');
+    for (const raw of ['收入120亿元。\n收入120万元。', '预计收入120万元。', '预计\n收入120万元。', '收入120万元以上。']) {
         await assert.rejects(run(raw), /关键数据未完整出现在引文中/);
     }
+});
+
+test('标题待核对不占用已满数据清单，初稿保留已核对项和安全标题', async () => {
+    const { draftWithCitationPlaceholders } = require('../server/services/presentations/master/citation-repair');
+    const state = makeState(), proposal = globalThis.structuredClone(design);
+    state.request.draftFirst = true;
+    const page = proposal.requestInput.plan.pages[0];
+    page.title = '经营回顾；预算99万元';
+    page.values = Array.from({ length: 8 }, (_, index) => ({ text: '经核实指标' + (index + 1) + '万元',
+        source: { path: 'instruction', quote: '经核实指标' + (index + 1) + '万元。' } }));
+    state.request.instruction = page.values.map(value => value.source.quote).join('\n');
+    let fallback;
+    await assert.rejects(validateTurn(proposal, state, async () => state.request.instruction), error => {
+        assert.equal(error.citationIssues[0].titleClaim, true);
+        fallback = draftWithCitationPlaceholders(error);
+        return true;
+    });
+    assert.equal(fallback.plan.pages[0].title, '经营回顾');
+    assert.deepEqual(fallback.plan.pages[0].values, page.values);
+    assert.doesNotMatch(JSON.stringify(fallback), /预算99万元/);
 });
 
 test('按模板生成 8 页时可从局部清单误提交恢复，阶段耗尽时保留 9 项引文问题', async () => {
@@ -419,11 +459,11 @@ test('按模板生成 8 页时可从局部清单误提交恢复，阶段耗尽�
     const { normalizeTemplateUse } = require('../server/services/presentations/master/template-application');
     const metadata = '| Style Name | Academic Research |';
     state.templateSpec.text = '## I. Style Overview\n' + metadata + '\n' + state.templateSpec.text;
-    assert.throws(() => normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: metadata } }, plan.pages),
-        { code: 'PPT_MASTER_ACTION_INVALID' });
+    const binding = { id: state.templateSpec.id, digest: state.templateSpec.digest };
+    assert.deepEqual(normalizeTemplateUse(state, {}, plan.pages), binding);
+    assert.deepEqual(normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: metadata } }, plan.pages), binding);
     state.templateSpec.text += '\n| Role | Evidence Obligation |\n| :--- | ---: |\n| Result | Include the verified finding. |';
-    assert.throws(() => normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: 'Evidence Obligation' } }, plan.pages),
-        { code: 'PPT_MASTER_ACTION_INVALID' });
+    assert.deepEqual(normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: 'Evidence Obligation' } }, plan.pages), binding);
     assert.equal(normalizeTemplateUse(state, { templateUse: { ...plan.templateUse, rule: 'Include the verified finding.' } }, plan.pages).page, 1);
     const partial = globalThis.structuredClone(proposal);
     partial.requestInput.plan.pages = partial.requestInput.plan.pages.slice(0, 1);
@@ -718,10 +758,65 @@ test('预检先校验窗口和图片能力，仅合格配置使用端点探针',
     const request = { operation: 'generate', profile: 'default', modelId: 'model' }, probes = [];
     const model = { id: 5, context_window_tokens: 256000, max_tokens: 12000, supports_vision: 1 };
     const deps = changes => ({ loadModel: async () => ({ ...model, ...changes }), probeModel: async (_user, selected, vision) => probes.push([selected.id, vision]) });
-    await assert.rejects(checkModel({ id: 1 }, request, deps({ max_input_tokens: 32000 })), { code: 'PPT_MASTER_CONTEXT_LIMIT' });
+    await assert.rejects(checkModel({ id: 1 }, request, deps({ max_input_tokens: 500 })), { code: 'PPT_MASTER_CONTEXT_LIMIT' });
     await assert.rejects(checkModel({ id: 1 }, request, deps({ max_tokens: 1000 })), { code: 'PPT_MASTER_MODEL_OUTPUT_LIMIT' });
     await assert.rejects(checkModel({ id: 1 }, request, { ...deps({ supports_vision: 0 }), visionRequired: true }), { code: 'PPT_MASTER_VISION_REQUIRED' });
     assert.deepEqual(probes, []);
     assert.equal((await checkModel({ id: 1 }, request, { ...deps({}), visionRequired: true })).contextWindow, 256000);
     assert.deepEqual(probes, [[5, true]]);
+});
+
+test('可省略模板风格规则证据，交付仍绑定所选模板安装摘要', async () => {
+    const state = makeState();
+    state.request.draftFirst = true;
+    state.request.template = { type: 'runtime', id: 'fixed-template' };
+    state.templateSpec = { id: 'fixed-template', digest: 'a'.repeat(64), text: '## V. Visual Theme\nEvidence.' };
+    const { requestInput } = await validateTurn(design, state, async () => state.request.instruction);
+    assert.deepEqual(requestInput.plan.templateUse, { id: 'fixed-template', digest: state.templateSpec.digest });
+    require('../server/services/presentations/master/review-plan').recordDraftPlan(state, requestInput.plan);
+    const expected = exportReview(state, 'report');
+    const packageCheck = { slideCount: 1, checkedPages: 1, checkedValues: 1, checklistDigest: expected.checklistDigest };
+    assert.throws(() => verifyReceipt({ packageCheck }, expected), /模板安装记录/);
+    assert.throws(() => verifyReceipt({ packageCheck: { ...packageCheck, templateSpecDigest: 'b'.repeat(64) } }, expected), /模板安装记录/);
+    assert.deepEqual(verifyReceipt({ packageCheck: { ...packageCheck, templateSpecDigest: state.templateSpec.digest } }, expected), { styleReview: 'manual' });
+});
+
+test('纯文本模型可制作带装饰图的清单，事实图与重建原图仍须读取', async () => {
+    const state = makeState();
+    const picture = { path: 'inputs/asset-12.png', kind: 'image/png', imageRole: 'decorative' };
+    state.request.inputFiles = [picture];
+    const { messagesForModel, imageCoverage } = require('../server/services/presentations/master/model-input');
+    assert.equal(imageCoverage(state).total, 0);
+    assert.equal(await messagesForModel({}, 'test', state, { supports_vision: 0 }), state.messages);
+    assert.ok((await validateTurn(design, state, async () => state.request.instruction)).requestInput.plan);
+    state.request.inputFiles.push({ path: 'inputs/source.png', kind: 'image' });
+    assert.equal(imageCoverage(state).total, 1);
+    await assert.rejects(messagesForModel({}, 'test', state, { supports_vision: 0 }), { code: 'PPT_MASTER_VISION_REQUIRED' });
+    await assert.rejects(validateTurn(design, state, async () => state.request.instruction), /尚有 1 张图片未读取/);
+});
+
+test('图表接受同单位等值十进制，扩大清单仍逐项核对并限制容量', async () => {
+    const state = makeState(), proposal = globalThis.structuredClone(design);
+    const text = '本季收入1,200.00万元', source = { path: 'instruction', quote: text };
+    const chart = { series: '收入', category: '本季', number: '1200' };
+    const page = proposal.requestInput.plan.pages[0];
+    page.values = [{ text, source, chart }, ...Array.from({ length: 8 }, (_, index) => ({ text: '事项' + (index + 1) + '项',
+        source: { path: 'instruction', quote: '事项' + (index + 1) + '项' } }))];
+    const material = page.values.map(value => value.text).join('。');
+    const verify = () => validateTurn(globalThis.structuredClone(proposal), state, async () => material);
+    await assert.rejects(verify(), /每页最多核验 8/);
+    state.engine = { expandedChecklist: 1 };
+    assert.deepEqual((await verify()).requestInput.plan.pages[0].values, page.values);
+    for (const number of ['-1200', '12000000', '1200.01']) {
+        chart.number = number;
+        await assert.rejects(verify(), /图表数据/);
+    }
+    chart.number = '1200';
+    state.request.pageCount = 21;
+    proposal.requestInput.plan.pages = Array.from({ length: 21 }, () => ({ ...page, values: Array(24).fill(page.values[0]) }));
+    await assert.rejects(verify(), /全稿最多 480 项/);
+    state.request.pageCount = 1;
+    proposal.requestInput.plan.pages = [page];
+    page.values = Array.from({ length: 25 }, () => page.values[0]);
+    await assert.rejects(verify(), /每页最多核验 24/);
 });

@@ -487,6 +487,8 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
         const startedAt = '2026-11-20 15:42:31';
         const task = {
             id: 'fixture-task', status: 'failed', request: { presentationId: '', tokenBudget: 0 },
+            workflowProgress: { phase: 'first_page', goal: '完成首张页面', calls: 4, limit: 16 },
+            draftCitationIssues: [{ page: 1, item: 1, reason: '需核对原文' }, { page: 2, titleClaim: true, reason: '标题待核对' }],
             usageDiagnostics: [
                 { ...prior, call: 1, outcome: 'retry', correctionKind: 'action_fields', actionType: 'write', actionIndex: 1,
                     fieldMessage: require('../server/services/presentations/master/action-parameters').fieldMessage('write', 1, ['append']) },
@@ -495,7 +497,8 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
                 { ...prior, call: 3, step: 2, startedAt, durationMs: 59950, outcome: 'citation_placeholder', errorCode: 'PPT_MASTER_CITATION_REVIEW_REQUIRED' },
                 { ...prior, call: 4, step: 3, startedAt, durationMs: null, outcome: 'tool_failed', actions: [
                     { action: 'read', path: 'validation/text_calibration.json', unavailable: true },
-                    { action: 'run', tool: 'project', subcommand: 'validate', failed: true, exitCode: 1, projectIssues: ['lock'] }
+                    { action: 'run', tool: 'project', subcommand: 'validate', failed: true, exitCode: 1, projectIssues: ['lock'],
+                        projectDetails: ['spec_lock.md communication 中的 objective 缺失'] }
                 ] },
                 { ...prior, call: 5, step: 4, durationMs: 0, outputTokens: 0, outcome: 'model_failed',
                     errorCode: 'PPT_MASTER_MODEL_CONNECTION', modelFailureKind: 'connection_reset' }
@@ -503,7 +506,13 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
         };
         await page.route('**/master/tasks/fixture-task', route => route.fulfill({ json: { task } }));
         await page.locator('#presentation-master-start').click();
-        await page.locator('#presentation-master-status').getByRole('button', { name: '查看每轮模型用量（共 5 轮）' }).click();
+        const panel = page.locator('#presentation-master-status');
+        await expect(panel).toContainText('本阶段已发起 4 / 16 次模型请求');
+        const citations = panel.locator('details.presentation-master-citation-details');
+        await expect(citations.locator('p').first()).toBeHidden();
+        await citations.getByText('2 页有 2 处待核对').click();
+        await expect(citations.getByText('第 2 页标题 · 标题待核对')).toBeVisible();
+        await panel.getByRole('button', { name: '查看每轮模型用量（共 5 轮）' }).click();
         const dialog = page.getByRole('dialog', { name: '每轮模型用量明细' });
         const failed = dialog.getByRole('listitem').filter({ hasText: '第 2 次模型调用' });
         for (const viewport of [{ width: 1366, height: 768 }, { width: 390, height: 844 }]) {
@@ -522,7 +531,7 @@ test('每轮明细显示失败调用、旧记录和分钟进位，桌面与窄�
             await expect(placeholder).toContainText('压缩 0 条历史写入');
             const project = dialog.getByRole('listitem').filter({ hasText: '第 4 次模型调用' });
             await expect(project).toContainText('记录尚未生成');
-            await expect(project).toContainText('项目校验未通过。请核对执行锁。');
+            await expect(project).toContainText('项目校验未通过。请核对执行锁。spec_lock.md communication 中的 objective 缺失。');
             const reset = dialog.getByRole('listitem').filter({ hasText: '第 5 次模型调用' });
             await expect(reset).toContainText('输入 10，输出 0');
             await expect(reset).toContainText('模型连接提前关闭，未收到完整回复');

@@ -3,6 +3,21 @@
     if (!pivotLegacy) return;
 
     function create({ api, state, requestJson, toast, renderDetail, loadDetail, loadJobs, closeDetailPanel, submitUpload }) {
+        function renderModes(vlMode) {
+            const selector = document.getElementById('ocr-mode-select');
+            const hint = document.getElementById('ocr-mode-hint');
+            if (!selector || !hint) return;
+            const vl = state.capabilities?.modes?.[vlMode];
+            const option = selector.querySelector(`option[value="${vlMode}"]`);
+            option.disabled = vl?.configured !== true;
+            const vlSelected = selector.value === vlMode;
+            const input = document.getElementById('ocr-file-input');
+            if (input) input.accept = vlSelected ? '.pdf,.png,.jpg,.jpeg,.webp,.bmp' : '.pdf,.ofd,.png,.jpg,.jpeg,.gif,.webp,.bmp';
+            if (!vl?.configured) hint.textContent = '文档解析（VL）需管理员配置服务后启用。';
+            else if (vlSelected) hint.textContent = vl.available ? '保留标题、表格等排版，支持图片和 PDF。' : 'VL 服务当前未就绪，请检查服务后再提交。';
+            else hint.textContent = '';
+        }
+
         async function requireDesktopCapability(type, label) {
             const desktop = window.pivotDesktop;
             if (typeof desktop?.getLocalAuthorizationStatus !== 'function') {
@@ -132,7 +147,7 @@
                     const upload = new File([bytes], file.originalName, { type: file.mimeType || 'application/octet-stream' });
                     const form = document.getElementById('ocr-upload-form');
                     if (!form) return;
-                    await submitUpload(form, [upload]);
+                    await submitUpload(form, [upload], { ocrMode: 'text' });
                     toast(`已从授权目录接收 ${file.originalName}`, 'success');
                 } catch (error) {
                     if (error?.code !== 'OCR_WATCH_FILE_UNSTABLE') toast(error.message || '读取授权目录文件失败', 'warning');
@@ -233,7 +248,7 @@
             });
         }
 
-        return { authorizeWatchDirectory, bindRegionPointerEvents, bindWatchEvents, cancelJob, captureDesktopScreenshot, deleteJob, downloadOutput, exportOutput, extractFields, openReviewers, recognizeSelectedRegion, retryJob, revokeWatchDirectory, saveReviewers, submitFeedback };
+        return { authorizeWatchDirectory, bindRegionPointerEvents, bindWatchEvents, cancelJob, captureDesktopScreenshot, deleteJob, downloadOutput, exportOutput, extractFields, openReviewers, recognizeSelectedRegion, renderModes, retryJob, revokeWatchDirectory, saveReviewers, submitFeedback };
     }
 
     pivotLegacy.PivotOcrActions = { create };

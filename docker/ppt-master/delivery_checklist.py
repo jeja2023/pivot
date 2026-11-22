@@ -39,6 +39,28 @@ def contains(text: str, expected: str, numeric: bool = False) -> bool:
     return bool(re.search(prefix + re.escape(needle) + suffix, numeric_text(text) if numeric else compact(text)))
 
 
+UNIT_SCALE = {"亿元": 8, "万元": 4, "千元": 3, "元": 0, "%": 0}
+EXACT_UNIT_VALUE = re.compile(r"(?<![0-9A-Za-z.,+±\-$€£¥])([+-]?(?:[0-9]{1,3}(?:,[0-9]{3})+|[0-9]+)(?:\.[0-9]+)?)(亿元|万元|千元|元|%)")
+
+
+def normalize_display_units(text: str) -> str:
+    def replace(match):
+        number, unit = match.groups()
+        whole, _, fraction = number.lstrip("+-").replace(",", "").partition(".")
+        at = len(whole) + UNIT_SCALE[unit]
+        digits = whole + fraction
+        integer = digits[:at].ljust(at, "0").lstrip("0") or "0"
+        remainder = digits[at:].rstrip("0")
+        return ("-" if number.startswith("-") else "") + integer + ("." + remainder if remainder else "") + ("%" if unit == "%" else "元")
+
+    # 与宿主的显示值核对使用同样的十进制移位，清单及实际放映内容保持原样。
+    return EXACT_UNIT_VALUE.sub(replace, re.sub(r"−|负(?=\d)", "-", compact(text)))
+
+
+def matches_displayed_value(text: str, expected: str, numeric: bool = False) -> bool:
+    return contains(text, expected, numeric) or contains(normalize_display_units(text), normalize_display_units(expected), numeric=True)
+
+
 def read_slide_order(archive, slide_names: list[str]) -> list[str]:
     presentation = ET.fromstring(archive.read("ppt/presentation.xml"))
     relationships = ET.fromstring(archive.read("ppt/_rels/presentation.xml.rels"))
@@ -54,7 +76,18 @@ def read_slide_order(archive, slide_names: list[str]) -> list[str]:
     return ordered
 
 
-def visible_fragments(slide) -> list[str]:
+def append_group_titles(group_titles, parts):
+    current = []
+    for part in [*parts, ""]:
+        if not part or (current and re.search(r"[0-9.,+±−负-]$", compact(current[-1])) and re.match(r"[0-9.,%]", compact(part))):
+            if len(current) > 1:
+                group_titles.append(" ".join(current))
+            current = []
+        if part:
+            current.append(part)
+
+
+def visible_fragments(slide, group_titles=None) -> list[str]:
     # 仅核验页面中的可见文字对象及表格内容，演讲备注不计入。
     fragments = []
     tree = slide.find(f"{{{P}}}cSld/{{{P}}}spTree")
@@ -62,21 +95,26 @@ def visible_fragments(slide) -> list[str]:
         return fragments
     def visit(element):
         if element.tag not in {f"{{{P}}}sp", f"{{{P}}}grpSp", f"{{{P}}}graphicFrame", f"{{{P}}}cxnSp"}:
-            return
+            return ""
         if any(node.get("hidden") in {"1", "true"} for node in element.findall(f"./*/{{{P}}}cNvPr")):
-            return
+            return ""
         if element.tag == f"{{{P}}}grpSp":
-            for child in element:
-                visit(child)
-            return
+            parts = [visit(child) for child in element]
+            if group_titles is not None:
+                append_group_titles(group_titles, parts)
+            return ""
+        texts = []
         for body in element.iter(f"{{{P}}}txBody"):
             paragraphs = ["".join(node.text or "" for node in paragraph.iter(f"{{{A}}}t")) for paragraph in body.findall(f"{{{A}}}p")]
             fragments.extend(paragraphs)
-            fragments.append(" ".join(paragraphs))
+            text = " ".join(paragraphs)
+            fragments.append(text)
+            texts.append(text)
         for row in element.iter(f"{{{A}}}tr"):
             cells = [" ".join(node.text or "" for node in cell.iter(f"{{{A}}}t")) for cell in row.findall(f"{{{A}}}tc")]
             fragments.extend(cells)
             fragments.append(" ".join(cells))
+        return " ".join(texts) if element.tag == f"{{{P}}}sp" else ""
     for child in tree:
         visit(child)
     return fragments
@@ -192,14 +230,15 @@ def verify_checklist(archive, slide_names: list[str], checklist) -> dict:
         if not isinstance(item, list) or len(item) != 2 or not isinstance(item[0], str) or not 0 < len(item[0]) <= 180:
             raise ValueError("已确认的页面标题无效。")
         title, values = item
-        if not isinstance(values, list) or len(values) > 8 or not all(valid_value(value) for value in values):
+        if not isinstance(values, list) or len(values) > 24 or not all(valid_value(value) for value in values):
             raise ValueError("已确认的关键数据清单无效。")
         checked += len(values)
-        if checked > 120:
+        if checked > 480:
             raise ValueError("已确认的关键数据超过核验范围。")
         slide = ET.fromstring(archive.read(path))
-        fragments = visible_fragments(slide)
-        missing_title = not any(contains(text, title) for text in fragments)
+        group_titles = []
+        fragments = visible_fragments(slide, group_titles)
+        missing_title = not any(matches_displayed_value(text, title) for text in [*fragments, *group_titles])
         if missing_title and not first_message:
             first_message = f"交付第 {index} 页缺少已确认的可见标题，请修正后重新导出。"
         points = chart_points(archive, slide, path) if any(isinstance(value, list) for value in values) else []
@@ -209,7 +248,7 @@ def verify_checklist(archive, slide_names: list[str], checklist) -> dict:
                 candidates = [number for series, category, number in points if (series, category) == (compact(value[1]), compact(value[2]))]
                 matched = bool(candidates) and all(number == Decimal(value[3]) for number in candidates)
             else:
-                matched = any(contains(text, value, numeric=True) for text in fragments)
+                matched = any(matches_displayed_value(text, value, numeric=True) for text in [*fragments, *group_titles])
             if not matched:
                 missing_values.append(item_number)
                 if not first_message:

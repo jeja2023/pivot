@@ -12,8 +12,8 @@ const { runtimeTemplate } = require('../presentation-template-catalog');
 const { ensureModelQuota } = require('../../model-daily-quota');
 const { estimateMessagesTokens } = require('../../context-budget');
 const { requestLimits } = require('./context');
+const { parsedOutput } = require('./actions');
 
-const MODEL_HEADROOM = { default: 42000, quick: 38000, beautify: 30000, image_to_pptx: 30000, create_template: 35000, edit_native: 35000 };
 const successful = new Map();
 const probing = new Map();
 const TTL_MS = 90_000;
@@ -49,8 +49,9 @@ async function sendCompatibilityProbe(user, model, vision) {
         await recordAgentModelUsage(user, model, messages, raw, 'ppt_master_preflight', '', { usageRef });
     } finally { releaseQuotaReservation?.(); }
     let parsed;
-    try { parsed = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch (_) {}
-    if (usageRef.truncated || parsed?.result !== marker || (vision && parsed.color !== '蓝')) {
+    try { parsed = parsedOutput(raw); } catch (_) {}
+    const color = typeof parsed?.color === 'string' ? parsed.color.normalize('NFKC').trim().toLowerCase() : '';
+    if (usageRef.truncated || parsed?.result !== marker || (vision && !['蓝', '蓝色', '藍', '藍色', 'blue'].includes(color))) {
         throw error('模型未返回完整的预检 JSON，请选择能稳定输出 JSON 的模型。', 'PPT_MASTER_MODEL_PREFLIGHT_FAILED', 422);
     }
 }
@@ -67,25 +68,21 @@ async function checkModel(user, request, { visionRequired = false, probeModel = 
     if (vision && !modelSupportsVision(model)) throw error('当前任务包含需要读取的图片，请选择支持图片输入的模型。', 'PPT_MASTER_VISION_REQUIRED', 422);
     const limits = requestLimits(model);
     if (limits.outputLimit < 2000) throw error('模型单轮输出上限至少为2000令牌，请检查所选模型。', 'PPT_MASTER_MODEL_OUTPUT_LIMIT', 422);
-    let minimumInput = MODEL_HEADROOM[mode];
+    // 运行包指引可分页加载，准入只计算制作请求中不可省略的内容。
+    const messages = initialMessages(request);
+    messages[0].content += '\n' + hostGuidance({ request: { ...request, draftFirst: operation !== 'create_template' } });
+    prepareRevisionSources({ messages, previousPlan: request.previousPlan, userSupplements: request.inheritedSupplements,
+        inheritedSupplementCount: request.inheritedSupplements?.length });
+    let minimumInput = estimateMessagesTokens(messages);
     if (request.template?.type === 'runtime') {
         const selected = runtimeTemplate(request.template.id);
         if (!selected) throw error('所选模板不属于当前运行包，请刷新模板库。');
-        // 未生成的清单只计必要页目。上一轮最大输出和本轮实际清单长度分别处理。
-        const messages = initialMessages(request);
         const pageCount = request.pageCount ?? 8;
         if (!Number.isInteger(pageCount) || pageCount < 1 || pageCount > 40) throw error('模板制作请指定一至四十页。');
-        messages[0].content += '\n' + hostGuidance({ request: { ...request, draftFirst: true } });
-        const pages = Array.from({ length: pageCount }, () => ({ title: '页', values: [] }));
-        messages.push({ role: 'assistant', content: JSON.stringify({ requestInput: { kind: 'confirmation', stage: 'design',
-            plan: { pages, summary: '页面清单', project: 'pivot_authoring', templateUse: { page: 1, rule: '所选模板的设计规则', visibleText: '页' } } } }) });
-        prepareRevisionSources({ messages, previousPlan: request.previousPlan, userSupplements: request.inheritedSupplements,
-            inheritedSupplementCount: request.inheritedSupplements?.length });
-        const promptTokens = estimateMessagesTokens(messages);
-        minimumInput = Math.max(minimumInput, promptTokens + selected.specInputTokens);
+        minimumInput += selected.specInputTokens;
     }
     if (!limits.unbounded && limits.inputBudget < minimumInput) {
-        throw error(`当前制作要求和模板预检需要约 ${minimumInput} 令牌输入空间，模型可用 ${limits.inputBudget}。请调整模型窗口或制作要求。`, 'PPT_MASTER_CONTEXT_LIMIT', 422);
+        throw error(`当前制作要求和必要资料预计需要 ${minimumInput} 令牌输入空间，模型可用 ${limits.inputBudget}。请调整模型窗口或制作要求。`, 'PPT_MASTER_CONTEXT_LIMIT', 422);
     }
     const key = createHash('sha256').update(JSON.stringify([user.id, model.id, model.model_name, model.url, model.api_key, model.supports_vision,
         limits.contextWindow, limits.configuredInputLimit, limits.outputLimit, vision])).digest('hex');

@@ -3,10 +3,11 @@
 const actionFields = Object.freeze({
     read: ['path', 'offset', 'length'], read_runtime: ['path', 'offset', 'length'],
     read_history: ['archive', 'index', 'offset', 'length'], read_images: ['offset', 'length'],
-    write: ['path', 'text'], run: ['tool', 'args'], list: [],
+    write: ['path', 'text'], run: ['tool', 'args'], list: ['path'],
     copy: ['path', 'source'], copy_template: ['path', 'source'], validate_template: ['path', 'kind']
 });
 const writeExample = '{"actions":[{"action":"write","path":"项目目录/目标文件.md","text":"本次写入的完整正文"}]}';
+const listGuidance = '用 {"action":"list"} 盘点任务根目录的文件，或用 {"action":"list","path":"项目目录"} 查看该目录下的文件。path 是任务内相对目录。';
 // 诊断只记录协议字段名或键的位置，避免把动态键中的文件名、正文和凭据带入制作记录。
 const diagnosticNames = new Set([...Object.values(actionFields).flat(), 'encoding', 'append', 'overwrite', 'mode',
     'filePath', 'file_path', 'filename', 'content', 'data', 'format', 'language', 'parameters', 'arguments',
@@ -30,4 +31,4 @@ function fieldMessage(type, index, labels) {
 
 const writeCorrection = '请按 ' + writeExample + ' 的结构重写该动作，填入本轮实际路径和完整正文。进度说明放在顶层 message，文件摘要和归档坐标仅供回读。';
 
-module.exports = { actionFields, writeExample, rejectedFields, publicFieldLabels, fieldMessage, writeCorrection };
+module.exports = { actionFields, writeExample, listGuidance, rejectedFields, publicFieldLabels, fieldMessage, writeCorrection };

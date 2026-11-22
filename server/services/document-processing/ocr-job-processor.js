@@ -1,5 +1,7 @@
 'use strict';
 
+const { OCR_MODES } = require('./constants');
+
 function createOcrJobProcessor(deps) {
     const {
         createTextOutputs, getBlocks, getJobRow, getPages, getPdfPageMetrics,
@@ -64,11 +66,17 @@ function createOcrJobProcessor(deps) {
             try {
                 const imagePath = resolveStoredDocumentPath(page.image_path);
                 if (!imagePath) throw new Error(`第 ${page.page_number} 页预览图不存在，无法进行 OCR。`);
-                const result = await recognizePage(imagePath, { language: config.language, engine: config.engine, dpi: config.dpi, timeoutMs: config.timeoutMs, confidenceThreshold: config.confidenceThreshold });
+                const result = await recognizePage(imagePath, { language: config.language, engine: config.engine, ocrMode: config.ocrMode, dpi: config.dpi, timeoutMs: config.timeoutMs, confidenceThreshold: config.confidenceThreshold });
                 const issues = analyzeOcrIssues(result, config.confidenceThreshold);
                 const pageNeedsReview = issues.length > 0 || result.confidence === null || result.confidence < config.confidenceThreshold;
                 needsReview = needsReview || pageNeedsReview;
-                const updatedPage = await updatePageText({ pageId: page.id, text: result.text, rawText: result.text, ocrStatus: pageNeedsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED, processingState: JOB_STATUSES.SUCCEEDED, confidence: result.confidence, result: { engine: result.engine, language: result.language, confidenceSource: result.confidence === null ? 'unknown' : 'engine', blockCount: result.blocks.length, tables: result.tables || [], quality: result.quality, model: result.model, issues }, contentRevision: 1, alignmentStatus: 'aligned' });
+                const pageResult = {
+                    engine: result.engine, language: result.language,
+                    confidenceSource: result.confidence === null ? 'unknown' : 'engine',
+                    blockCount: result.blocks.length, tables: result.tables || [], quality: result.quality, model: result.model, issues,
+                    ...(result.ocrMode ? { ocrMode: result.ocrMode, markdown: result.markdown } : {})
+                };
+                const updatedPage = await updatePageText({ pageId: page.id, text: result.text, rawText: result.text, ocrStatus: pageNeedsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED, processingState: JOB_STATUSES.SUCCEEDED, confidence: result.confidence, result: pageResult, contentRevision: 1, alignmentStatus: 'aligned' });
                 await insertOcrBlocks({ userId: job.user_id, fileId: file.id, jobId: job.id, pageId: page.id, pageNumber: page.page_number, blocks: result.blocks });
                 recognizedPages.push(updatedPage);
                 allBlocks.push(...result.blocks);
@@ -78,18 +86,27 @@ function createOcrJobProcessor(deps) {
             }
             await touchProgress(job.id, 35 + Math.floor(((index + 1) / Math.max(pages.length, 1)) * 50), { processedPages: recognizedPages.length, failedPages: failedPages.length }, Number(job.execution_epoch));
         }
-        const freshJob = await getJobRow(job.id);
-        const coverage = await updateJobCoverage(job.id, { sourcePageCount: Number(freshJob?.source_page_count || pages.length), plannedPages: pages.map(page => Number(page.page_number)), processedPages: recognizedPages.map(page => Number(page.page_number)), failedPages });
+        const [freshJob, allPages] = await Promise.all([getJobRow(job.id), getPages(job.id)]);
+        const pageNumbers = rows => rows.map(page => Number(page.page_number));
+        const coverage = await updateJobCoverage(job.id, {
+            sourcePageCount: Number(freshJob?.source_page_count || allPages.length),
+            plannedPages: pageNumbers(allPages),
+            processedPages: pageNumbers(allPages.filter(page => page.processing_state === JOB_STATUSES.SUCCEEDED)),
+            failedPages: pageNumbers(allPages.filter(page => page.processing_state === JOB_STATUSES.FAILED))
+        });
         return { pages: recognizedPages, blocks: allBlocks, needsReview, failedPages, coverage, truncated: false };
     }
 
     async function processImageOcr({ job, file, filePath, config }) {
         const pages = await preparePagesForJob({ job, file, filePath, config });
         const recognized = await recognizePages({ job, file, pages, config });
-        const finalPages = await getPages(job.id);
-        const blocks = await getBlocks(job.id);
-        const outputs = await createTextOutputs({ userId: job.user_id, file, job, pages: finalPages, blocks });
-        return { status: recognized.failedPages.length ? JOB_STATUSES.PARTIAL_SUCCESS : (recognized.needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED), progress: 100, result: { textLength: pagesToText(finalPages).length, outputs, lowConfidence: recognized.needsReview, failedPages: recognized.failedPages, coverage: recognized.coverage, truncated: false } };
+        if (config.ocrMode === OCR_MODES.VL && !recognized.coverage.processedPageCount) {
+            return { status: JOB_STATUSES.FAILED, progress: 100, errorMessage: '所有页面解析失败，请查看页面错误后重试。', result: { failedPages: recognized.failedPages, coverage: recognized.coverage } };
+        }
+        const [finalPages, blocks, currentJob] = await Promise.all([getPages(job.id), getBlocks(job.id), getJobRow(job.id)]);
+        const outputs = await createTextOutputs({ userId: job.user_id, file, job: currentJob, pages: finalPages, blocks });
+        const needsReview = finalPages.some(page => page.ocr_status === JOB_STATUSES.NEEDS_REVIEW);
+        return { status: recognized.failedPages.length ? JOB_STATUSES.PARTIAL_SUCCESS : (needsReview ? JOB_STATUSES.NEEDS_REVIEW : JOB_STATUSES.SUCCEEDED), progress: 100, result: { textLength: pagesToText(finalPages).length, outputs, lowConfidence: needsReview, failedPages: recognized.failedPages, coverage: recognized.coverage, truncated: false } };
     }
 
     return { preparePagesForJob, recognizePages, processImageOcr };

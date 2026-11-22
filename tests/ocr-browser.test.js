@@ -45,7 +45,7 @@ async function createOcrPage(browser, options = {}) {
     const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
     await page.setContent('<style>.hidden{display:none!important}.apps-workspace-body{min-height:700px}</style><main class="apps-workspace-body"></main><div id="apps-home-view"></div><div id="official-writing-view"></div><div id="data-analysis-view"></div><div id="regulations-view"></div><div id="pdf-tools-view"></div><button id="apps-back-btn"></button>');
     await page.addStyleTag({ path: style });
-    await page.evaluate(({ detail, desktopSupportedTypes }) => {
+    await page.evaluate(({ detail, desktopSupportedTypes, vlConfigured }) => {
         const escape = value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
         window.Pivot = { legacy: {
             PivotSafeHtml: { escapeHtml: escape, setHtml: (element, value) => { element.innerHTML = String(value || ''); } },
@@ -71,13 +71,20 @@ async function createOcrPage(browser, options = {}) {
         window.apiFetch = async (url, options = {}) => {
             window.ocrCalls.push([url, options.method || 'GET', options]);
             const json = body => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } });
-            if (url.endsWith('/capabilities')) return json({ capabilities: { limits: { maxOcrPages: 8, maxRenderPages: 8 }, output: { confidence: 'optional' }, engine: { available: true } } });
+            if (url.endsWith('/capabilities')) return json({ capabilities: { limits: { maxOcrPages: 8, maxRenderPages: 8 }, output: { confidence: 'optional' }, engine: { available: true }, modes: { document_vl: { configured: vlConfigured, available: vlConfigured } } } });
+            if (url.endsWith('/preflight')) return json({ preflight: { rejected: 0, files: [] } });
+            if (url.endsWith('/jobs') && options.method === 'POST') return json(window.ocrFixtureDetail);
             if (url.includes('/jobs/101') && !url.includes('/outputs/')) return json(window.ocrFixtureDetail);
             if (url.includes('/jobs?')) return json({ data: [{ id: 101, status: 'queued', progress: 0, file: { originalName: '排队材料.pdf' }, config: {} }], total: 1 });
             return json({ success: true });
         };
-    }, { detail: fixtureDetail(), desktopSupportedTypes: options.desktopSupportedTypes });
+    }, { detail: options.detail || fixtureDetail(), desktopSupportedTypes: options.desktopSupportedTypes, vlConfigured: options.vlConfigured === true });
     await page.addScriptTag({ path: path.join(root, 'client/common/vendor/purify.min.js') });
+    await page.addScriptTag({ path: path.join(root, 'client/common/vendor/marked.min.js') });
+    if (options.vlConfigured) {
+        await page.addScriptTag({ path: path.join(root, 'client/common/vendor/katex.min.js') });
+        await page.addScriptTag({ path: path.join(root, 'client/chat/render.js') });
+    }
     await page.addScriptTag({ path: path.join(root, 'client/chat/safe-html.js') });
     await page.addScriptTag({ path: path.join(root, 'client/chat/apps-workbench-ocr-review-views.js') });
     await page.addScriptTag({ path: path.join(root, 'client/chat/apps-workbench-ocr-actions.js') });
@@ -93,12 +100,99 @@ test('OCR 工作区展示排队状态、处理范围、未知置信度和全部�
         await expect(page.locator('#ocr-job-table-body')).toContainText('排队中');
         await expect(page.locator('[data-ocr-job-cancel="101"]')).toBeVisible();
         await expect(page.locator('#ocr-pages-input')).toHaveAttribute('max', '8');
+        await expect(page.locator('#ocr-mode-select option[value="document_vl"]')).toHaveJSProperty('disabled', true);
         await page.locator('[data-ocr-job-open="101"]').click();
         await expect(page.locator('#ocr-detail')).toContainText('已选择 3/5 页');
         await expect(page.locator('.ocr-block-list .ocr-block-row')).toHaveCount(125);
         await expect(page.locator('.ocr-block-list .ocr-block-row').first()).toContainText('未知');
         await expect(page.locator('.ocr-block-list .ocr-block-row').first()).toHaveClass(/is-unknown/);
         await page.close();
+    } finally {
+        await browser.close();
+    }
+});
+
+test('VL 模式随上传提交，详情按页安全展示 Markdown 和失败原因', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const detail = fixtureDetail();
+        detail.job.config.ocrMode = 'document_vl';
+        detail.pages[0].result = { markdown: '### 解析标题\n\n<table><tr><td>表格内容</td></tr></table>\n\n$$x^2$$\n\n![图片](https://invalid.example/test.png)\n\n[外链](https://invalid.example/)' };
+        detail.pages[1].result = { errorMessage: 'VL 服务请求超时' };
+        const page = await createOcrPage(browser, { detail, vlConfigured: true });
+        const requests = [];
+        page.on('request', request => { if (request.url().includes('invalid.example')) requests.push(request.url()); });
+        await page.locator('#ocr-mode-select').selectOption('document_vl');
+        await page.locator('#ocr-file-input').setInputFiles({ name: '扫描图片.png', mimeType: 'image/png', buffer: Buffer.from('测试图片') });
+        await page.locator('#ocr-submit-btn').click();
+        await expect.poll(() => page.evaluate(() => window.ocrCalls.filter(([url, method]) => method === 'POST' && /\/(preflight|jobs)$/.test(url)).map(([, , options]) => options.body.get('ocrMode')))).toEqual(['document_vl', 'document_vl']);
+        await page.locator('[data-ocr-job-open="101"]').click();
+        await expect(page.locator('#ocr-vl-preview h3')).toHaveText('解析标题');
+        await expect(page.locator('#ocr-vl-preview td')).toHaveText('表格内容');
+        await expect(page.locator('#ocr-vl-preview .katex')).toHaveCount(1);
+        await expect(page.locator('#ocr-vl-preview img, #ocr-vl-preview a[href]')).toHaveCount(0);
+        assert.deepEqual(requests, []);
+        await page.setViewportSize({ width: 390, height: 844 });
+        await expect(page.locator('#ocr-vl-preview')).toBeVisible();
+        await page.locator('[data-ocr-page-id="12"]').click();
+        await expect(page.locator('#ocr-vl-preview')).toHaveText('VL 服务请求超时');
+    } finally {
+        await browser.close();
+    }
+});
+
+test('OCR 保存立即显示状态，失败保留输入，重试成功后直接刷新卡片', { timeout: 60000 }, async () => {
+    const browser = await chromium.launch({ headless: true });
+    try {
+        const page = await browser.newPage();
+        page.setDefaultTimeout(5000);
+        const pageErrors = [];
+        page.on('pageerror', error => pageErrors.push(error.message));
+        await page.setContent('<style>.hidden{display:none!important}</style><main id="admin-container"><section id="tab-content-app-services"><div id="application-services-body"></div></section></main>');
+        const markup = fs.readFileSync(path.join(root, 'client/chat/partials/admin-extra-modals.html'), 'utf8');
+        await page.evaluate(source => {
+            const dialog = new window.DOMParser().parseFromString(source, 'text/html').getElementById('ocr-service-modal');
+            window.document.body.appendChild(dialog);
+            window.API_BASE = '/api';
+            window.isSuperAdminUser = () => true;
+            window.showToast = () => {};
+            window.ocrSaves = [];
+            window.apiFetch = (url, options) => {
+                window.ocrSaves.push([url, options.method, JSON.parse(options.body)]);
+                return new Promise(resolve => {
+                    window.respondToOcrSave = (status, json) => resolve(new Response(JSON.stringify(json), { status }));
+                });
+            };
+        }, markup);
+        for (const asset of ['chat/pivot-core.js', 'common/vendor/purify.min.js', 'chat/safe-html.js', 'chat/admin-settings-events.js', 'chat/application-services-settings.js', 'chat/admin-settings.js']) {
+            await page.addScriptTag({ path: path.join(root, 'client', asset) });
+        }
+        await page.evaluate(() => {
+            window.escapeHtml = window.Pivot.html.escapeHtml;
+            window.Pivot.moduleApi('settings.applicationServices').renderFromSettings({ ocrConfig: { serviceUrl: 'http://previous.example:9100' } });
+        });
+        const card = page.locator('[data-application-service="ocr"]');
+        await card.locator('[data-retrieval-model-config-open="ocr"]').click();
+        assert.deepEqual(pageErrors, []);
+        const modal = page.locator('#ocr-service-modal');
+        const save = modal.locator('[data-retrieval-config-save="ocr"]');
+        const addresses = { serviceUrl: 'http://ocr.example:9100', vlServiceUrl: 'http://ocr-vl.example:9101' };
+        await modal.locator('#setting-ocr-service-url').fill(addresses.serviceUrl);
+        await modal.locator('#setting-ocr-vl-service-url').fill(addresses.vlServiceUrl);
+        await save.click();
+        await expect(save).toBeDisabled();
+        await expect(save).toHaveText('保存中…');
+        await expect(modal.getByRole('status')).toHaveText('正在保存 OCR 服务地址…');
+        await page.evaluate(() => { window.respondToOcrSave(400, { error: '服务地址校验失败' }); });
+        await expect(modal.getByRole('status')).toHaveText('服务地址校验失败');
+        await expect(modal.locator('#setting-ocr-vl-service-url')).toHaveValue(addresses.vlServiceUrl);
+        await expect(save).toBeEnabled();
+        await save.click();
+        await page.evaluate(saved => { window.respondToOcrSave(200, { success: true, settings: saved }); }, addresses);
+        await expect(modal).toBeHidden();
+        await expect(card).toContainText(addresses.serviceUrl);
+        await expect(card).toContainText('文档解析（VL）已配置');
+        assert.deepEqual(await page.evaluate(() => window.ocrSaves), Array(2).fill(['/api/settings/ocr', 'PUT', addresses]));
     } finally {
         await browser.close();
     }

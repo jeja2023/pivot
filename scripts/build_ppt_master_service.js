@@ -8,8 +8,10 @@ const { digestFile } = require('../server/services/offline-backup-bundle');
 const lock = require('../config/ppt-master-engine.json');
 
 function assertServiceCapabilities(health) {
-    const required = ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle', 'selectedTemplateRecovery', 'atomicInputSnapshots'];
+    const required = ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle',
+        'selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist'];
     const missing = required.filter(key => health[key] !== 1);
+    if (health.startupHealthTimeoutSeconds !== 300) missing.push('startupHealthTimeoutSeconds');
     if (health.serviceProtocol !== 1 || !/^sha256:[a-f0-9]{64}$/.test(health.runtimeId || '') || missing.length) {
         throw new Error('镜像的协议、运行身份或执行能力未通过校验，请使用当前源码重新构建。' + (missing.length ? '缺少 ' + missing.join('、') : ''));
     }
@@ -41,12 +43,19 @@ async function main(args = process.argv.slice(2)) {
         await run('docker', ['run', '-d', '--pull', 'never', '--name', name, '--read-only', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges', '--user', '65532:65532',
             '--tmpfs', '/tmp:size=512m,mode=1777', '--tmpfs', '/data:size=512m,mode=0700,uid=65532,gid=65532', '--env', 'PPT_MASTER_TOKEN=' + token, image]);
         let ready = false;
-        for (let attempt = 0; attempt < 180; attempt++) {
+        const readyBy = Date.now() + 330000;
+        while (Date.now() < readyBy) {
             const result = await run('docker', ['exec', name, 'python', '-c', "import urllib.request,json;assert json.load(urllib.request.urlopen('http://127.0.0.1:8502/healthz',timeout=2))['ready']"]).then(() => true, () => false);
             if (result) { ready = true; break; }
+            const status = await run('docker', ['inspect', '--format', '{{.State.Status}}', name]).catch(() => null);
+            if (status?.stdout.trim() === 'exited' || status?.stdout.trim() === 'dead') break;
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
-        if (!ready) throw new Error('独立PPT服务启动检查未通过，请检查镜像日志。');
+        if (!ready) {
+            const report = await run('docker', ['logs', '--tail', '20', name]).catch(() => null);
+            const timedOut = /启动自检超时/.test((report?.stderr || '') + (report?.stdout || ''));
+            throw new Error(timedOut ? '独立PPT服务启动自检超时，请检查磁盘读取速度及容器资源。' : '独立PPT服务启动检查未通过，请检查镜像日志。');
+        }
         const readInfo = "import os,urllib.request;req=urllib.request.Request('http://127.0.0.1:8502/v1/info',headers={'Authorization':'Bearer '+os.environ['PPT_MASTER_TOKEN']});print(urllib.request.urlopen(req,timeout=2).read().decode())";
         health = JSON.parse((await run('docker', ['exec', name, 'python', '-c', readInfo])).stdout);
         if (health.revision !== lock.revision || health.version !== lock.skillVersion || health.contentDigest !== lock.contentDigest) {

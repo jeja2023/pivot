@@ -6,9 +6,11 @@ const { imageCoverage, selectImagePage } = require('./model-input');
 const { getSupplement } = require('./user-supplements');
 const { patchCitationDraft } = require('./citation-repair');
 const { requireChecks } = require('./tool-checks');
+const { withProjectValidation } = require('./project-preparation');
 const { HISTORY_PAGE_CHARS } = require('./observations');
 const { normalizeRuntimeReads } = require('./runtime-references');
 const { actionFields, rejectedFields, fieldMessage } = require('./action-parameters');
+const { presentationPath, listScope } = require('./workspace-list');
 
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const benignMetadata = new Set(['message', 'description', 'reason']);
@@ -35,9 +37,6 @@ function normalizeAction(action) {
     }
     return normalized;
 }
-const presentationPath = value => typeof value === 'string' && value.length <= 300 && !/[:\\\u0000-\u001f]/.test(value)
-    && value.split('/').every(part => part && !part.startsWith('.'));
-
 function parsedOutput(output) {
     if (output && typeof output === 'object' && !Array.isArray(output)) return output;
     const source = String(output || '').trim().replace(/^\x60\x60\x60(?:json)?\s*/i, '').replace(/\s*\x60\x60\x60$/i, '');
@@ -48,14 +47,35 @@ function parsedOutput(output) {
     throw error('模型未返回完整的制作操作，请重试或切换模型。', 'PPT_MASTER_MODEL_OUTPUT_INVALID', 422);
 }
 
-function validateAction(action, state, index, original) {
-    if (!action || typeof action !== 'object' || typeof action.action !== 'string' || !Object.hasOwn(actionFields, action.action)) throw invalid('模型请求了未登记的制作动作。');
-    const rejected = rejectedFields(action, original);
-    if (rejected.length) {
-        throw Object.assign(invalid(fieldMessage(action.action, index + 1, rejected)),
-            { correctionKind: 'action_fields', actionIndex: index + 1, actionType: action.action, rejectedFields: rejected });
+function repairedTurn(output, repair) {
+    const reply = parsedOutput(output);
+    const single = Object.hasOwn(reply, 'repairAction');
+    if (!single && !Object.hasOwn(reply, 'repairActions')) return reply;
+    const issues = repair?.issues || (repair ? [{ actionIndex: repair.index + 1, actionType: repair.type }] : []);
+    const patches = single ? [{ index: issues[0]?.actionIndex, action: reply.repairAction }] : reply.repairActions;
+    const allowed = new Map(issues.map(issue => [issue.actionIndex, issue.actionType]));
+    if (!repair || Object.keys(reply).length !== 1 || !Array.isArray(patches) || !patches.length || patches.length > allowed.size
+        || new Set(patches.map(patch => patch?.index)).size !== patches.length
+        || patches.some(patch => !patch?.action || Array.isArray(patch.action) || !allowed.has(patch.index) || allowed.get(patch.index) !== patch.action.action)) {
+        throw invalid('局部纠正须只提交 repairActions，逐项填写原批次 index 和完整 action 对象，并保留原动作类型。');
     }
+    const replacements = new Map(patches.map(patch => [patch.index, patch.action]));
+    return { ...repair.turn, actions: repair.turn.actions.map((previous, index) => replacements.get(index + 1) || previous) };
+}
+
+function fieldIssues(actions, originals) {
+    return actions.flatMap((action, index) => {
+        if (!action || typeof action !== 'object' || typeof action.action !== 'string' || !Object.hasOwn(actionFields, action.action)) {
+            throw invalid('模型请求了未登记的制作动作。');
+        }
+        const rejected = rejectedFields(action, originals[index]);
+        return rejected.length ? [{ actionIndex: index + 1, actionType: action.action, rejectedFields: rejected }] : [];
+    });
+}
+
+function validateAction(action, state) {
     if (Buffer.byteLength(JSON.stringify(action), 'utf8') > 200000) throw invalid('单次制作动作过大，请按单页拆分。');
+    if (action.action === 'list') listScope(action.path);
     if (!state.review) return;
     if (state.pageRepair && !repairActionAllowed(state, action)) {
         if (state.pageRepair.automatic && action.action === 'run' && ['check_svg', 'finalize', 'export'].includes(action.tool)) {
@@ -103,7 +123,7 @@ function validateAction(action, state, index, original) {
     }
 }
 
-async function validateTurn(output, state, verifySource) {
+async function validateTurn(output, state, verifySource, { hostCompletion = false } = {}) {
     let turn = parsedOutput(output);
     let citationPatch;
     if (Object.hasOwn(turn, 'repairCitations')) {
@@ -121,9 +141,15 @@ async function validateTurn(output, state, verifySource) {
         const originalActions = turn.actions;
         if (state.review) turn = { ...turn, actions: normalizeRuntimeReads(turn.actions.map(normalizeAction), state) };
         if (turn.actions.filter(action => action?.action === 'read_images').length > 1) throw invalid('每轮只请求一批图片。');
+        const issues = fieldIssues(turn.actions, originalActions);
+        if (issues.length) {
+            const message = issues.map(issue => fieldMessage(issue.actionType, issue.actionIndex, issue.rejectedFields)).join(' ');
+            throw Object.assign(invalid(message), { correctionKind: 'action_fields', ...issues[0], actionFieldIssues: issues });
+        }
+        for (const action of turn.actions) validateAction(action, state);
+        turn = withProjectValidation(state, turn);
         for (const [index, action] of turn.actions.entries()) {
-            validateAction(action, state, index, originalActions[index]);
-            if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0], turn.actions.slice(0, index));
+            if (action.action === 'run' && action.tool === 'export') requireChecks(state, action.args[0], turn.actions.slice(0, index), { exportArgs: action.args });
         }
     }
     if (turn.requestInput) {
@@ -147,7 +173,7 @@ async function validateTurn(output, state, verifySource) {
         }
     }
     if (turn.complete && state.review) {
-        if (state.pageRepair?.automatic) throw invalid('正在按已批准的清单自动修页，请先写回待修源文件，宿主将复检并交付修订稿。');
+        if (state.pageRepair?.automatic && !hostCompletion) throw invalid('正在按已批准的清单自动修页，请先写回待修源文件，宿主将复检并交付修订稿。');
         const template = state.request.operation === 'create_template';
         const target = template ? turn.complete.templatePath : turn.complete.path;
         const match = !template && typeof target === 'string' ? /^(.*)\/exports\/[^/]+\.pptx$/i.exec(target) : null;
@@ -155,7 +181,7 @@ async function validateTurn(output, state, verifySource) {
             throw invalid('交付须指向已批准项目的 exports 中实际的 PPTX，或已批准的模板工作区。');
         }
         const project = template ? target : match[1];
-        requireChecks(state, project);
+        requireChecks(state, project, [], { templateKind: template ? turn.complete.kind : undefined });
         exportReview(state, project, template);
         if (!template && state.lastExport && state.lastExport.path !== target) {
             throw invalid('请使用本次最新成功导出的文件提交交付：' + state.lastExport.path);
@@ -164,4 +190,4 @@ async function validateTurn(output, state, verifySource) {
     return turn;
 }
 
-module.exports = { validateTurn };
+module.exports = { validateTurn, repairedTurn, parsedOutput };

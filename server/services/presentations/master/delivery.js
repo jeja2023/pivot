@@ -9,6 +9,9 @@ const { recordDeliveryEvent } = require('../../agent-artifact-delivery');
 const runtime = require('./runtime');
 const sourceBundleLimit = () => Math.min(120 * 1024 * 1024, maxObjectBytes());
 const bundleWarning = 'PPTX 已通过核验。完整项目源包超过当前交付上限，无法随本次结果下载。';
+const bundleUnavailable = 'PPTX 已通过核验。完整项目源包暂时无法下载。';
+const optionalBundleErrors = new Set(['PPT_SERVICE_OUTPUT_MISSING', 'PPT_SERVICE_FILE_CHANGED', 'PPT_SERVICE_TIMEOUT',
+    'PPT_SERVICE_UNAVAILABLE', 'ENOENT', 'ENOSPC', 'EDQUOT', 'EIO']);
 
 async function prepareDelivery(user, taskId, request, receipt, context = {}) {
     context.signal?.throwIfAborted();
@@ -24,27 +27,29 @@ async function prepareDelivery(user, taskId, request, receipt, context = {}) {
         sourceDigest: request.sourceDigest, inputDigests: request.inputDigests, outputDigest: actualDigest, checks: receipt.packageCheck, productionProfile: request.productionProfile,
         editing: '原生PPTX与上游项目源包保留；复杂对象尚未转换为Pivot画布元素。' };
     const meta = await putBuffer({ buffer: Buffer.from(JSON.stringify(metadata)), mimeType: 'application/json', tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'ppt_master_project' });
-    const files = [];
-    let sourcePackageWarning = receipt.sourcePackageUnavailable === true && !receipt.templateOnly ? bundleWarning : '';
-    const formats = receipt.templateOnly ? [['zip', 'project.zip', 'application/zip']]
-        : [['pptx', 'presentation.pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation'],
-            ...(sourcePackageWarning ? [] : [['zip', 'project.zip', 'application/zip']])];
-    for (const [format, name, mimeType] of formats) {
-        context.signal?.throwIfAborted();
-        let buffer = primary;
-        if (format === 'zip' && !receipt.templateOnly) {
-            try { buffer = await runtime.readOutput(user, taskId, name, sourceBundleLimit()); }
-            catch (failure) {
-                if (!['PPT_SERVICE_RESPONSE_TOO_LARGE', 'PPT_MASTER_OUTPUT_TOO_LARGE'].includes(failure.code)) throw failure;
-                sourcePackageWarning = bundleWarning;
-                continue;
-            }
+    const storeDeliveryFile = async (buffer, format, mimeType) => ({ format, mimeType, stored: await putBuffer({ buffer, mimeType,
+        tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'ppt_master_' + format }) });
+    const zip = 'application/zip';
+    if (receipt.templateOnly && receipt.projectSha256 && actualDigest !== receipt.projectSha256) {
+        throw runtime.error('项目源包摘要不一致，请核对制作服务输出。', 'PPT_MASTER_DELIVERY_INVALID', 422);
+    }
+    const files = [receipt.templateOnly ? await storeDeliveryFile(primary, 'zip', zip)
+        : await storeDeliveryFile(primary, 'pptx', 'application/vnd.openxmlformats-officedocument.presentationml.presentation')];
+    let sourcePackageWarning = receipt.sourcePackageUnavailable === true && !receipt.templateOnly
+        ? receipt.sourcePackageUnavailableReason ? bundleUnavailable : bundleWarning : '';
+    if (!receipt.templateOnly && !sourcePackageWarning) {
+        try {
+            context.signal?.throwIfAborted();
+            const buffer = await runtime.readOutput(user, taskId, 'project.zip', sourceBundleLimit());
+            context.signal?.throwIfAborted();
+            if (crypto.createHash('sha256').update(buffer).digest('hex') === receipt.projectSha256) files.push(await storeDeliveryFile(buffer, 'zip', zip));
+            else sourcePackageWarning = 'PPTX 已通过核验。完整项目源包的摘要无法核对，暂不可下载。';
+        } catch (failure) {
+            context.signal?.throwIfAborted();
+            if (['PPT_SERVICE_RESPONSE_TOO_LARGE', 'PPT_MASTER_OUTPUT_TOO_LARGE', 'ARTIFACT_CAS_TOO_LARGE', 'EFBIG'].includes(failure.code)) sourcePackageWarning = bundleWarning;
+            else if (optionalBundleErrors.has(failure.code)) sourcePackageWarning = bundleUnavailable;
+            else throw failure;
         }
-        if (format === 'zip' && receipt.projectSha256 && crypto.createHash('sha256').update(buffer).digest('hex') !== receipt.projectSha256) {
-            throw runtime.error('项目源包摘要不一致，请核对制作服务输出。', 'PPT_MASTER_DELIVERY_INVALID', 422);
-        }
-        const stored = await putBuffer({ buffer, mimeType, tenantId: tenant.tenantId, ownerUserId: user.id, kind: 'ppt_master_' + format });
-        files.push({ format, mimeType, stored });
     }
     return { tenantId: tenant.tenantId, metadata, meta, files, sourcePackageWarning };
 }

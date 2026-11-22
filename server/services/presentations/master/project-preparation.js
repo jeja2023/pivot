@@ -2,6 +2,7 @@
 
 const { confirmedWrite } = require('./observations');
 const { error } = require('./runtime');
+const { projectErrorBlock, projectValidationDetails, projectErrorKeys } = require('./project-validation-diagnostics');
 
 const specNames = ['design_spec.md', 'spec_lock.md'];
 const reasons = {
@@ -20,8 +21,7 @@ function isProjectValidation(action, project) {
 function projectIssueKinds(result) {
     if (!Number.isInteger(result?.exitCode) || result.exitCode === 0) return [];
     const { stdout = '', stderr = '' } = result;
-    const block = /(?:^|\n)\[ERROR\]\s*\r?\n([\s\S]*?)(?=\r?\n\s*\[|$)/.exec(stdout);
-    const detail = (block?.[1] || stderr || '').slice(0, 10000);
+    const detail = (projectErrorBlock(stdout) || stderr || '').slice(0, 10000);
     const found = [
         [/design_spec(?:\.md)?|design spec/i, 'design'],
         [/spec_lock(?:\.md)?|execution lock/i, 'lock'],
@@ -41,13 +41,19 @@ function signature(files) {
 
 function deterministicSpecFailure(result) {
     if (result?.exitCode !== 1 || result.truncated || result.stderr?.trim()) return false;
-    const errors = /(?:^|\n)\[ERROR\]\s*\r?\n([\s\S]*?)(?=\r?\n\s*\[|$)/.exec(result.stdout || '')?.[1]?.trim();
+    const errors = projectErrorBlock(result.stdout);
     return Boolean(errors) && errors.split(/\r?\n/).every(line =>
-        /^\s*-\s+(?:spec_lock|design_spec)\.md schema: (?:unknown section|missing section|duplicate section)\b/i.test(line));
+        /^\s*-\s+(?:spec_lock|design_spec)\.md schema: (?:unknown section|missing section|duplicate section|section '[\w-]+' (?:appears more than once|is missing field)|missing ppt-master-schema marker)\b/i.test(line));
 }
 
 function specName(action, project) {
     return action?.action === 'write' && specNames.find(name => action.path === project + '/' + name);
+}
+
+function changesProjectInputs(action, project) {
+    return (['write', 'copy', 'copy_template'].includes(action.action) && action.path?.startsWith(project + '/')
+        && !action.path.startsWith(project + '/svg_output/')) || (action.action === 'run'
+        && (['apply_template', 'import_template', 'import_native', 'icon_sync'].includes(action.tool) || action.tool === 'project' && action.args?.[0] === 'import-sources'));
 }
 
 function receiptFor(prep, action, observation, project) {
@@ -56,13 +62,31 @@ function receiptFor(prep, action, observation, project) {
     if (write) prep.files[name] = write.sha256;
     else if (isProjectValidation(action, project) && action.args.length === 2 && signature(prep.files) && observation) {
         const kinds = observation.projectIssues || projectIssueKinds(observation.result);
-        prep.validation = { signature: signature(prep.files), exitCode: observation.result?.exitCode ?? null, kinds,
+        const details = observation.result?.cachedSpecFailure ? prep.validation?.details : observation.projectDetails || projectValidationDetails(observation.result);
+        const errorKeys = observation.result?.cachedSpecFailure ? prep.validation?.errorKeys
+            : observation.projectErrorKeys || projectErrorKeys(observation.result);
+        prep.validation = { signature: signature(prep.files), exitCode: observation.result?.exitCode ?? null, kinds, details, errorKeys,
             cacheable: deterministicSpecFailure(observation.result) || observation.result?.cachedSpecFailure === true };
-    } else if ((['write', 'copy', 'copy_template'].includes(action.action) && action.path?.startsWith(project + '/')
-        && !action.path.startsWith(project + '/svg_output/')) || (action.action === 'run'
-            && (['apply_template', 'import_template', 'import_native', 'icon_sync'].includes(action.tool) || action.tool === 'project' && action.args?.[0] === 'import-sources'))) {
+    } else if (observation && changesProjectInputs(action, project)) {
         delete prep.validation;
     }
+}
+
+function restoreProjectDetails(state, validation) {
+    const messages = state.messages || [];
+    for (let index = messages.length - 2; index >= (state.workflowPhaseFrom || 0); index--) {
+        if (messages[index].role !== 'assistant' || messages[index + 1].role !== 'user') continue;
+        try {
+            const { actions } = JSON.parse(messages[index].content);
+            const position = actions?.findLastIndex(action => isProjectValidation(action, state.managedProject) && action.args.length === 2);
+            if (position == null || position < 0) continue;
+            const observation = JSON.parse(messages[index + 1].content)?.[position];
+            if (!observation || observation.result?.cachedSpecFailure) continue;
+            if (observation.result?.exitCode !== validation.exitCode) break;
+            return projectValidationDetails(observation.result);
+        } catch (_) { continue; }
+    }
+    return [];
 }
 
 function preparationFor(state) {
@@ -71,7 +95,11 @@ function preparationFor(state) {
         || state.review?.approvals?.design?.plan?.project !== project || !state.engine?.tools?.includes('project')
         || state.pageRepair || state.lastExport) return null;
     if (!state.projectPreparation && state.milestones?.firstPageWrite && !state.authoringPages) return null;
-    if (state.projectPreparation) return state.projectPreparation;
+    if (state.projectPreparation) {
+        const validation = state.projectPreparation.validation;
+        if (validation?.exitCode && !Array.isArray(validation.details)) validation.details = restoreProjectDetails(state, validation);
+        return state.projectPreparation;
+    }
     const prep = { files: {} };
     const messages = state.messages || [];
     for (let index = state.workflowPhaseFrom || 0; index + 1 < messages.length; index++) {
@@ -96,23 +124,29 @@ function withProjectValidation(state, turn) {
     const prep = turn.actions && preparationFor(state);
     if (!prep) return turn;
     const project = state.managedProject;
-    const ready = new Set(Object.keys(prep.files));
+    const ready = new Set(specNames.filter(name => prep.files[name]));
     const actions = [];
-    let changed = false, scheduled = false;
-    for (let index = 0; index < turn.actions.length; index++) {
-        const action = turn.actions[index];
+    let changed = false, dirty = ready.size === specNames.length && signature(prep.files) !== prep.validation?.signature;
+    const validatePreparedFiles = () => {
+        if (dirty && ready.size === specNames.length) {
+            actions.push(projectValidationAction(project));
+            changed = true;
+            dirty = false;
+        }
+    };
+    for (const action of turn.actions) {
+        // 等同批的规范及引用资源落盘，在首次消费前或批次结束处校验。
+        if (action.action === 'write' && action.path.startsWith(project + '/svg_output/')
+            || action.action === 'run' && ['check_svg', 'finalize', 'export'].includes(action.tool) && action.args[0] === project) {
+            validatePreparedFiles();
+        }
         const name = specName(action, project);
         actions.push(action);
-        if (isProjectValidation(action, project)) continue;
-        if (!name) continue;
-        ready.add(name);
-        // 相邻的规范写入先完成，再校验同一次修改，避免校验半对文件。
-        if (ready.size === specNames.length && !specName(turn.actions[index + 1], project)
-            && !isProjectValidation(turn.actions[index + 1], project) && !scheduled) {
-            actions.push(projectValidationAction(project));
-            scheduled = changed = true;
-        }
+        if (name) ready.add(name);
+        if (isProjectValidation(action, project) && action.args.length === 2) dirty = false;
+        else if (changesProjectInputs(action, project)) dirty = true;
     }
+    validatePreparedFiles();
     return changed ? { ...turn, actions } : turn;
 }
 
@@ -136,8 +170,9 @@ function previousProjectFailure(state, action) {
     const prep = preparationFor(state);
     if (!prep || !isProjectValidation(action, state.managedProject) || action.args.length !== 2
         || prep.validation?.signature !== signature(prep.files) || !prep.validation?.cacheable || !prep.validation.exitCode) return null;
-    return { exitCode: prep.validation.exitCode, projectIssues: prep.validation.kinds, cachedSpecFailure: true,
-        message: '规范文件摘要未变化，已沿用上次失败结果。请按上次执行器回执改正字段后再校验。' };
+    return { exitCode: prep.validation.exitCode, projectIssues: prep.validation.kinds, projectDetails: prep.validation.details || [],
+        projectErrorKeys: prep.validation.errorKeys || [], cachedSpecFailure: true,
+        message: '规范文件摘要未变化，已沿用上次失败结果。请先写回修正内容，宿主将重新校验。' };
 }
 
 function recordProjectPreparation(state, action, observation) {
@@ -148,12 +183,18 @@ function recordProjectPreparation(state, action, observation) {
 function projectPreparationGuidance(state) {
     const prep = preparationFor(state);
     if (!prep || prep.validation?.exitCode === 0 && prep.validation.signature === signature(prep.files)) return '';
-    const detail = projectIssueText(prep.validation?.kinds);
+    const { kinds = [], details = [] } = prep.validation || {};
+    const detail = projectIssueText(kinds);
+    const scaffolds = specNames.filter(name => !kinds.length || kinds.includes(name === specNames[0] ? 'design' : 'lock') || kinds.includes('communication'))
+        .map(name => 'templates/scaffolds/' + name).join('、');
+    const reference = scaffolds ? '需要核对结构时，用 read_runtime 读取 ' + scaffolds + '。' : '';
     return detail
-        ? '上次项目校验：' + detail + '。按执行器回执核对规范、引用文件和运行状态，修正后重新执行 project validate。'
+        ? '上次项目校验：' + detail + '。' + (details.length ? '具体问题：' + details.join('；') + '。' : '') + reference
+            + '按诊断直接修正对应文件。已有文件正文可复用，无需重复读取。规范修正写入后由宿主重新校验；引用文件或临时执行问题解决后可复检。'
         : signature(prep.files) && prep.validation?.exitCode === null
             ? '上次项目校验没有取得执行器结果。按工具回执排查连接或参数，使用 project validate 和当前项目目录重试。'
-            : '先写入完整 design_spec.md 和 spec_lock.md。按真实运行包模板的 schema 首行、字段和值域编写。宿主在两份规范可用后执行 project validate，通过后再写 SVG。';
+            : '先写入完整 design_spec.md 和 spec_lock.md。' + reference
+                + '沿用脚手架的 schema 首行、标题和字段，填入实际内容。执行锁需填写 ## communication，设计规范 §IX 每个 Slide 需填写 Audience move 和 Relationships。两份规范可用后宿主校验，通过后再写 SVG。';
 }
 
 function missingValidationRead(state, action, failure) {
