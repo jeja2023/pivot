@@ -72,3 +72,47 @@ test('服务停机返回标准功能可继续使用，未配置时不依赖Docke
         for (const [key, value] of [['PIVOT_PPT_MASTER_SERVICE_URL', previous.url], ['PIVOT_PPT_MASTER_SERVICE_TOKEN', previous.token]]) if (value === undefined) delete process.env[key]; else process.env[key] = value;
     }
 });
+
+test('允许较慢的状态响应，同端点轮换密钥后核验并继续原工作区', async t => {
+    const { pptMasterSettings } = require('../server/services/presentations/master/settings');
+    const { assertCheckpoint } = require('../server/services/presentations/master/deployment');
+    const oldToken = 'a'.repeat(64), newToken = 'b'.repeat(64), user = { id: 1 }, id = 'tooltask_' + 'o'.repeat(32);
+    const oldKey = crypto.createHmac('sha256', oldToken).update('1:' + id).digest('hex');
+    let auth = oldToken, delayed = true, available = true, probes = 0, creates = 0;
+    const fixture = await fake((req, res) => {
+        assert.equal(req.headers.authorization, 'Bearer ' + auth);
+        if (req.url === '/v1/info') {
+            if (delayed) { delayed = false; setTimeout(() => json(res, health), 1950); }
+            else json(res, health);
+            return;
+        }
+        if (!req.url.startsWith('/v1/jobs/' + oldKey) || !available) return json(res, { error: { code: 'PPT_SERVICE_JOB_MISSING' } }, 404);
+        if (!req.url.includes('/operations/')) { creates++; return json(res, { runtimeId: health.runtimeId }); }
+        const chunks = [];
+        req.on('data', chunk => chunks.push(chunk));
+        req.on('end', () => {
+            const { operation } = JSON.parse(Buffer.concat(chunks));
+            if (operation.action === 'health') probes++;
+            json(res, { ok: true, runtimeId: health.runtimeId, serviceProtocol: 1, result: { status: 'ready', action: operation.action } });
+        });
+    });
+    t.mock.method(pptMasterSettings, 'effective', async () => ({
+        enabled: true, source: 'settings', endpoint: fixture.env.PIVOT_PPT_MASTER_SERVICE_URL, token: auth,
+        workspaceKey: oldToken
+    }));
+    try {
+        client.reset();
+        const prior = await client.identity();
+        assert.equal((await client.execute(user, id, { action: 'list' })).result.action, 'list');
+        auth = newToken;
+        assert.doesNotThrow(() => assertCheckpoint({ runtimeImage: prior }, prior));
+        assert.equal(await client.identity(process.env, { user, id, identity: prior }), prior);
+        assert.equal((await client.execute(user, id, { action: 'list' })).result.action, 'list');
+        assert.equal(probes, 1);
+        assert.equal(creates, 1);
+        available = false;
+        client.reset();
+        await assert.rejects(client.identity(process.env, { user, id, identity: prior }), { code: 'PPT_SERVICE_JOB_MISSING' });
+        assert.equal(creates, 1);
+    } finally { client.reset(); await fixture.close(); }
+});

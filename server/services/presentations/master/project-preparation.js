@@ -3,6 +3,7 @@
 const { confirmedWrite } = require('./observations');
 const { error } = require('./runtime');
 const { projectErrorBlock, projectValidationDetails, projectErrorKeys } = require('./project-validation-diagnostics');
+const { posix } = require('node:path');
 
 const specNames = ['design_spec.md', 'spec_lock.md'];
 const reasons = {
@@ -15,7 +16,8 @@ const reasons = {
 
 function isProjectValidation(action, project) {
     return action?.action === 'run' && action.tool === 'project'
-        && action.args?.[0] === 'validate' && action.args[1] === project;
+        && action.args?.[0] === 'validate' && typeof action.args[1] === 'string'
+        && posix.normalize(action.args[1]).replace(/\/$/u, '') === project;
 }
 
 function projectIssueKinds(result) {
@@ -47,7 +49,7 @@ function deterministicSpecFailure(result) {
 }
 
 function specName(action, project) {
-    return action?.action === 'write' && specNames.find(name => action.path === project + '/' + name);
+    return ['write', 'copy'].includes(action?.action) && specNames.find(name => action.path === project + '/' + name);
 }
 
 function changesProjectInputs(action, project) {
@@ -59,8 +61,15 @@ function changesProjectInputs(action, project) {
 function receiptFor(prep, action, observation, project) {
     const name = specName(action, project);
     const write = name && confirmedWrite(action, observation);
-    if (write) prep.files[name] = write.sha256;
-    else if (isProjectValidation(action, project) && action.args.length === 2 && signature(prep.files) && observation) {
+    const copy = name && action.action === 'copy' && observation?.action === 'copy' && !observation.error
+        && observation.result?.path === action.path && /^[a-f0-9]{64}$/.test(observation.result.sha256) && observation.result;
+    if (write || copy) prep.files[name] = (write || copy).sha256;
+    else if (isProjectValidation(action, project) && action.args.length === 2 && observation) {
+        const result = observation.result;
+        if (!observation.error && result?.exitCode === 0 && specNames.every(file => /^[a-f0-9]{64}$/.test(result.validatedSpecs?.[file] || ''))) {
+            prep.files = Object.fromEntries(specNames.map(file => [file, result.validatedSpecs[file]]));
+        }
+        if (!signature(prep.files)) return;
         const kinds = observation.projectIssues || projectIssueKinds(observation.result);
         const details = observation.result?.cachedSpecFailure ? prep.validation?.details : observation.projectDetails || projectValidationDetails(observation.result);
         const errorKeys = observation.result?.cachedSpecFailure ? prep.validation?.errorKeys
@@ -68,6 +77,7 @@ function receiptFor(prep, action, observation, project) {
         prep.validation = { signature: signature(prep.files), exitCode: observation.result?.exitCode ?? null, kinds, details, errorKeys,
             cacheable: deterministicSpecFailure(observation.result) || observation.result?.cachedSpecFailure === true };
     } else if (observation && changesProjectInputs(action, project)) {
+        if (name) delete prep.files[name];
         delete prep.validation;
     }
 }
@@ -198,7 +208,9 @@ function projectPreparationGuidance(state) {
 }
 
 function missingValidationRead(state, action, failure) {
-    return action.action === 'read' && state.managedProject && action.path?.startsWith(state.managedProject + '/validation/')
+    const project = state.managedProject;
+    return action.action === 'read' && project && (action.path?.startsWith(project + '/validation/')
+        || action.path === project + '/analysis/image_analysis.csv' && !(state.request.inputFiles || []).some(file => /\.(?:png|jpe?g|webp)$/i.test(file.path)))
         && failure.code === 'PPT_MASTER_OPERATION_FAILED' && /^任务文件不存在[。.]?$/.test(failure.message);
 }
 

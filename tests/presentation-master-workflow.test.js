@@ -203,7 +203,7 @@ test('末步成功导出后宿主直接核验交付，仍检查回执且不额�
     const project = 'report', path = project + '/exports/final.pptx';
     for (const verified of [true, false]) {
         const state = { bootstrapped: true, steps: 4, usedTokens: 0, engine: { tools: ['export'] }, messages: [],
-            request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 5, tokenBudget: 0 }, review: { approvals: {} } };
+            request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: verified ? 80 : 5, tokenBudget: 0 }, review: { approvals: {} } };
         recordDraftPlan(state, { project, summary: '汇报', pages: [{ title: '首页', values: [] }] });
         const operations = [];
         const execution = drive({ id: 1 }, 'case', state, hooks, {
@@ -223,6 +223,76 @@ test('末步成功导出后宿主直接核验交付，仍检查回执且不额�
         assert.equal(state.steps, 5);
         assert.equal(state.usageDiagnostics.length, 1);
     }
+});
+
+test('有有效导出回执时直接交付，不请求模型或整理旧历史', async () => {
+    const project = 'report', path = project + '/exports/final.pptx';
+    const state = { bootstrapped: true, steps: 5, usedTokens: 0, engine: { tools: ['export'] }, messages: [],
+        request: { operation: 'generate', profile: 'default', draftFirst: true, maxSteps: 80, tokenBudget: 0 }, review: { approvals: {} },
+        lastExport: { path, args: [project, '-o', path] } };
+    recordDraftPlan(state, { project, summary: '汇报', pages: [{ title: '首页', values: [] }] });
+    state.messages.push({ role: 'user', content: 'x'.repeat(660000) });
+    const { receipt } = await drive({ id: 1 }, 'job', state, hooks, {
+        resolveModel: async () => assert.fail('无需额外模型额度'),
+        execute: async (_u, _i, action) => {
+            assert.equal(action.action, 'deliver');
+            assert.equal(action.path, path);
+            return { packageCheck: { slideCount: 1, checkedPages: 1, checkedValues: 0,
+                checklistDigest: require(directory + 'review-plan').exportReview(state, project).checklistDigest } };
+        }
+    });
+    assert.ok(receipt);
+    assert.equal(state.steps, 5);
+});
+
+test('自动修页的导出失效且复检失败时保留待核验稿，只尝试一次', async () => {
+    const project = 'report', path = project + '/exports/repair.pptx', sha256 = 'a'.repeat(64);
+    const state = { bootstrapped: true, steps: 5, usedTokens: 0, messages: [],
+        request: { operation: 'generate', profile: 'quick', draftFirst: true, maxSteps: 80, tokenBudget: 0 },
+        review: { approvals: {} }, lastExport: { path, args: [project, '--quick-generate', '-o', path] } };
+    recordDraftPlan(state, { project, summary: '汇报', pages: [{ title: '首页', values: [] }] });
+    const selection = { sha256, pages: [1], sourceFiles: [project + '/svg_output/p01.svg'] };
+    state.reviewDraft = { sha256, byteSize: 512 };
+    state.pageRepair = { ...selection, automatic: true, phase: 'deliver', output: path };
+    const operations = [];
+    await assert.rejects(drive({ id: 1 }, 'job', state, hooks, {
+        resolveModel: async () => assert.fail('修页失败应保留检查点'),
+        execute: async (_u, _i, action) => {
+            operations.push(action.tool || action.action);
+            if (action.action === 'deliver') throw runtime.error('最终文件与最近成功的上游导出或当前源稿不一致。', 'PPT_MASTER_OPERATION_FAILED', 422);
+            return { exitCode: 1, stdout: '单页复检失败' };
+        }
+    }), { code: 'PPT_MASTER_DELIVERY_REEXPORT_FAILED' });
+    assert.deepEqual(operations, ['deliver', 'check_svg']);
+    assert.deepEqual(state.pageRepair, selection);
+    assert.equal(state.reviewDraft.sha256, sha256);
+    assert.equal(state.deferredExport, path);
+});
+
+test('规范复制、等价项目路径和受控恢复摘要可放行首张页面，缺图报告可跳过', () => {
+    const preparation = require(directory + 'project-preparation');
+    const project = 'report';
+    const state = { managedProject: project, request: { operation: 'generate', profile: 'default', draftFirst: true },
+        review: { approvals: { design: { plan: { project } } } }, engine: { tools: ['project'] } };
+    const digests = { 'design_spec.md': 'a'.repeat(64), 'spec_lock.md': 'b'.repeat(64) };
+    const check = { action: 'run', tool: 'project', args: ['validate', './report/'] };
+    const page = { action: 'write', path: 'report/svg_output/slide_01.svg', text: '<svg/>' };
+    for (const [name, sha256] of Object.entries(digests)) {
+        const path = project + '/' + name;
+        preparation.recordProjectPreparation(state, { action: 'copy', path }, { action: 'copy', result: { path, sha256 } });
+    }
+    preparation.recordProjectPreparation(state, check, { action: 'run', result: { exitCode: 0 } });
+    assert.doesNotThrow(() => preparation.requireValidatedProject(state, page));
+    delete state.projectPreparation;
+    assert.throws(() => preparation.requireValidatedProject(state, page), { code: 'PPT_MASTER_PROJECT_SPEC_REVIEW_REQUIRED' });
+    preparation.recordProjectPreparation(state, check, { action: 'run', result: { exitCode: 0, validatedSpecs: digests } });
+    assert.doesNotThrow(() => preparation.requireValidatedProject(state, page));
+    const missing = runtime.error('任务文件不存在。', 'PPT_MASTER_OPERATION_FAILED');
+    const read = { action: 'read', path: project + '/analysis/image_analysis.csv' };
+    assert.equal(preparation.missingValidationRead(state, read, missing), true);
+    assert.equal(preparation.missingValidationRead(state, { ...read, path: 'inputs/material-1.md' }, missing), false);
+    state.request.inputFiles = [{ path: 'inputs/asset.png' }];
+    assert.equal(preparation.missingValidationRead(state, read, missing), false);
 });
 
 test('首张 SVG 先核对可见文字再走执行器版式检查，失败会拦住同批后续页', async () => {

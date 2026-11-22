@@ -27,6 +27,8 @@ const { sourceBundleLimit } = require('./delivery');
 const { listWorkspace } = require('./workspace-list');
 const { projectValidationDetails, projectErrorKeys } = require('./project-validation-diagnostics');
 const { checklistLimits } = require('./checklist-limits');
+const { batchGuidance } = require('./plan-batches');
+const { imageReviewTurn } = require('./image-evidence');
 
 const AUTHORITY = {
     generate: { default: 'workflows/generate-pptx.md', quick: 'workflows/profiles/quick-generate.md', beautify: 'workflows/profiles/beautify-pptx.md', image_to_pptx: 'workflows/profiles/image-to-pptx.md' },
@@ -54,20 +56,22 @@ function resetInspectionRepair(state) {
     delete state.inspectionDiagnostic;
 }
 
-async function nextTurn(user, id, state, model, hooks, deps, inspection) {
+async function nextTurn(user, id, state, hooks, deps, inspection) {
     let correction = '', actionRepair;
+    let model;
     let fieldRetries = 0;
     const verifySource = async path => path === 'instruction' ? state.request.instruction
         : (await (deps.inputBuffer || runtime.inputBuffer)(user, id, path.slice('inputs/'.length), 500000)).toString('utf8');
     for (;;) {
         const current = progressFor(state);
-        if (state.request.draftFirst && current?.phase === 'design' && (current.calls >= current.limit || inspection.stalled())) {
+        const savedImageCandidate = state.retryImageCandidate;
+        if (!savedImageCandidate && state.request.draftFirst && current?.phase === 'design' && (current.calls >= current.limit || inspection.stalled())) {
             const draft = draftWithCitationPlaceholders({ citationDraft: state.citationDraft, citationIssues: state.citationRepair });
             if (draft) return { turn: { requestInput: draft }, pendingCitations: state.citationRepair, recoveredPlan: true };
         }
         const images = imageCoverage(state);
         const imageHint = state.review && images.total ? `图片覆盖 ${images.read}/${images.total}，下一未读 offset=${images.nextOffset ?? '无'}。` : '';
-        const guidance = [workflowGuidance(state), inspection.guidance(), reviewGuidance(state), projectPreparationGuidance(state),
+        const guidance = [!savedImageCandidate && workflowGuidance(state), batchGuidance(state), inspection.guidance(), reviewGuidance(state), projectPreparationGuidance(state),
             authoringPageGuidance(state), supplementGuidance(state), imageHint, correction,
             state.templateSpec && '按 selectedTemplateSpec.text 和已安装模板制作。确需查阅任务副本时，用 read 读取 selected-template/templates/design_spec.md。可填 plan.templateUse:{rule,page,visibleText} 供风格复核，rule 引用模板第 II 至 VII 节正文，visibleText 对应该页标题或关键数据。宿主核对模板安装记录。',
             state.pageRepair && `按页修复范围为第 ${state.pageRepair.pages.join('、')} 页。根据用户指示修改这几页的原页面文件，不改变页序、其他页、共享版式、主题或资源。保留原清单，校验并重新导出当前项目。`,
@@ -75,12 +79,15 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
                 : state.pageRepair && `本次可写文件：${state.pageRepair.sourceFiles.join('、')}。导出时用 -o 指定当前项目 exports 下的 PPTX 文件。`,
             state.citationRepair && CITATION_REPAIR_GUIDANCE, state.citationRepair && state.citationDraft && CITATION_PATCH_GUIDANCE,
             state.inspectionRepairPending && INSPECTION_REPAIR_GUIDANCE].filter(Boolean).join('\n');
-        const { output, usageRef, readResultBudget } = await runModelTurn(user, id, state, model, hooks, deps, guidance, state.citationRepair);
+        delete state.retryImageCandidate;
+        const { output, usageRef, readResultBudget } = savedImageCandidate
+            ? { output: savedImageCandidate, usageRef: {}, readResultBudget: Infinity }
+            : await runModelTurn(user, id, state, model ||= await (deps.resolveModel || resolveModel)(user, state.request), hooks, deps, guidance, state.citationRepair);
         await hooks.ensureCurrent();
         if (state.request.tokenBudget !== 0 && state.usedTokens > state.request.tokenBudget) throw runtime.error('本次制作的实际模型用量已超过预算，本轮未继续执行制作动作。检查点已保留。', 'PPT_MASTER_BUDGET_EXHAUSTED', 429);
         let candidate;
         try {
-            if (usageRef.truncated) throw runtime.error('模型输出被截断，请拆为单页或减少同轮动作。', 'PPT_MASTER_MODEL_TRUNCATED', 422);
+            if (usageRef.truncated) throw runtime.error('模型输出被截断。清单请改用 planPages 分批提交，制稿请拆为单页或减少同轮动作。', 'PPT_MASTER_MODEL_TRUNCATED', 422);
             candidate = repairedTurn(output, actionRepair);
             const turn = await validateTurn(candidate, state, verifySource);
             if (turn.complete?.path) requireAuthoringPages(state, turn.complete.path.split('/exports/')[0]);
@@ -89,7 +96,7 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
                 await installTemplate(state, turn.requestInput.plan.project, op => (deps.execute || runtime.execute)(user, id, op, hooks));
                 state.installedTemplateProject = turn.requestInput.plan.project;
             }
-            return { turn: withFirstPageCheck(state, turn), readResultBudget };
+            return { turn: withFirstPageCheck(state, turn), readResultBudget, pendingCitations: turn.batchIssues };
         } catch (failure) {
             const progress = progressFor(state);
             const designLimitReached = progress?.phase === 'design' && progress.calls >= progress.limit;
@@ -98,6 +105,12 @@ async function nextTurn(user, id, state, model, hooks, deps, inspection) {
             const correctionReason = failure.correctionKind === 'action_fields' && failure.actionType === 'write'
                 ? failure.message + writeCorrection : failure.message;
             if (failure.citationIssues) {
+                const review = imageReviewTurn(state, candidate, failure.citationIssues);
+                if (review) return { turn: review };
+                if (savedImageCandidate) {
+                    const draft = draftWithCitationPlaceholders(failure);
+                    if (draft) return { turn: { requestInput: draft }, pendingCitations: failure.citationIssues, recoveredPlan: true };
+                }
                 const attempts = Number(state.citationRepairAttempts || 0);
                 const keepPrior = state.request.draftFirst && canUseCitationDraft(state.citationDraft, state.citationRepair)
                     && failure.citationIssues.some(issue => issue.missing);
@@ -228,6 +241,12 @@ async function drive(user, id, state, hooks, deps = {}) {
             && response.promptId === pending?.promptId;
         let source = response.source;
         if (!approved && response.answer && !source) source = registerSupplement(state, response.answer, response.decision, response.promptId);
+        if (source && state.pendingInput?.imageReview) {
+            const { origin, candidate } = state.pendingInput.imageReview;
+            state.reviewedImageDigests = [...new Set([...(state.reviewedImageDigests || []), origin.digest])];
+            if (response.answer.trim() !== '跳过') (state.imageTranscriptions ||= {})[origin.path] = { source, digest: origin.digest };
+            state.retryImageCandidate = candidate;
+        }
         if (source) {
             if (state.pageRepair?.automatic) delete state.pageRepair.missingSource;
             resetCitationRepair(state, { allowRevision: response.decision === 'revise' });
@@ -274,17 +293,31 @@ async function drive(user, id, state, hooks, deps = {}) {
     for (;;) {
         await hooks.ensureCurrent();
         const exhausted = state.steps >= request.maxSteps;
+        const path = state.lastExport?.path;
+        const canDeliver = state.review?.approvals?.design && path && !state.citationFacts?.length
+            && (!state.pageRepair?.automatic || state.pageRepair.phase === 'deliver')
+            && (!state.reviewDraft || state.deliveryPendingPath === path || state.pageRepair?.phase === 'deliver')
+            && state.deferredExport !== path;
         let automatic;
-        if (exhausted) {
-            const path = state.lastExport?.path;
-            if (!state.review || !path || request.operation === 'create_template'
-                || state.pageRepair?.automatic && state.pageRepair.phase !== 'deliver') break;
-            automatic = await validateTurn({ complete: { path } }, state, undefined, { hostCompletion: true });
+        if (canDeliver) {
+            try { automatic = await validateTurn({ complete: { path } }, state, undefined, { hostCompletion: true }); }
+            catch (failure) {
+                if (state.pageRepair?.automatic) {
+                    state.deferredExport = path;
+                    stopAutomaticRepair(state);
+                    throw failure;
+                }
+                if (exhausted || !correctable.has(failure.code)) throw failure;
+                state.deferredExport = path;
+                state.messages.push({ role: 'user', content: '本次导出暂不能登记。' + failure.message });
+            }
+        } else if (exhausted) {
+            break;
         } else {
             automatic = pendingProjectValidation(state) || resumeFirstPageCheck(state) || automaticTurn(state);
         }
         const { turn, readResultBudget = Infinity, pendingCitations, recoveredPlan } = automatic ? { turn: automatic }
-            : await nextTurn(user, id, state, await (deps.resolveModel || resolveModel)(user, request), hooks, deps, inspection);
+            : await nextTurn(user, id, state, hooks, deps, inspection);
         inspection.syncVisibleObservations(state.messages);
         if (turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design' || turn.complete) {
             delete state.citationRepair;
@@ -293,7 +326,18 @@ async function drive(user, id, state, hooks, deps = {}) {
             resetCitationRepair(state);
         }
         if (turn.requestInput || turn.complete) delete state.inspectionRepairPending;
-        if (!exhausted) state.steps++;
+        if (!exhausted && !(automatic && turn.complete)) state.steps++;
+        if (turn.planBatch) {
+            state.planBatch = turn.planBatch;
+            if (state.workflowProgress?.phase === 'design') {
+                const { calls, finishBy = 0 } = state.workflowProgress;
+                state.workflowProgress.finishBy = Math.max(finishBy, calls + 4);
+            }
+            const message = `已核对分批清单 ${turn.planBatch.pages.length}/${turn.planBatch.pageCount} 页。`;
+            recordTurnDiagnostic(state, { outcome: 'progressed', planPages: turn.planBatch.pages.length });
+            await hooks.checkpoint(state, { phase: 'authoring', message });
+            continue;
+        }
         if (request.draftFirst && turn.requestInput?.kind === 'confirmation' && turn.requestInput.stage === 'design') {
             const { plan } = turn.requestInput;
             if (plan.templateUse && state.installedTemplateProject !== plan.project) {
@@ -302,24 +346,36 @@ async function drive(user, id, state, hooks, deps = {}) {
                 state.installedTemplateProject = plan.project;
             }
             recordDraftPlan(state, plan);
+            let visiblePlan = turn;
+            delete state.modelPlanPaged;
+            if (state.planBatch || turn.batchIssues) {
+                const concise = plan.pages.map(page => ({ title: page.title,
+                    values: page.values.map(({ text, chart }) => ({ text, ...(chart ? { chart } : {}) })) }));
+                state.modelPlanPaged = JSON.stringify(concise).length > 16000;
+                const roster = state.modelPlanPaged ? concise.map(page => ({ title: page.title, valueCount: page.values.length })) : concise;
+                visiblePlan = { requestInput: { ...turn.requestInput, plan: { ...plan, pages: roster } } };
+            }
+            delete state.planBatch;
             if (!state.lastExport) delete state.projectPreparation;
             if (state.authoringPages && !state.lastExport) state.authoringPages = { paths: {}, first: 'unwritten' };
             state.draftCitationIssues = pendingCitations?.map(({ page, item, reason, titleClaim }) => ({ page, item, reason, ...(titleClaim ? { titleClaim } : {}) })) || [];
             markMilestone(state, 'firstPlan');
-            state.messages.push({ role: 'assistant', content: JSON.stringify(turn) },
+            state.messages.push({ role: 'assistant', content: JSON.stringify(visiblePlan) },
                 { role: 'user', content: '宿主已登记本次初稿清单，请按清单生成页面。待核对项只显示占位文字。' });
-            if (!recoveredPlan && !pendingCitations) recordTurnDiagnostic(state, { outcome: 'progressed', citationPatchIgnored: turn.citationPatchIgnored });
+            if (!recoveredPlan && !pendingCitations?.length) recordTurnDiagnostic(state, { outcome: 'progressed', citationPatchIgnored: turn.citationPatchIgnored });
             resetInspectionRepair(state);
             state.workflowPhaseFrom = state.messages.length;
             await hooks.checkpoint(state, { phase: 'authoring', message: '已准备初稿清单，开始生成页面。' });
             continue;
         }
-        state.messages.push({ role: 'assistant', content: JSON.stringify(turn) });
+        const { imageReview: _imageReview, ...visibleTurn } = turn;
+        state.messages.push({ role: 'assistant', content: JSON.stringify(visibleTurn) });
         if (turn.requestInput) {
             const question = String(turn.requestInput.question || '').trim(), context = String(turn.requestInput.context || '').trim();
             if (!question || question.length > 2000 || context.length > 12000) throw runtime.error('制作确认问题无效。');
             state.pendingKind = turn.requestInput.kind === 'confirmation' ? 'confirmation' : 'clarification';
-            state.pendingInput = { question, context, ...(turn.requestInput.stage ? { stage: turn.requestInput.stage, plan: turn.requestInput.plan } : {}) };
+            state.pendingInput = { question, context, ...(turn.requestInput.stage ? { stage: turn.requestInput.stage, plan: turn.requestInput.plan } : {}),
+                ...(turn.imageReview ? { imageReview: turn.imageReview } : {}) };
             if (state.pendingKind === 'confirmation') markMilestone(state, 'firstPlan');
             if (!automatic) recordTurnDiagnostic(state, summarizeExecutedTurn(turn));
             await hooks.checkpoint(state, { phase: 'input_required', message: question });
@@ -346,9 +402,19 @@ async function drive(user, id, state, hooks, deps = {}) {
             } catch (failure) {
                 if (!automatic) recordTurnDiagnostic(state, summarizeExecutedTurn(turn, null, { outcome: 'failed', ...(failure.code ? { errorCode: failure.code } : {}) }));
                 if (failure.code === 'PPT_MASTER_OPERATION_FAILED') stopAutomaticRepair(state);
+                if (automatic && failure.code === 'PPT_MASTER_DELIVERY_REEXPORT_FAILED') {
+                    state.deferredExport = path;
+                    if (state.pageRepair?.automatic) stopAutomaticRepair(state);
+                    else if (!exhausted) {
+                        await hooks.checkpoint(state, { phase: 'delivery_review', message: failure.message });
+                        continue;
+                    }
+                }
                 throw failure;
             }
             if (expected?.checklist && typeof receipt?.reviewFailure === 'string' && receipt.reviewFailure) {
+                delete state.deliveryPendingPath;
+                state.deferredExport = path;
                 const { sha256, byteSize } = receipt.reviewDraft || {};
                 if (typeof sha256 === 'string' && /^[a-f0-9]{64}$/.test(sha256) && Number.isSafeInteger(byteSize) && byteSize > 0 && byteSize <= 60 * 1024 * 1024) {
                     state.reviewDraft = { sha256, byteSize };
@@ -377,6 +443,7 @@ async function drive(user, id, state, hooks, deps = {}) {
                 state.deliveryReview = { project, templateOnly: Boolean(templateOnly) };
             }
             state.deliveryReceipt = receipt;
+            delete state.deliveryPendingPath;
             if (!automatic) recordTurnDiagnostic(state, summarizeExecutedTurn(turn));
             await hooks.checkpoint(state, { phase: 'delivery', message: '上游导出已完成，正在核验并登记交付文件。' });
             return { receipt };
@@ -427,7 +494,7 @@ async function drive(user, id, state, hooks, deps = {}) {
                 hooks.signal?.throwIfAborted();
                 if (missingValidationRead(state, action, error)) {
                     observations.push({ action: 'read', result: { path: action.path, unavailable: true,
-                        message: '这份可选校验记录尚未生成。继续本批其他动作。请使用 project validate 或 text_measure 的回执。' } });
+                        message: '这份可选报告尚未生成。继续本批其他动作。' } });
                 } else {
                     recordCheck(state, action, { exitCode: 1 });
                     observations.push({ action: action.action, error: String(error.message).slice(0, 2000),
@@ -471,7 +538,9 @@ async function drive(user, id, state, hooks, deps = {}) {
             await hooks.captureProgress?.(state, action, result);
         }
         state.messages[state.messages.length - 1].content = JSON.stringify(observations);
-        if (JSON.stringify(state.messages).length > 650000) {
+        const justExported = observations.some((item, index) => turn.actions[index]?.tool === 'export'
+            && !item.error && item.result?.exitCode === 0 && state.lastExport?.path);
+        if (!justExported && JSON.stringify(state.messages).length > 650000) {
             await archiveOlderObservations(state, { preserveActive: true });
             if (JSON.stringify(state.messages).length > 650000) await archiveOlderObservations(state, { force: true, recentTurns: 1 });
             if (JSON.stringify(state.messages).length > 650000) throw runtime.error('制作检查点超过当前保存上限，请保留项目后分批制作。', 'PPT_MASTER_HISTORY_LIMIT', 422);

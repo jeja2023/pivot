@@ -18,6 +18,17 @@ function document() {
 }
 function plan() { return { summary: '先说明情况，再安排具体行动', slideOrder: ['slide_1', 'slide_2'], updates: [{ slideId: 'slide_1', reason: '突出已提供材料中的结论', intent: { purpose: '说明经营情况', takeaway: '收入120万元', bridgeToNext: '转入后续行动', stage: 'evidence', relation: 'sequence', durationSeconds: 40 }, textEdits: [{ elementId: 'title', text: '收入120万元' }] }] }; }
 
+test('故事线接受同单位等值十进制格式，拒绝单位、符号和数值变化', () => {
+    const source = document(), update = plan();
+    source.content.slides[0].elements[1].content.text = '预算 1,200.00 万元';
+    update.updates[0].textEdits[0].text = '预算 1200 万元';
+    assert.equal(prepare(update, source).preview.changes[0].textEdits[0].after, '预算 1200 万元');
+    for (const text of ['预算 1200 元', '预算 -1200 万元', '预算 1200.01 万元']) {
+        update.updates[0].textEdits[0].text = text;
+        assert.throws(() => prepare(update, source), /没有的数值或单位/);
+    }
+});
+
 test('故事线建议可重复校验和摘要核对，保留几何、事实登记及制作目标且不修改原稿', () => {
     const source = document(), before = JSON.stringify(source), proposal = prepare(JSON.stringify(plan()), source);
     assert.equal(JSON.stringify(source), before);

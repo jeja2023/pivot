@@ -16,12 +16,14 @@ function config(env = process.env) {
     try { url = new URL(endpoint); } catch (_) { throw error('PPT制作服务地址无效，请检查配置。'); }
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash || url.pathname !== '/') throw error('PPT制作服务地址只支持HTTP/HTTPS服务根地址。');
     if (!/^[A-Za-z0-9_-]{32,256}$/.test(token)) throw error('PPT制作服务密钥未配置或格式无效，请检查服务连接。');
-    return { endpoint, token };
+    return { endpoint, token, workspaceKey: token };
 }
 async function connection(env = process.env) {
     if (env !== process.env) return { selected: Boolean(String(env.PIVOT_PPT_MASTER_SERVICE_URL || '').trim()), settings: config(env) };
     const value = await pptMasterSettings.effective();
-    return { selected: value.source === 'settings' || Boolean(value.endpoint), settings: value.enabled ? config({ PIVOT_PPT_MASTER_SERVICE_URL: value.endpoint, PIVOT_PPT_MASTER_SERVICE_TOKEN: value.token }) : null };
+    const settings = value.enabled ? config({ PIVOT_PPT_MASTER_SERVICE_URL: value.endpoint, PIVOT_PPT_MASTER_SERVICE_TOKEN: value.token }) : null;
+    if (settings && value.workspaceKey) settings.workspaceKey = value.workspaceKey;
+    return { selected: value.source === 'settings' || Boolean(value.endpoint), settings };
 }
 async function configured(env = process.env) { return (await connection(env)).selected; }
 async function bytes(response, maximum) {
@@ -70,22 +72,46 @@ async function info({ force = false, env = process.env } = {}) {
     const { settings } = await connection(env); if (!settings) return null;
     const signature = crypto.createHash('sha256').update(settings.endpoint + settings.token).digest('hex');
     if (!force && cached?.signature === signature && Date.now() - cached.at < 2000) return cached.value;
-    const value = compatible(await request(settings, '/v1/info', { timeout: 1800 }));
+    let response;
+    try { response = await request(settings, '/v1/info', { timeout: 5000 }); }
+    catch (failure) {
+        if (!['PPT_SERVICE_TIMEOUT', 'PPT_SERVICE_UNAVAILABLE'].includes(failure.code)) throw failure;
+        response = await request(settings, '/v1/info', { timeout: 5000 });
+    }
+    const value = compatible(response);
     cached = { signature, at: Date.now(), value }; return value;
 }
-function jobKey(user, id, settings) {
+function jobKey(user, id, token) {
     if (!Number.isSafeInteger(Number(user?.id)) || Number(user.id) <= 0 || !/^tooltask_[A-Za-z0-9_-]{24,80}$/.test(String(id))) throw error('制作任务标识无效。', 'PPT_SERVICE_JOB_INVALID', 400);
-    return crypto.createHmac('sha256', settings.token).update(String(user.id) + ':' + id).digest('hex');
+    return crypto.createHmac('sha256', token).update(String(user.id) + ':' + id).digest('hex');
+}
+
+function sessionKey(settings, key) {
+    return crypto.createHash('sha256').update(JSON.stringify([settings.endpoint, settings.token, key])).digest('hex');
+}
+async function verifyExistingWorkspace(settings, user, id, health) {
+    const key = jobKey(user, id, settings.workspaceKey), cacheKey = sessionKey(settings, key);
+    if (sessions.get(cacheKey)?.runtimeId === health.runtimeId) return;
+    // 使用当前访问密钥查询已存在的原工作区，禁止把空目录当成已保存的检查点。
+    const receipt = await request(settings, '/v1/jobs/' + key + '/operations/' + crypto.randomBytes(16).toString('hex'),
+        { method: 'POST', body: { runtimeId: health.runtimeId, operation: { action: 'health' } }, timeout: 5000 });
+    if (!receipt.ok || receipt.runtimeId !== health.runtimeId || receipt.result?.status !== 'ready') throw error('无法确认原制作任务的运行身份。', 'PPT_SERVICE_RUNTIME_CHANGED', 409);
+    rememberSession(cacheKey, health);
+}
+
+function rememberSession(key, health) {
+    if (sessions.size >= 400) sessions.delete(sessions.keys().next().value);
+    sessions.set(key, health);
 }
 async function session(user, id, env = process.env) {
     const { settings } = await connection(env); if (!settings) throw error('PPT制作服务已停用，标准PPT功能继续可用。');
-    const key = jobKey(user, id, settings), cacheKey = settings.endpoint + ':' + key;
+    const key = jobKey(user, id, settings.workspaceKey), cacheKey = sessionKey(settings, key);
     const previous = sessions.get(cacheKey);
     if (previous) return { settings, key, health: previous };
     const health = await info({ env });
     await request(settings, '/v1/jobs/' + key, { method: 'POST', body: { runtimeId: health.runtimeId }, timeout: 10000 });
-    if (sessions.size >= 400) sessions.delete(sessions.keys().next().value);
-    sessions.set(cacheKey, health); return { settings, key, health };
+    rememberSession(cacheKey, health);
+    return { settings, key, health };
 }
 async function execute(user, id, operation, { signal, env = process.env } = {}) {
     const { settings, key, health } = operation.action === 'inspect_export' ? await reviewSession(user, id, env) : await session(user, id, env);
@@ -120,17 +146,26 @@ async function reviewSession(user, id, env) {
     const { settings } = await connection(env);
     if (!settings) throw error('PPT制作服务已停用。');
     // 查阅已有快照不创建任务，也不重绑旧工作区的运行身份。
-    return { settings, key: jobKey(user, id, settings), health: await info({ env }) };
+    const health = await info({ env });
+    return { settings, key: jobKey(user, id, settings.workspaceKey), health };
 }
 async function cleanup(user, id, env = process.env) {
     const { settings } = await connection(env); if (!settings) return;
-    const key = jobKey(user, id, settings);
-    await request(settings, '/v1/jobs/' + key, { method: 'DELETE', timeout: 5000 }); sessions.delete(settings.endpoint + ':' + key);
+    const key = jobKey(user, id, settings.workspaceKey);
+    await request(settings, '/v1/jobs/' + key, { method: 'DELETE', timeout: 5000 }); sessions.delete(sessionKey(settings, key));
 }
-async function identity(env = process.env) {
+function identityFor(endpoint, token, runtimeId) {
+    return 'service:' + crypto.createHmac('sha256', token).update(endpoint).digest('hex') + ':' + runtimeId;
+}
+
+async function identity(env = process.env, checkpoint) {
     const { settings } = await connection(env); if (!settings) return '';
     const health = await info({ env });
-    return 'service:' + crypto.createHmac('sha256', settings.token).update(settings.endpoint).digest('hex') + ':' + health.runtimeId;
+    const current = identityFor(settings.endpoint, settings.workspaceKey, health.runtimeId);
+    if (checkpoint?.identity === current && settings.workspaceKey !== settings.token) {
+        await verifyExistingWorkspace(settings, checkpoint.user, checkpoint.id, health);
+    }
+    return current;
 }
 function reset() { cached = null; sessions.clear(); }
 module.exports = { config, configured, compatible, info, execute, inputFile, file, cleanup, request, identity, reset };

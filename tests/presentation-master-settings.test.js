@@ -24,8 +24,11 @@ test('PPT服务配置整体加密，公开响应不包含密钥，非最高管�
     assert.match(app.raw(), /^enc:v2:/); assert.ok(!app.raw().includes(changed)); assert.ok(!app.raw().includes('127.0.0.1'));
     assert.equal(saved.source, 'settings'); assert.equal(saved.hasToken, true); assert.equal(saved.token, undefined);
     assert.equal((await app.settings.effective()).token, changed);
+    assert.equal((await app.settings.effective()).workspaceKey, token);
     const publicValue = await app.settings.publicConfig(); assert.equal(publicValue.canManage, false); assert.equal(publicValue.endpoint, '********');
     assert.ok(!JSON.stringify(publicValue).includes(changed));
+    assert.ok(!JSON.stringify(publicValue).includes(token));
+    assert.equal(publicValue.workspaceKey, undefined);
 });
 
 test('空白保留密钥；更换地址必须提供新密钥，测试草稿不更改保存配置', async () => {

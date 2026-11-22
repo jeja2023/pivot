@@ -6,6 +6,7 @@ const { error } = require('./runtime');
 const { getSupplement } = require('./user-supplements');
 const { compact, containsValue, matchesDisplayedValue, matchesChartNumber, locateCitation, verifiedCorrection, originalLine, extendCitation, CITATION_REVIEW_REQUIRED } = require('./citation-repair');
 const { checklistLimits } = require('./checklist-limits');
+const { imageOrigin, imageTranscription, supplementImageOrigin } = require('./image-evidence');
 const { normalizeTemplateUse } = require('./template-application');
 const { writeCorrection, listGuidance } = require('./action-parameters');
 const { missingTitleClaims } = require('./title-evidence');
@@ -66,7 +67,7 @@ function citationExcerpt(source, anchor) {
     return source.slice(Math.max(0, start - 60), start + anchor.length + 60);
 }
 
-async function normalizeStage(input, state, verifySource) {
+async function normalizeStage(input, state, verifySource, { partial = false, trustedPlaceholders = false } = {}) {
     const stage = input.stage;
     if (stage !== confirmationStage(state.request)) {
         throw invalid('请按制作流程提交当前待确认阶段：' + (labels[nextStage(state)] || '已批准方案的修订') + '。');
@@ -83,14 +84,14 @@ async function normalizeStage(input, state, verifySource) {
     const { pages } = input.plan;
     if (!Array.isArray(pages) || !pages.length || pages.length > 100) throw invalid('请逐页提交有顺序的清单，每页都要填写页面标题和关键数据数组。');
     const expected = state.request.pageCount;
-    if (fixedPageCount(state.request) && pages.length !== expected) {
+    if (!partial && fixedPageCount(state.request) && pages.length !== expected) {
         throw Object.assign(invalid(`制作要求为 ${expected} 页。请提交包含全部 ${expected} 页的页面清单。`),
             { correctionKind: 'plan_page_count' });
     }
     const normalized = [], sources = new Map(), failures = [], seen = new Set(), verified = new Set();
-    const requiredFacts = new Map((state.citationFacts || []).map(fact => [fact.key, fact]));
+    const requiredFacts = new Map((partial ? [] : state.citationFacts || []).map(fact => [fact.key, fact]));
     const approved = new Set(state.review.approvals.design?.plan?.pages?.flatMap(page => page.values.map(citationKey)));
-    if (state.request.draftFirst && state.citationDraft?.plan) {
+    if (!partial && state.request.draftFirst && state.citationDraft?.plan) {
         const pending = new Set((state.citationRepair || []).map(({ page, item }) => page + '/' + item));
         for (const [index, page] of state.citationDraft.plan.pages.entries()) {
             for (const [position, value] of page.values.entries()) {
@@ -138,7 +139,8 @@ async function normalizeStage(input, state, verifySource) {
             const fact = { key, ...value, title, page: pageIndex + 1, item: valueIndex + 1 };
             values.push(value);
             if (entry.source === undefined) {
-                if (previous || state.request.draftFirst && /\d/u.test(compact(text))) {
+                if (previous || state.request.draftFirst && /\d/u.test(compact(text))
+                    && !(trustedPlaceholders && text === `数据待核对（第 ${valueIndex + 1} 项）`)) {
                     failures.push({ ...fact, path: previous?.path || '', excerpt: previous?.excerpt, reason: '仍需为该数据项提供可核对的引用。' });
                 }
                 continue;
@@ -150,6 +152,15 @@ async function normalizeStage(input, state, verifySource) {
             } catch (failure) {
                 if (failure.code !== 'PPT_MASTER_ACTION_INVALID') throw failure;
             }
+            const requestedImage = imageOrigin(state, path);
+            const transcription = requestedImage && imageTranscription(state, requestedImage);
+            if (requestedImage && !transcription) {
+                failures.push({ ...fact, path, imagePath: path, imageDigest: requestedImage.digest,
+                    reason: '这项数据来自图片，需用户核对原图并输入可引用的原文。' });
+                continue;
+            }
+            if (transcription) path = transcription.path;
+            const origin = requestedImage || supplementImageOrigin(state, path);
             if (!availablePaths.has(path)) {
                 failures.push({ ...fact, path: '', reason: '请为本项提供当前任务的文本材料、制作要求或已登记的用户补充。' });
                 continue;
@@ -158,12 +169,12 @@ async function normalizeStage(input, state, verifySource) {
             if (!quote) {
                 const original = typeof entry.source?.quote === 'string' && !entry.source.quote.trim() ? originalLine(source, text) : '';
                 if (original) {
-                    value.source = { path, quote: original };
+                    value.source = { path, quote: original, ...(origin ? { imageOrigin: origin } : {}) };
                     verified.add(value);
                 } else failures.push({ ...fact, path, reason: '引文为空、过长或含无效字符。请提供含本项数据的连续原文。' });
                 continue;
             }
-            value.source = { path, quote };
+            value.source = { path, quote, ...(origin ? { imageOrigin: origin } : {}) };
             const normalizedQuote = compact(quote);
             const quoteFound = containsValue(source.normalized, normalizedQuote);
             const containsText = matchesDisplayedValue(normalizedQuote, text);
@@ -199,14 +210,24 @@ async function normalizeStage(input, state, verifySource) {
                 } catch (error) {
                     if (error.code !== 'PPT_MASTER_ACTION_INVALID') throw error;
                 }
+                const origin = citation && imageOrigin(state, citation.path);
+                if (origin) {
+                    const transcription = imageTranscription(state, origin);
+                    if (transcription) citation = { ...citation, path: transcription.path, imageOrigin: origin };
+                    else if (missingTitleClaims({ ...normalizedPage, values: values.filter(value => verified.has(value)) }).length) {
+                        failures.push({ page: pageIndex + 1, title, text: title, path: origin.path, imagePath: origin.path, imageDigest: origin.digest,
+                            titleClaim: true, reason: '标题数字来自图片，请核对原图并输入原文。' });
+                    }
+                }
                 if (citation && availablePaths.has(citation.path) && containsValue((await readSource(citation.path)).normalized, citation.quote)) {
-                    normalizedPage.titleSource = citation;
+                    const verifiedOrigin = citation.imageOrigin || supplementImageOrigin(state, citation.path);
+                    normalizedPage.titleSource = { ...citation, ...(verifiedOrigin ? { imageOrigin: verifiedOrigin } : {}) };
                 }
             }
             // 只有已核对的数据项能证明标题。缺少依据的标题分句进入既有逐项修复和占位流程。
             const missing = missingTitleClaims({ ...normalizedPage, values: values.filter(v => verified.has(v)) });
             for (const claim of new Set(missing)) {
-                if (failures.some(f => f.page === pageIndex + 1 && f.text === claim)) continue;
+                if (failures.some(f => f.page === pageIndex + 1 && (f.text === claim || f.titleClaim && f.imagePath))) continue;
                 let position = values.findIndex(value => value.text === claim);
                 if (claim.length > 120 || position < 0 && (values.length >= perPage || totalValues >= total)) {
                     failures.push({ key: citationKey({ text: claim }), page: pageIndex + 1, title, text: claim, path: '', titleClaim: true,
@@ -239,12 +260,12 @@ async function normalizeStage(input, state, verifySource) {
         failures.push({ ...fact, missing: true, reason: '之前待核对的数据项仍需保留，或由用户说明如何调整。' });
     }
     const plan = { summary, project, pages: normalized };
-    const templateUse = normalizeTemplateUse(state, input.plan, normalized);
+    const templateUse = !partial && normalizeTemplateUse(state, input.plan, normalized);
     if (templateUse) plan.templateUse = templateUse;
     if (failures.length) {
-        const citationIssues = failures.map(({ page, item, path, title, text, reason, excerpt, missing, titleClaim }) => ({
+        const citationIssues = failures.map(({ page, item, path, title, text, reason, excerpt, missing, titleClaim, imagePath, imageDigest }) => ({
             location: `第 ${page} 页${titleClaim ? '标题' : '第 ' + item + ' 项'}（${sourceLabel(path)}）`, page, item, title, text, path, reason,
-            ...(titleClaim ? { titleClaim: true } : {}),
+            ...(titleClaim ? { titleClaim: true } : {}), ...(imagePath ? { imagePath, imageDigest } : {}),
             ...(excerpt ? { excerpt } : {}), ...(missing ? { missing: true } : {})
         }));
         const detail = citationIssues.slice(0, 4).map(({ location, reason }) => `${location}的${reason}`).join('');
@@ -293,6 +314,10 @@ async function normalizeCitationPatch(patch, state, verifySource) {
 function reopenReview(state, stage = confirmationStage(state.request)) {
     if (!state.review || stage !== confirmationStage(state.request)) return;
     const approvals = state.review.approvals;
+    if (approvals[stage] && state.lastExport?.path) {
+        state.deferredExport = state.lastExport.path;
+        delete state.deliveryPendingPath;
+    }
     delete approvals[stage];
     delete state.deliveryReceipt;
     delete state.deliveryReview;

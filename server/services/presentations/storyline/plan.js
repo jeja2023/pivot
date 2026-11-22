@@ -5,10 +5,18 @@ const { canonicalJson } = require('../../canonical-json');
 const { normalizePresentation, computePresentationDigest, presentationError } = require('../presentation-schema');
 const { normalizeSlideIntent } = require('../presentation-semantics');
 const { runPresentationValidation } = require('../presentation-validation');
+const { exactDecimal } = require('../presentation-decimal');
 const invalid = message => presentationError(message, 422, 'PRESENTATION_STORY_PLAN_INVALID');
 const title = slide => slide.elements.find(item => item.id === 'title')?.content?.text || slide.elements.find(item => item.type === 'text' && item.style.fontSize >= 24)?.content?.text || `第${slide.index + 1}页`;
 function text(value, length, label) { if (typeof value !== 'string' || value.length > length || /\u0000/.test(value)) throw invalid(label + '格式无效或过长。'); return value.trim(); }
 function keys(value, allowed) { if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).some(key => !allowed.includes(key))) throw invalid('调整方案包含未支持字段。'); }
+function quantities(text) {
+    const normalized = text.normalize('NFKC').replace(/−|负(?=\d)/gu, '-');
+    const pattern = /([$¥€£])?[ \t]*([+±-]?\d+(?:[.,]\d+)*)[ \t]*(个百分点|百分点|[%‰]|[千万元亿]*(?:元|美元|欧元)|[万亿]?(?:公里|[台件人笔份项吨套米秒日年月])|[万亿])?/gu;
+    const decimal = /^[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?$/u;
+    return Array.from(normalized.matchAll(pattern), ([, currency, number, unit]) => (currency || '')
+        + (decimal.test(number) ? exactDecimal(number) : number) + ':' + (unit || ''));
+}
 function prepare(input, document, scope = 'deck', slideId = '') {
     let raw;
     try { raw = typeof input === 'string' ? JSON.parse(input.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '')) : input; }
@@ -37,8 +45,9 @@ function prepare(input, document, scope = 'deck', slideId = '') {
             if (!element || element.type !== 'text' || element.locked || String(element.id).startsWith('pivotTemplate_') || String(element.id).startsWith('pivotBrand_') || edited.has(element.id)) throw invalid('方案修改了锁定、模板或非文字对象。');
             edited.add(element.id); const value = text(edit.text, 4000, '调整文字');
             if (!value) throw invalid('不能用空文字删除现有内容。');
-            const originalNumbers = new Set((before.elements.filter(item => item.type === 'text').map(item => item.content.text).join(' ') + before.speakerNotes).match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/g) || []);
-            if ((value.match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/g) || []).some(number => !originalNumbers.has(number))) throw invalid('方案引入了当前页没有的数值，请先核对材料后手工补充。');
+            const originalNumbers = new Set(before.elements.filter(item => item.type === 'text').map(item => item.content.text)
+                .concat(before.speakerNotes).flatMap(quantities));
+            if (quantities(value).some(number => !originalNumbers.has(number))) throw invalid('方案引入了当前页没有的数值或单位，请先核对材料后手工补充。');
             if (value !== element.content.text) { nextById.get(before.id).elements.find(item => item.id === element.id).content.text = value; edits.push({ elementId: element.id, text: value }); }
         }
         if (intent !== undefined) after.intent = intent;

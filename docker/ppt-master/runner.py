@@ -475,7 +475,7 @@ def main(request: dict) -> dict:
         for name, file in actual.items():
             if file.is_symlink() or hashlib.sha256(file.read_bytes()).hexdigest() != expected[name]["sha256"]:
                 raise ValueError("完整发行包内容摘要不一致。")
-        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "boundedSourceBundle": 1, "optionalSourcePackage": 1, "deliveryChecklist": 1, "checklistDisplayEquivalence": 1, "checklistGroupedValues": 1, "expandedChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "selectedTemplateRecovery": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
+        return {"status": "ready", "revision": REVISION, "contentDigest": manifest["contentDigest"], "fileCount": len(actual), "tools": list(TOOLS), "textCalibrationRoles": 1, "managedProject": 1, "projectSpecReceipts": 1, "boundedSourceBundle": 1, "optionalSourcePackage": 1, "deliveryChecklist": 1, "checklistDisplayEquivalence": 1, "checklistGroupedValues": 1, "expandedChecklist": 1, "currentExport": 1, "pageRepair": 1, "progressSnapshots": 1, "selectedTemplateRecovery": 1, "network": "disabled", "license": "MIT", "pdfSourceBackend": "pivot", "offlineNativeProtocol": 1 if shutil.which("soffice") and shutil.which("pdftoppm") and shutil.which("ffmpeg") else 0}
     inventory()
     if action == "inspect_export":
         return inspect_export(request)
@@ -506,7 +506,11 @@ def main(request: dict) -> dict:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, target)
         inventory()
-        return {"path": request["path"], "bytes": target.stat().st_size}
+        response = {"path": request["path"], "bytes": target.stat().st_size}
+        if target.name in {"design_spec.md", "spec_lock.md"}:
+            with target.open("rb") as handle:
+                response["sha256"] = hashlib.file_digest(handle, "sha256").hexdigest()
+        return response
     if action == "copy_template":
         return copy_runtime_template(request)
     if action == "read":
@@ -537,6 +541,15 @@ def main(request: dict) -> dict:
             previous_exports = {file: file.stat().st_mtime_ns for file in inventory() if file.suffix == ".pptx" and "exports" in file.parts}
         result = run(args)
         files = inventory()
+        if request.get("tool") == "project" and request["args"][0] == "validate" and len(request["args"]) == 2 and result["exitCode"] == 0:
+            project = relative_path(request["args"][1], WORKSPACE, must_exist=True)
+            validated = {}
+            for name in ("design_spec.md", "spec_lock.md"):
+                if project / name in files:
+                    with (project / name).open("rb") as handle:
+                        validated[name] = hashlib.file_digest(handle, "sha256").hexdigest()
+            if len(validated) == 2:
+                result["validatedSpecs"] = validated
         if request.get("tool") == "apply_template" and result["exitCode"] == 0 and request.get("templateSource"):
             project = relative_path(request["args"][0], WORKSPACE, must_exist=True)
             result["templateSpecDigest"] = installed_template_digest(project, request["templateSource"])

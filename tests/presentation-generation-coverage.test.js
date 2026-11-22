@@ -8,6 +8,19 @@ const { validateGenerationMaterials, prepareGenerationMaterials, confirmedRoster
 const { compileGenerationPage, assembleGeneratedProposal } = require('../server/services/presentations/presentation-generation-drafts');
 const { getBuiltInTemplate } = require('../server/services/presentations/presentation-templates');
 
+test('标准缺图页经明确确认可改正文，图表需求仍须满足', async () => {
+    const template = getBuiltInTemplate('executive-clean');
+    const request = { title: '报告', template, templateId: template.id, materials: [] };
+    const page = { id: 'outline_page_2', title: '验收安排', layout: 'content', points: ['保留已确认重点'] };
+    const image = { title: page.title, layoutHint: 'image-focus' };
+    await assert.rejects(compileGenerationPage(page, image, request, {}), { code: 'PRESENTATION_GENERATION_REQUIRED_DATA' });
+    const result = await compileGenerationPage(page, image, request, { allowTextFallback: true });
+    assert.equal(result.content.slides[0].id, page.id);
+    assert.match(result.warnings.at(-1), /已按确认改用正文/);
+    await assert.rejects(compileGenerationPage(page, { ...image, layoutHint: 'chart' }, request, { allowTextFallback: true }),
+        { code: 'PRESENTATION_GENERATION_REQUIRED_DATA' });
+});
+
 test('标准制作在 256K 窗口保留材料尾部，较长材料逐段读取并校对原文', async () => {
     const build = materials => buildOutlineMessages({ topic: '年度汇报', materials });
     const model = { context_window_tokens: 256000 };

@@ -28,10 +28,16 @@ async function availability() {
                 checklistDisplayEquivalence: health.checklistDisplayEquivalence === 1,
                 checklistGroupedValues: health.checklistGroupedValues === 1,
                 expandedChecklist: health.expandedChecklist === 1,
+                projectSpecReceipts: health.projectSpecReceipts === 1,
                 generationReady, templateReady: health.deliveryChecklist === 1, progressSnapshotsReady: health.progressSnapshots === 1,
                 message: generationReady ? '独立PPT制作服务可用。' : '独立服务已连接，生成或编辑 PPTX 需要更新镜像以启用完整导出核验。' };
         }
-    } catch (_) { return { enabled: false, transport: 'service', message: '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。' }; }
+    } catch (failure) {
+        const message = failure.code === 'PPT_SERVICE_TIMEOUT' ? '独立 PPT 制作服务状态查询超时，请稍后重试。'
+            : failure.code === 'PPT_SERVICE_PROTOCOL_MISMATCH' ? '独立 PPT 制作服务协议不兼容，请检查镜像版本。'
+                : '独立PPT制作服务暂不可用，标准PPT创建、编辑和导出继续可用。';
+        return { enabled: false, transport: 'service', message };
+    }
     if (!deployment.accepting()) return { enabled: false, message: 'PPT制作引擎正在更新，请稍后重新提交。' };
     const definition = config();
     if (!definition.enabled || !definition.image) return { enabled: false, message: '完整制作引擎尚未配置。' };
@@ -109,7 +115,7 @@ async function cleanupWorkspace(user, id) {
     await fs.rm(actual, { recursive: true, force: true });
 }
 
-async function identity() { return await remote.configured() ? remote.identity() : config().image; }
+async function identity(checkpoint) { return await remote.configured() ? remote.identity(process.env, checkpoint) : config().image; }
 async function inputBuffer(user, id, name, maximum) {
     if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,120}$/.test(name)) throw error('输入快照文件名无效。');
     if (await remote.configured()) return remote.file(user, id, 'inputs', name, maximum);

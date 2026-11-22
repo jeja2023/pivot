@@ -24,14 +24,19 @@ function describeArchivedWrites(messages) {
     return messages.map((message, index) => {
         const reply = messages[index + 1];
         if (message.role !== 'assistant' || reply?.role !== 'user' || typeof message.content !== 'string'
-            || !/"saved(?:Content|Sha256)"\s*:/u.test(message.content) || typeof reply.content !== 'string') return message;
+            || !/"(?:saved(?:Content|Sha256)|rejectedWrite)"\s*:/u.test(message.content) || typeof reply.content !== 'string') return message;
         let turn, observations;
         try { turn = JSON.parse(message.content); observations = JSON.parse(reply.content); } catch (_) { return message; }
         if (!Array.isArray(turn?.actions) || !Array.isArray(observations)) return message;
-        const writes = [];
+        const writes = [], rejected = [];
         const actions = turn.actions.filter((action, position) => {
             if (action?.action !== 'write' || typeof action.text === 'string') return true;
             const observation = observations[position], receipt = observation?.result;
+            const marker = action.rejectedWrite;
+            if (Number.isInteger(marker?.archive) && Number.isInteger(marker?.index) && !confirmedWrite(action, observation)) {
+                rejected.push(`第 ${position + 1} 项未取得写入回执。原动作可用 read_history 读取，archive=${marker.archive}、index=${marker.index}。`);
+                return false;
+            }
             const legacy = action.savedSha256 === undefined && typeof action.savedContent === 'string' && action.savedContent.startsWith('已成功写入；')
                 && observation?.action === 'write' && !observation.error && receipt?.path === action.path && /^[a-f0-9]{64}$/u.test(receipt?.sha256 || '');
             if (!legacy && !confirmedWrite(action, observation)) return true;
@@ -39,9 +44,10 @@ function describeArchivedWrites(messages) {
             writes.push(`第 ${position + 1} 项 ${receipt.path}${location ? '（原文可用 read_history 回读，' + location[0] + '）' : ''}`);
             return false;
         });
-        if (!writes.length) return message;
+        if (!writes.length && !rejected.length) return message;
         // 文件摘要及原批次顺序由下一条工具回执提供，模型不需要模仿带宿主字段的写入动作。
-        const note = '本批已成功写入 ' + writes.join('、') + '。下一条工具回执按原批次顺序排列。需要当前正文时用 read 读取。';
+        const note = (writes.length ? '本批已成功写入 ' + writes.join('、') + '。需要当前正文时用 read 读取。' : '')
+            + rejected.join('') + '下一条工具回执按原批次顺序排列。';
         if (!actions.length) return { role: 'user', content: JSON.stringify({ writeReceiptSummary: note }) };
         return { ...message, content: JSON.stringify({ ...turn, message: [turn.message, note].filter(Boolean).join('\n'), actions }) };
     });

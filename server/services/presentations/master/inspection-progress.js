@@ -1,6 +1,7 @@
 'use strict';
 
 const { createHash } = require('node:crypto');
+const { posix } = require('node:path');
 const { confirmedWrite, failedObservation, observationLocation } = require('./observations');
 
 const READ_ACTIONS = new Set(['read', 'read_runtime', 'read_history', 'read_images', 'list']);
@@ -11,6 +12,8 @@ const isInspection = action => READ_ACTIONS.has(action?.action) || action?.actio
     || action?.action === 'run' && (action.tool === 'check_svg' || LOOKUP_TOOLS.has(action.tool)
         || action.tool === 'project' && PROJECT_INSPECTIONS.has(action.args?.[0]));
 const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const projectCheckKey = action => action.tool === 'project' && action.args?.[0] === 'validate' && typeof action.args[1] === 'string'
+    ? JSON.stringify([posix.normalize(action.args[1]).replace(/\/$/u, ''), ...action.args.slice(2)]) : '';
 
 function createInspectionProgress(messages, phaseFrom = 0) {
     const seen = new Map();
@@ -27,7 +30,7 @@ function createInspectionProgress(messages, phaseFrom = 0) {
             if (!action || action.action !== observation?.action) continue;
             if (failedObservation(observation)) {
                 failed = true;
-                const key = action.tool === 'project' && action.args?.[0] === 'validate' ? JSON.stringify(action.args) : '';
+                const key = projectCheckKey(action);
                 const keys = observation.projectErrorKeys;
                 if (!historical && key && keys?.length) {
                     const signature = digest(keys);
@@ -38,8 +41,8 @@ function createInspectionProgress(messages, phaseFrom = 0) {
                 }
                 continue;
             }
-            if (!historical && action.tool === 'project' && action.args?.[0] === 'validate' && observation.result?.exitCode === 0) {
-                failedChecks.delete(JSON.stringify(action.args));
+            if (!historical && observation.result?.exitCode === 0) {
+                failedChecks.delete(projectCheckKey(action));
             }
             if (isInspection(action) || !observation.result) continue;
             if (action.action === 'write') {

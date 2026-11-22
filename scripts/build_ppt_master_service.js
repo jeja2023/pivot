@@ -9,7 +9,7 @@ const lock = require('../config/ppt-master-engine.json');
 
 function assertServiceCapabilities(health) {
     const required = ['deliveryChecklist', 'currentExport', 'pageRepair', 'progressSnapshots', 'managedProject', 'boundedSourceBundle',
-        'selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist'];
+        'selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist', 'projectSpecReceipts'];
     const missing = required.filter(key => health[key] !== 1);
     if (health.startupHealthTimeoutSeconds !== 300) missing.push('startupHealthTimeoutSeconds');
     if (health.serviceProtocol !== 1 || !/^sha256:[a-f0-9]{64}$/.test(health.runtimeId || '') || missing.length) {

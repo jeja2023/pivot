@@ -5,7 +5,7 @@ const { promisify } = require('node:util');
 const { gzip, gunzip } = require('node:zlib');
 const compress = promisify(gzip), decompress = promisify(gunzip);
 const { compactMessages } = require('./context');
-const { HISTORY_PAGE_CHARS } = require('./observations');
+const { HISTORY_PAGE_CHARS, confirmedWrite } = require('./observations');
 const runtime = require('./runtime');
 
 const THRESHOLD = 500000, MAX_ARCHIVES = 64, MAX_ARCHIVE_BYTES = 8 * 1024 * 1024;
@@ -42,12 +42,28 @@ function activePages(batches, before, phaseFrom) {
 
 function reduceObservation(item, archive, index) {
     const result = item?.result;
-    if (!result || item.error || result.archived || !['read', 'read_runtime', 'read_history', 'list', 'run'].includes(item.action)) return item;
+    if (!result || result.archived || !['read', 'read_runtime', 'read_history', 'list', 'run'].includes(item.action)) return item;
     const { text, files, stdout, stderr, ...metadata } = result;
     if (JSON.stringify({ text, files, stdout, stderr }).length < 1000) return item;
     return { ...item, result: { ...metadata, archived: { archive, index },
         ...(Array.isArray(files) ? { fileCount: files.length } : {}),
         note: '完整工具结果已归档。可按 archive、index 分页调用 read_history；核对当前文件时使用 read 或 list。' } };
+}
+
+function archiveFailedWrites(message, observations, archive, index) {
+    if (!observations) return message;
+    let turn;
+    try { turn = JSON.parse(message.content); } catch (_) { return message; }
+    if (!Array.isArray(turn.actions)) return message;
+    let changed = false;
+    const actions = turn.actions.map((action, position) => {
+        if (action?.action !== 'write' || typeof action.text !== 'string' || action.text.length < 1000
+            || confirmedWrite(action, observations[position])) return action;
+        const { text: _text, ...fields } = action;
+        changed = true;
+        return { ...fields, rejectedWrite: { archive, index } };
+    });
+    return changed ? { ...message, content: JSON.stringify({ ...turn, actions }) } : message;
 }
 
 async function archiveOlderObservations(state, { force = false, recentTurns = 4, preserveActive = false } = {}) {
@@ -62,6 +78,7 @@ async function archiveOlderObservations(state, { force = false, recentTurns = 4,
     for (let index = protectedFrom; index < before.length; index++) view[index] = before[index];
     for (let index = 0; index < protectedFrom; index++) {
         const original = before[index];
+        if (original.role === 'assistant') view[index] = archiveFailedWrites(view[index], batches[index + 1], archiveIndex, index);
         if (original.role === 'assistant' && view[index].content !== original.content) {
             archived[index] = original;
             view[index] = { ...view[index], content: view[index].content.replace('需要正文时使用 read 读取当前文件。', `历史原文可调用 read_history，archive=${archiveIndex}、index=${index}；当前文件可使用 read 读取。`) };

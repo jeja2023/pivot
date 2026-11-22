@@ -3,6 +3,7 @@
 const { error } = require('./runtime');
 const { createHash } = require('node:crypto');
 const { checklistLimits } = require('./checklist-limits');
+const { exactDecimal } = require('../presentation-decimal');
 const CITATION_REVIEW_REQUIRED = 'PPT_MASTER_CITATION_REVIEW_REQUIRED';
 const compact = value => value.normalize('NFKC').replace(/\s+/gu, '');
 const citationFields = new Set(['id', 'page', 'item', 'text', 'path', 'quote', 'correctedText', 'correctedNumber']);
@@ -38,15 +39,9 @@ function matchesDisplayedValue(source, value) {
 }
 
 function matchesChartNumber(text, value) {
-    const canonical = number => {
-        const [integer, fraction = ''] = number.replace(/^[+-]|,/g, '').split('.');
-        const plain = integer.replace(/^0+(?=\d)/, '');
-        const decimals = fraction.replace(/0+$/, '');
-        return (number.startsWith('-') && (plain !== '0' || decimals) ? '-' : '') + plain + (decimals ? '.' + decimals : '');
-    };
-    const expected = canonical(value);
+    const expected = exactDecimal(value);
     const candidates = numericText(text).matchAll(/(?<![\d.,+±-])[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?!\d|\.\d|,\d)/gu);
-    return [...candidates].some(match => canonical(match[0]) === expected);
+    return [...candidates].some(match => exactDecimal(match[0]) === expected);
 }
 
 function pauseCitationReview(state) {

@@ -38,13 +38,14 @@ function createSettings({ readValue = async key => (await require('../../app-set
         try {
             const stored = JSON.parse(decrypt(raw, PURPOSE));
             if (stored.version !== 1 || typeof stored.revision !== 'string' || typeof stored.values?.enabled !== 'boolean' || typeof stored.values?.endpoint !== 'string' || typeof stored.values?.token !== 'string') throw new Error();
-            return { ...stored.values, source: 'settings', revision: stored.revision };
+            const workspaceKey = /^[A-Za-z0-9_-]{32,256}$/.test(stored.workspaceKey || '') ? stored.workspaceKey : '';
+            return { ...stored.values, workspaceKey, source: 'settings', revision: stored.revision };
         } catch (_) { throw error('保存的PPT服务配置无法解密，请联系管理员检查数据加密密钥。', 'PPT_MASTER_SETTINGS_UNREADABLE', 503); }
     }
     async function effectivePptMasterConfiguration() { return decode(await readValue(KEY)); }
     async function publicConfig({ administrator = false } = {}) {
         try {
-            const { token, endpoint, ...safe } = await effectivePptMasterConfiguration();
+            const { token, endpoint, workspaceKey: _workspaceKey, ...safe } = await effectivePptMasterConfiguration();
             return { ...safe, endpoint: administrator ? endpoint : endpoint ? '********' : '', hasToken: Boolean(token), configured: Boolean(endpoint && token), canManage: administrator };
         } catch (_) { return { enabled: false, source: 'settings', revision: 'unreadable', endpoint: '', hasToken: false, configured: false, canManage: administrator, error: '保存的PPT服务配置无法读取，请检查服务器加密密钥。' }; }
     }
@@ -59,7 +60,9 @@ function createSettings({ readValue = async key => (await require('../../app-set
         const values = await validator(patch, previous);
         if (!canEncrypt()) throw error('服务器缺少数据加密密钥，不能安全保存PPT服务配置。', 'PPT_MASTER_SETTINGS_ENCRYPTION_REQUIRED', 409);
         if (previous.source === 'settings' && Object.keys(values).every(key => values[key] === previous[key])) return publicConfig({ administrator: true });
-        const stored = encrypt(JSON.stringify({ version: 1, revision: crypto.randomUUID(), values }), PURPOSE);
+        // 同地址轮换鉴权密钥时沿用现有目录派生密钥，保留检查点和工作区定位。
+        const workspaceKey = values.endpoint === previous.endpoint && values.token ? previous.workspaceKey || previous.token || values.token : values.token;
+        const stored = encrypt(JSON.stringify({ version: 1, revision: crypto.randomUUID(), values, workspaceKey }), PURPOSE);
         const result = await replace(KEY, raw, stored, userId);
         if (result.conflict) throw error('PPT服务配置已被其他操作更新，请重新加载。', 'PPT_MASTER_SETTINGS_CONFLICT', 409);
         if (result.busy) throw error('已有PPT任务正在执行或等待确认，请结束任务后再切换服务配置。', 'PPT_MASTER_SETTINGS_BUSY', 409);

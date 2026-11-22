@@ -104,6 +104,30 @@ test('分批路由保存成功页，失败页可补齐，改动后的大纲由�
     assert.ok(proposal.data.proposal.presentation.slides[1].elements.some(element => element.type === 'chart'));
 });
 
+test('补页路由仅在显式确认后允许缺图页用正文，并保留已保存页面', { skip: !process.env.DATABASE_URL }, async t => {
+    const { request } = await startApi(t, ({ messages }) => {
+        const outline = JSON.parse(messages[1].content.split('\n').find(line => line.startsWith('大纲：')).slice(3));
+        return { content: JSON.stringify({ slides: outline.slides.map(page => ({
+            outlinePageId: page.outlinePageId, title: page.title, layout: 'content', points: ['已确认要点']
+        })) }) };
+    });
+    const draftId = 'pptgen_' + crypto.randomBytes(16).toString('hex');
+    const outline = { title: '规划', slides: [{ title: '概况' }, { title: '图片资料', layoutHint: 'image-focus' }] };
+    const path = '/' + draftId;
+    const partial = await request('/ai/slides', { draftId, outline, templateId: 'executive-clean', model: '1' });
+    assert.equal(partial.status, 422, JSON.stringify(partial.data));
+    const before = (await request(path)).data.presentation;
+    assert.deepEqual(before.generation.pending.map(page => page.id), ['outline_page_2']);
+    const strict = await request(path + '/ai/fill-missing', { model: '1' });
+    assert.equal(strict.data.code, 'PRESENTATION_SLIDE_COVERAGE_INCOMPLETE');
+    const approved = await request(path + '/ai/fill-missing', { model: '1', allowTextFallback: true });
+    assert.equal(approved.status, 200, JSON.stringify(approved.data));
+    assert.match(approved.data.warnings.join('\n'), /已按确认改用正文/);
+    const after = (await request(path)).data.presentation;
+    assert.deepEqual(after.generation.pending, []);
+    assert.deepEqual(after.content.slides[0], before.content.slides[0]);
+});
+
 test('标准导出路由登记包含可见表格的 PDF', { skip: !process.env.DATABASE_URL }, async t => {
     const { user, request } = await startApi(t, () => assert.fail('导出不调用模型'));
     const document = await service.createPresentation(user, { title: '数据表', templateId: 'business-blue' });

@@ -820,3 +820,53 @@ test('图表接受同单位等值十进制，扩大清单仍逐项核对并限�
     page.values = Array.from({ length: 25 }, () => page.values[0]);
     await assert.rejects(verify(), /每页最多核验 24/);
 });
+test('图片证据请用户核对原图，答复绑定图片摘要并自动复核原清单', async () => {
+    const state = makeState(), path = 'inputs/source.png', digest = 'a'.repeat(64);
+    Object.assign(state.request, { draftFirst: true, profile: 'image_to_pptx', maxSteps: 2,
+        inputFiles: [{ path, kind: 'image' }], inputDigests: [digest] });
+    state.seenImages = [path];
+    const proposal = globalThis.structuredClone(design), content = proposal.requestInput.plan.pages[0];
+    content.values[0].source = { path, quote: '收入120万元' };
+    const hooks = { ensureCurrent: async () => {}, checkpoint: async () => {} };
+    const user = { id: 1 };
+    const pending = await drive(user, 'image', state, hooks, {
+        resolveModel: async () => ({ supports_vision: 1, context_window_tokens: 32768 }),
+        callModel: async () => proposal
+    });
+    assert.match(pending.pending.question, /source\.png/);
+    assert.match(pending.pending.context, /收入120万元/);
+    const prompt = pendingInput('image', state);
+    state.response = parseDecision({ decision: 'clarify', promptId: prompt.promptId, answer: '收入120万元' }, prompt);
+    await assert.rejects(drive(user, 'image', state, hooks, { resolveModel: async () => assert.fail('原清单应由宿主复核') }),
+        { code: 'PPT_MASTER_STEP_LIMIT' });
+    const source = state.review.approvals.design.plan.pages[0].values[0].source;
+    assert.deepEqual(source, { path: 'user-supplement:1', quote: '收入120万元', imageOrigin: { path, digest } });
+});
+
+test('密集清单逐批核实并合并，保持页序、数据和占位', async () => {
+    const state = makeState(), pages = [];
+    state.request.draftFirst = true;
+    state.request.pageCount = 40;
+    state.engine = { expandedChecklist: 1, tools: [] };
+    for (let index = 0; index < 40; index++) {
+        const values = Array.from({ length: 12 }, (_, item) => {
+            const number = 100 + index * 12 + item, text = '经营指标' + number + '万元';
+            return { text, source: { path: 'inputs/material-1.md', quote: text } };
+        });
+        pages.push({ title: '第 ' + (index + 1) + ' 页', values });
+    }
+    const material = pages.flatMap(page => page.values).slice(0, -1).map(value => value.text).join('。');
+    state.request.inputFiles = [{ kind: 'text', path: 'inputs/material-1.md' }];
+    const verify = async () => material;
+    await assert.rejects(validateTurn({ planPages: { offset: 1, pageCount: 40, project: 'report', summary: '报告', pages: pages.slice(0, 6) } }, state, verify), /下一 offset/);
+    let turn;
+    for (let offset = 0; offset < pages.length; offset += 4) {
+        turn = await validateTurn({ planPages: { offset, pageCount: 40, project: 'report', summary: '报告', pages: pages.slice(offset, offset + 4) } }, state, verify);
+        if (turn.planBatch) state.planBatch = turn.planBatch;
+    }
+    assert.equal(turn.requestInput.plan.pages.length, 40);
+    assert.equal(turn.requestInput.plan.pages.flatMap(page => page.values).length, 480);
+    assert.deepEqual(turn.requestInput.plan.pages[38], pages[38]);
+    assert.equal(turn.requestInput.plan.pages[39].values[11].text, '数据待核对（第 12 项）');
+    assert.equal(turn.batchIssues[0].page, 40);
+});

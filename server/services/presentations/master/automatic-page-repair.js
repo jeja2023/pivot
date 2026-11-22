@@ -55,8 +55,7 @@ function startPageRepair(state, project, pages, pass, { note = '', previousPages
 
 function automaticTurn(state) {
     const repair = state.pageRepair;
-    if (!repair?.automatic || repair.phase === 'edit') return null;
-    if (repair.phase === 'deliver') return { complete: { path: repair.output } };
+    if (!repair?.automatic || ['edit', 'deliver'].includes(repair.phase)) return null;
     const project = repair.args[0], quick = repair.args.includes('--quick-generate');
     const actions = [];
     if (repair.phase === 'check') actions.push({ action: 'run', tool: 'check_svg', args: [
@@ -76,8 +75,19 @@ function stopAutomaticRepair(state) {
 
 function recordRepairResult(state, action, observation, result = observation.result) {
     if (action.tool === 'export' && result?.exitCode === 0) {
-        if (result.progressExport) state.lastExport = { path: result.progressExport, args: action.args };
-        else delete state.lastExport;
+        if (result.progressExport) {
+            state.lastExport = { path: result.progressExport, args: action.args };
+            state.deliveryPendingPath = result.progressExport;
+        }
+        else {
+            delete state.lastExport;
+            delete state.deliveryPendingPath;
+        }
+        delete state.deferredExport;
+        delete state.deliveryRetryAttempted;
+    } else if (state.lastExport && (['write', 'copy', 'copy_template'].includes(action.action)
+        || action.action === 'run' && ['apply_template', 'finalize', 'import_native', 'import_template', 'icon_sync', 'split_notes'].includes(action.tool))) {
+        state.deferredExport = state.lastExport.path;
     }
     const repair = state.pageRepair;
     if (!repair?.automatic) return;

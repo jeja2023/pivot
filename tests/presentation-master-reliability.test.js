@@ -227,9 +227,9 @@ test('视觉预检接受完整围栏 JSON 与等义颜色，仍拒绝错误颜�
 test('独立服务打包核对模板恢复与输入快照能力，支持已有镜像的预检', () => {
     const health = { serviceProtocol: 1, runtimeId: 'sha256:' + 'a'.repeat(64), deliveryChecklist: 1, currentExport: 1, pageRepair: 1,
         progressSnapshots: 1, managedProject: 1, boundedSourceBundle: 1, selectedTemplateRecovery: 1, atomicInputSnapshots: 1,
-        checklistDisplayEquivalence: 1, checklistGroupedValues: 1, optionalSourcePackage: 1, expandedChecklist: 1, startupHealthTimeoutSeconds: 300 };
+        checklistDisplayEquivalence: 1, checklistGroupedValues: 1, optionalSourcePackage: 1, expandedChecklist: 1, projectSpecReceipts: 1, startupHealthTimeoutSeconds: 300 };
     assert.doesNotThrow(() => assertServiceCapabilities(health));
-    for (const key of ['selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist', 'startupHealthTimeoutSeconds']) {
+    for (const key of ['selectedTemplateRecovery', 'atomicInputSnapshots', 'checklistDisplayEquivalence', 'checklistGroupedValues', 'optionalSourcePackage', 'expandedChecklist', 'projectSpecReceipts', 'startupHealthTimeoutSeconds']) {
         assert.throws(() => assertServiceCapabilities({ ...health, [key]: undefined }), new RegExp(key));
     }
 });

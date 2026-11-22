@@ -209,7 +209,7 @@ async function run(id, user, deps = {}) {
                 ...(previousPlan ? { previousPlan } : {}) };
         }
         state.startedAt ||= Date.parse(row.created_at) || Date.now();
-        const currentRuntime = await runtime.identity();
+        const currentRuntime = await runtime.identity({ user, id, identity: state.runtimeImage });
         deployment.assertCheckpoint(state, currentRuntime);
         state.runtimeImage ||= currentRuntime;
         await ensureCurrent();
@@ -293,8 +293,11 @@ async function respond(user, id, input, deps = {}) {
     if (task.status !== 'input_required' && !(['expired', 'failed'].includes(task.status) && row.result_json.state?.pendingKind)) throw runtime.error('当前任务没有待确认问题。', 'PPT_MASTER_NOT_WAITING', 409);
     const state = row.result_json.state;
     const pending = pendingInput(id, state, row.input_request);
+    if (state.pendingInput?.imageReview && (input?.decision !== 'clarify' || !pending || input.promptId !== pending.promptId)) {
+        throw runtime.error('请刷新并核对当前图片，再提交转录答复。', 'PPT_MASTER_CONFIRMATION_CHANGED', 409);
+    }
     const decision = parseDecision(input, pending, { continueDraft: draftContinuation(pending) });
-    deployment.assertCheckpoint(state, await (deps.identity || runtime.identity)());
+    deployment.assertCheckpoint(state, await (deps.identity || runtime.identity)({ user, id, identity: state.runtimeImage }));
     await (deps.ensureAccess || ensureAccess)(user, state.request);
     if (decision.answer) decision.source = registerSupplement(state, decision.answer, decision.decision, decision.promptId);
     if (decision.decision === 'continue' && state.request.operation !== 'create_template') state.request.draftFirst = true;
@@ -360,7 +363,7 @@ async function activeTask(user) {
 async function resume(user, id, input = {}) {
     const row = await repository.read(user, id), state = row?.result_json.state;
     if (!state || active.has(id)) throw runtime.error('任务尚在执行或没有可恢复的检查点。', 'PPT_MASTER_BUSY', 409);
-    deployment.assertCheckpoint(state, await runtime.identity());
+    deployment.assertCheckpoint(state, await runtime.identity({ user, id, identity: state.runtimeImage }));
     await ensureAccess(user, state.request);
     if (input.resumeNote !== undefined && (typeof input.resumeNote !== 'string' || input.resumeNote.length > 4000)) {
         throw runtime.error('补充说明请填写四千字以内的有效文字。');
@@ -407,7 +410,10 @@ async function resume(user, id, input = {}) {
     if (resumeNote) {
         const source = registerSupplement(state, resumeNote, 'resume');
         resetCitationRepair(state, { allowRevision: input.revisePlan === true });
-        if (input.revisePlan === true) reopenReview(state);
+        if (input.revisePlan === true) {
+            reopenReview(state);
+            delete state.planBatch;
+        }
         state.messages ||= [];
         state.messages.push({ role: 'user', content: '用户在检查点补充说明 [引用来源 ' + source + ']：' + resumeNote });
     } else if (paused && changedModel) resetCitationRepair(state);

@@ -32,7 +32,7 @@ async function run(user, id, deps = {}) {
     let state, progress = { message: '正在准备离线原稿任务。' }, renewing = false;
     const current = async () => {
         controller.signal.throwIfAborted();
-        if (state.runtimeImage && (await runtimeClient.identity?.() || runtimeClient.config?.().image) !== state.runtimeImage) throw runtime.error('原稿执行镜像已变化，请重新创建任务以使用一致的渲染环境。', 'PRESENTATION_NATIVE_IMAGE_CHANGED', 409);
+        if (state.runtimeImage && (await runtimeClient.identity?.({ user, id, identity: state.runtimeImage }) || runtimeClient.config?.().image) !== state.runtimeImage) throw runtime.error('原稿执行镜像已变化，请重新创建任务以使用一致的渲染环境。', 'PRESENTATION_NATIVE_IMAGE_CHANGED', 409);
         const row = await repo.readJob(user, id);
         if (!row || row.status !== 'working' || row.result_json._lease !== lease || Number(row.result_json._leaseUntil || 0) <= Date.now() / 1000 || Date.parse(row.expires_at) <= Date.now()) throw runtime.error('原稿任务已停止、过期或租约已变化。', 'PRESENTATION_NATIVE_STOPPED', 409);
         return persistence.access(user, state.request);
@@ -123,7 +123,8 @@ async function cancel(user, id) { if (!await get(user, id)) return null; await t
 async function resume(user, id) {
     const row = await repository.readJob(user, id);
     if (!row || active.has(id)) throw runtime.error('任务正在执行或没有可恢复的检查点。');
-    if (row.result_json.state?.runtimeImage && row.result_json.state.runtimeImage !== await runtime.identity()) throw runtime.error('制作镜像已升级，请新建原稿任务，不能混用旧检查点与新渲染器。', 'PRESENTATION_NATIVE_IMAGE_CHANGED', 409);
+    const identity = row.result_json.state?.runtimeImage;
+    if (identity && identity !== await runtime.identity({ user, id, identity })) throw runtime.error('制作镜像已升级，请新建原稿任务，不能混用旧检查点与新渲染器。', 'PRESENTATION_NATIVE_IMAGE_CHANGED', 409);
     await storage.access(user, row.result_json.state?.request || row.input_request);
     if (!await repository.admit(user, () => { deployment.assertAccepting(); return repository.resume(user, id); }, id)) throw runtime.error('任务状态已变化，请刷新后核对。');
     setImmediate(() => run(user, id).catch(() => {})); return get(user, id);

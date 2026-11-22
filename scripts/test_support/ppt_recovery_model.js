@@ -30,30 +30,19 @@ function master(messages, finish, citations = false, automatic = false) {
     const system = messages.find(message => message.role === 'system')?.content || '';
     const budget = '项目预算80万元';
     const finalCost = '全年决算成本80.25万元';
-    if (automatic && exports.length === 1) {
-        if (!system.includes('自动修页')) return { complete: { path: exports[0].args.at(-1) } };
-        const issues = messages.flatMap(message => {
-            try { return JSON.parse(message.content)?.approvedPageRepairs || []; } catch (_) { return []; }
-        });
+    if ((automatic || finish) && exports.length === 1 && system.includes('自动修页')) {
+        const issues = messages.map(message => {
+            try { return JSON.parse(message.content)?.approvedPageRepairs; } catch (_) { return undefined; }
+        }).findLast(Array.isArray) || [];
         if (issues.length !== 1 || issues[0].page !== 2 || issues[0].items[0].text !== fixture.pages[1].fact) throw new Error('自动修页没有收到已批准的错页及数据');
         return { actions: [{ action: 'write', path: issues[0].sourceFile, text: fixture.slide(fixture.pages[1]) }] };
     }
-    if (citations && exports.length === 1 && designTurns.length === 1) {
-        if (system.includes('user-supplement:2')) {
-            const text = finalCost;
-            return { repairCitations: [{ page: 2, item: 1, text, path: 'user-supplement:2', quote: text }] };
-        }
-        const next = globalThis.structuredClone(designTurns[0]);
-        next.requestInput.plan.pages[1].values[0] = { text: finalCost, source: { path: 'instruction', quote: finalCost } };
-        return next;
-    }
-    if (citations && exports.length === 1 && designTurns.length === 2) finish = true;
+    if (automatic && exports.length === 1) return { complete: { path: exports[0].args.at(-1) } };
     const action = exports.length === 1 && finish ? exports[0] : null;
     if (action) {
         const project = action.args[0];
-        const revisedFact = citations ? designTurns.at(-1)?.requestInput.plan.pages[1].values[0].text || finalCost : '';
         return { actions: [
-            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(citations ? { ...fixture.pages[1], fact: revisedFact } : fixture.pages[1]) },
+            { action: 'write', path: project + '/svg_output/slide_02.svg', text: fixture.slide(fixture.pages[1]) },
             { action: 'run', tool: 'check_svg', args: [project, '--canonical-authoring', '--stage', 'final', '--json'] },
             { action: 'run', tool: 'finalize', args: [project] },
             { action: 'run', tool: 'export', args: [project, '--no-notes', '-o', project + '/exports/repaired.pptx'] }
@@ -68,7 +57,11 @@ function master(messages, finish, citations = false, automatic = false) {
     const next = fixture.turn(request, messages, assistant);
     const consulting = automatic && observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-consulting-decision');
     const academic = automatic && observations.some(item => item?.selectedTemplateSpec?.id === 'master-style-academic-research');
-    if (academic && next.requestInput?.stage === 'design') delete next.requestInput.plan.templateUse;
+    if (academic && next.requestInput?.stage === 'design') {
+        const { project, summary, pages } = next.requestInput.plan;
+        const offset = Number(/分批清单已核对[^\n]+offset=(\d+)/u.exec(system)?.[1] || 0);
+        return { planPages: { offset, pageCount: pages.length, project, summary, pages: pages.slice(offset, offset + 2) } };
+    }
     const approvedPlan = designTurns.at(-1)?.requestInput.plan;
     if (consulting && approvedPlan) {
         const project = approvedPlan.project;
@@ -100,10 +93,9 @@ function master(messages, finish, citations = false, automatic = false) {
         if (fixing && !assistant.some(turn => turn.actions?.some(item => item.path === 'user-supplement:1'))) {
             return { actions: [{ action: 'read', path: 'user-supplement:1' }] };
         }
-        const values = next.requestInput.plan.pages[0].values;
-        const extra = { text: budget, source: { path: fixing ? 'user-supplement:1' : 'instruction', quote: budget } };
-        if (fixing) values.unshift(extra);
-        else values.push(extra);
+        const pages = next.requestInput.plan.pages;
+        pages[0].values.push({ text: budget, source: { path: 'user-supplement:1', quote: budget } });
+        pages[1].values[0] = { text: finalCost, source: { path: 'instruction', quote: finalCost } };
     }
     const firstPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_01.svg'));
     if (consulting && firstPage && system.includes('需要分排标题时')) {
@@ -124,7 +116,8 @@ function master(messages, finish, citations = false, automatic = false) {
         '<text x="128" y="375" font-family="Noto Sans CJK SC" font-size="32" fill="#17324D">' + budget + '</text></g></svg>');
     const secondPage = next.actions?.find(item => item.path?.endsWith('/svg_output/slide_02.svg'));
     // SVG 内是完整文本，导出会拆成不同对象。核验不能把分开的数字拼回一个值。
-    if (secondPage) secondPage.text = fixture.slide(fixture.pages[1]).replace(fixture.pages[1].fact,
+    if (secondPage && citations) secondPage.text = fixture.slide({ ...fixture.pages[1], fact: approvedPlan.pages[1].values[0].text });
+    else if (secondPage) secondPage.text = fixture.slide(fixture.pages[1]).replace(fixture.pages[1].fact,
         '<tspan>全年核定成本80</tspan><tspan x="360" y="362">.25万元</tspan>');
     if (consulting && firstPage && system.includes('请移除或修正 encoding') && system.includes('repairAction')) return { repairAction: firstPage };
     return next;

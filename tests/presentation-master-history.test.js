@@ -322,6 +322,26 @@ test('长任务归档旧观察后保留用户答复、近期动作和原始内�
     await assert.rejects(() => readHistory(state, { archive: 0, index }), /摘要/);
 });
 
+test('失败和未执行的长 SVG 正文离开在线历史但原文可回读', async () => {
+    const state = { messages: [] };
+    const path = 'project/svg_output/slide_01.svg';
+    const outcomes = [{ action: 'write', error: 'SVG 格式无效' }, { action: 'pending' }, { action: 'write', result: { path } }];
+    for (let i = 0; i < 15; i++) {
+        const write = { action: 'write', path, text: '字'.repeat(45000) };
+        state.messages.push({ role: 'assistant', content: JSON.stringify({ actions: [write] }) },
+            { role: 'user', content: JSON.stringify([outcomes[i % outcomes.length]]) });
+    }
+    assert.ok(JSON.stringify(state.messages).length > 650000);
+    assert.equal(await archiveOlderObservations(state, { recentTurns: 1 }), true);
+    assert.ok(JSON.stringify(state.messages).length < 100000);
+    assert.equal(JSON.parse(state.messages[1].content)[0].error, 'SVG 格式无效');
+    const marker = JSON.parse(state.messages[0].content).actions[0].rejectedWrite;
+    assert.match((await readHistory(state, { ...marker, offset: 0, length: 1000 })).text, /字{100}/u);
+    const { compactMessages } = require('../server/services/presentations/master/context');
+    const { messages } = compactMessages(state.messages, { forModel: true });
+    for (const index of [0, 2, 4]) assert.match(messages[index].content, /未取得写入回执/);
+});
+
 test('超出旧大小限制的检查点可归档并续跑，模型可通过动作读取历史而不重新执行文件操作', async () => {
     const { drive } = require('../server/services/presentations/master/driver');
     const state = { bootstrapped: true, steps: 12, usedTokens: 1000, request: { operation: 'generate', profile: 'quick',

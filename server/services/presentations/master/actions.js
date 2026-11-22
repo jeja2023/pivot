@@ -11,6 +11,7 @@ const { HISTORY_PAGE_CHARS } = require('./observations');
 const { normalizeRuntimeReads } = require('./runtime-references');
 const { actionFields, rejectedFields, fieldMessage } = require('./action-parameters');
 const { presentationPath, listScope } = require('./workspace-list');
+const { preparePlanBatch } = require('./plan-batches');
 
 const invalid = message => error(message, 'PPT_MASTER_ACTION_INVALID', 422);
 const benignMetadata = new Set(['message', 'description', 'reason']);
@@ -126,6 +127,15 @@ function validateAction(action, state) {
 async function validateTurn(output, state, verifySource, { hostCompletion = false } = {}) {
     let turn = parsedOutput(output);
     let citationPatch;
+    if (Object.hasOwn(turn, 'planPages')) {
+        if (Object.keys(turn).some(key => !['planPages', 'message'].includes(key))) throw invalid('分批清单须单独提交 planPages。');
+        const coverage = imageCoverage(state);
+        if (coverage.read < coverage.total) throw invalid(`须先从 offset=${coverage.nextOffset} 读取未送达的原图。`);
+        return preparePlanBatch(turn.planPages, state, verifySource);
+    }
+    if (state.planBatch && turn.requestInput?.stage === 'design' && turn.requestInput.kind === 'confirmation') {
+        throw invalid('当前清单已有已核对页，请用 planPages 提交其余页面。');
+    }
     if (Object.hasOwn(turn, 'repairCitations')) {
         if (turn.actions || turn.complete || turn.requestInput) throw invalid('引用修正不能与操作、询问或交付一并提交。');
         citationPatch = patchCitationDraft(state, turn.repairCitations);

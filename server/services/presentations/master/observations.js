@@ -297,6 +297,7 @@ function boundedObservation(action, result) {
     return { truncated: true, message: '工具结果过长，请按路径或较小范围重新读取。',
         ...(typeof result.path === 'string' ? { path: result.path } : {}),
         ...(Number.isInteger(result.exitCode) ? { exitCode: result.exitCode } : {}),
+        ...(result.validatedSpecs ? { validatedSpecs: result.validatedSpecs } : {}),
         ...(typeof result.stdout === 'string' ? { stdout: result.stdout.slice(0, 8000) } : {}),
         ...(typeof result.stderr === 'string' ? { stderr: result.stderr.slice(0, 8000) } : {}) };
 }

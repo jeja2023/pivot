@@ -49,7 +49,7 @@ function progressFor(state) {
     if (!phase) return null;
     const previous = state.workflowProgress?.phase === phase ? state.workflowProgress : { phase, calls: 0 };
     const { goal, limit } = phases[phase];
-    return { ...previous, goal, limit: phase === 'first_page' ? Math.max(limit, previous.finishBy || 0) : limit };
+    return { ...previous, goal, limit: ['design', 'first_page'].includes(phase) ? Math.max(limit, previous.finishBy || 0) : limit };
 }
 
 function assertWorkflowCapacity(state) {

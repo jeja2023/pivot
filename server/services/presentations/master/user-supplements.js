@@ -5,6 +5,9 @@ const { error } = require('./runtime');
 const supplementPath = /^user-supplement:[1-9]\d{0,2}$/;
 
 function getSupplement(state, path) {
+    if (path === 'current-plan.json' && state.review?.approvals?.design?.plan) {
+        return { path, text: JSON.stringify(state.review.approvals.design.plan) };
+    }
     if (path === 'previous-plan.json' && state.previousPlan) return { path, text: JSON.stringify(state.previousPlan) };
     if (path === 'previous-supplements.json' && state.inheritedSupplementCount) {
         return { path, text: JSON.stringify(state.userSupplements.slice(0, state.inheritedSupplementCount).map(({ path, text, kind }) => ({ path, text, kind }))) };
@@ -36,6 +39,7 @@ function readSupplement(entry, { offset = 0, length = 12000 }) {
 function supplementGuidance(state) {
     const pending = Object.entries(state.revisionReadOffsets || {}).filter(([, offset]) => offset != null);
     return [state.previousPlan && '沿用原清单和已确认的修订，根据本次要求重提清单。事实引文仍须核对原材料或用户补充来源。',
+        state.modelPlanPaged && '完整已核对清单位于 current-plan.json。请先用 read 按字符分页获取待制作页面的标题和关键数据，再写对应页面。',
         pending.length && ('提交修订清单前用 read 继续读取 ' + pending.map(([path, offset]) => path + ' offset=' + offset).join('、')),
         state.userSupplements?.length && ('当前任务的用户补充来源：' + state.userSupplements.map(entry => entry.path).join('、')
             + '。按顺序用 read 核对与本稿相关的答复及修订。用户明确提供的事实可引用原编号，修改意见、疑问和假设不能充作事实。')].filter(Boolean).join('\n');

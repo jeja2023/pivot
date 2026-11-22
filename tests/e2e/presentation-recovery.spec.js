@@ -107,6 +107,9 @@ for (const [name, style, title] of [['咨询决策', 'consulting-decision', '收
         const done = await read();
         expect(done.status, done.error?.message || done.inputRequest?.question).toBe('completed');
         expect(done.milestones.firstApproval).toBeUndefined();
+        if (style === 'academic-research') {
+            expect(done.usageDiagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ planPages: 2, outcome: 'progressed' })]));
+        }
         if (style === 'consulting-decision') {
             expect(done.imageCoverage).toEqual({ total: 0, read: 0, nextOffset: null });
             const actions = done.usageDiagnostics.flatMap(item => item.actions || []);
@@ -285,7 +288,7 @@ test('普通用户回看完整制作快照，下载通过页并从原任务继�
     await user.getByRole('button', { name: /完整制作断点验收.*已保存制作快照/ }).click();
     await panel.locator('#presentation-master-resume-model').selectOption(ids[1]);
     const resuming = user.waitForResponse(response => response.url().endsWith('/resume') && response.request().method() === 'POST');
-    await panel.getByRole('button', { name: '从检查点继续' }).click();
+    await panel.getByRole('button', { name: '仅修复所选页面' }).click();
     const resumed = await resuming;
     expect(resumed.ok(), await resumed.text()).toBeTruthy();
     expect((await resumed.json()).task.request.modelId).toBe(ids[1]);
@@ -293,6 +296,7 @@ test('普通用户回看完整制作快照，下载通过页并从原任务继�
     const completed = await read();
     expect(completed.status, completed.error?.message).toBe('completed');
     expect(completed.result.checks.checkedPages).toBe(3);
+    expect(completed.result.checks.preservation.pages).toEqual([2]);
 });
 
 test('普通用户补充必要事实后，仍无法核对的引文用占位文字随初稿下载', async ({ page, browser }) => {
@@ -329,5 +333,6 @@ test('普通用户补充必要事实后，仍无法核对的引文用占位文�
     const file = await Zip.loadAsync(await fs.readFile(await (await download).path()));
     const repaired = await file.file('ppt/slides/slide2.xml').async('string');
     expect(repaired).toContain('数据待核对');
+    expect(repaired).not.toContain('全年决算成本80.25万元');
     expect(repaired).not.toContain('全年核定成本90.25万元');
 });

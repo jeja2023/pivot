@@ -527,13 +527,15 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     async function generateConfirmedPages(request, roster, model, call, signal, onAccepted) {
         const title = request.title || request.outline.title;
         const build = (materials, pages, compact = false, pageFeedback) => buildSlidesMessages({ ...request, materials, compact, pageFeedback, enforcePageIds: true,
+            instruction: request.allowTextFallback ? [request.instruction, '缺少可用图片的待补页可用正文版式。保留图表和表格要求。'].filter(Boolean).join('\n') : request.instruction,
             outline: { title: request.outline.title, assumptions: request.outline.assumptions, slides: pages } });
         const largest = largestPageBatch(roster, batch => build([], batch, true));
         const prepared = await prepareGenerationMaterials(request.materials, model, materials => build(materials, largest, true), 7200, call, title);
         const productionProfile = require('../../services/presentations/presentation-production-profile').fromRequest(request);
         const outcome = await generateRosterPages(roster, (pages, compact, feedback) => call(build(prepared.materials, pages, compact, feedback), {
             sourceSuffix: compact ? '_missing_pages' : ''
-        }), { compilePage: (page, confirmed) => generationDrafts.compileGenerationPage(page, confirmed, request, { productionProfile, signal }), onAccepted });
+        }), { compilePage: (page, confirmed) => generationDrafts.compileGenerationPage(page, confirmed, request,
+            { productionProfile, signal, allowTextFallback: request.allowTextFallback === true }), onAccepted });
         outcome.warnings = [...materialNotice(prepared.coverage), ...outcome.warnings];
         return { outcome, coverage: prepared.coverage, title };
     }
@@ -541,7 +543,8 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
     function runDraftGeneration(req, res, id, requestBody, roster, generation) {
         const pending = generationDrafts.selectPending(roster, generation);
         if (!pending.length) return res.json({ draftId: id, warnings: [] });
-        return runAiRequest(req, res, { id, digest: generation.digest, pending: pending.map(page => page.outlinePageId), model: req.body?.model }, null, {
+        return runAiRequest(req, res, { id, digest: generation.digest, pending: pending.map(page => page.outlinePageId), model: req.body?.model,
+            ...(requestBody.allowTextFallback === true ? { allowTextFallback: true } : {}) }, null, {
             source: 'presentation_slides',
             auditAction: '生成并保存大纲页面',
             maxTokens: 7200,
@@ -561,7 +564,8 @@ function createPresentationsRouter({ authMiddleware, logAction, uploadLimiter, u
         if (String(body.template.snapshotDigest) !== String(generation.templateDigest)) return res.status(409).json({
             error: '模板版本摘要已变化，不能继续制作。', code: 'PRESENTATION_GENERATION_TEMPLATE_CHANGED'
         });
-        return runDraftGeneration(req, res, req.params.id, body, confirmedRoster(body.outline), generation);
+        const allowTextFallback = req.body?.allowTextFallback === true;
+        return runDraftGeneration(req, res, req.params.id, { ...body, allowTextFallback }, confirmedRoster(body.outline), generation);
     }));
 
     router.post('/apps/presentations/ai/continue', authMiddleware, asyncHandler(async (req, res) => {

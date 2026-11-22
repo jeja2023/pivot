@@ -4,6 +4,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import hashlib
 import unittest
 from zipfile import ZipFile
 from pathlib import Path
@@ -16,6 +17,27 @@ from tool_catalog import command  # noqa: E402
 
 
 class MasterToolTests(unittest.TestCase):
+    def test_copied_specs_and_successful_validation_return_current_digests(self):
+        engine = ROOT / 'artifacts' / 'ppt-master-runtime'
+        if not (engine / 'manifest.json').exists():
+            self.skipTest('未准备固定运行包')
+        with tempfile.TemporaryDirectory() as directory, patch.object(runner, "WORKSPACE", Path(directory)), \
+                patch.object(runner, 'ENGINE', engine), patch.object(runner, 'SKILL', engine / 'skill'):
+            workspace = Path(directory)
+            source = workspace / "provided"
+            source.mkdir()
+            expected = {}
+            for name in ["design_spec.md", "spec_lock.md"]:
+                data = f"规范 {name}".encode("utf-8")
+                (source / name).write_bytes(data)
+                expected[name] = hashlib.sha256(data).hexdigest()
+            with patch.object(runner, "run", return_value={"exitCode": 0, "stdout": "", "stderr": ""}):
+                for name in expected:
+                    receipt = runner.main({"action": "copy", "source": "provided/" + name, "path": "report/" + name})
+                    self.assertEqual(receipt["sha256"], expected[name])
+                approval = runner.main({"action": "run", "tool": "project", "args": ["validate", "./report/"]})
+                self.assertEqual(approval["validatedSpecs"], expected)
+
     def test_selected_template_recovers_partial_copy_and_does_not_publish_interrupted_staging(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

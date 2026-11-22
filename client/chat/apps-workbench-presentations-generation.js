@@ -48,15 +48,18 @@
             }
         }
 
-        async function fillMissingPages() {
+        async function fillMissingPages({ allowTextFallback = false } = {}) {
             const id = state.active?.id;
             if (!id || !state.active.generation?.pending.length) return;
+            if (allowTextFallback && (!await window.Pivot.legacy.showConfirm?.('缺图页面改用正文',
+                '仅在待补页缺少版式所需图片时改用正文。已完成页面、图表和表格要求保留。') || state.active?.id !== id)) return;
             const model = requireModel();
             if (!model || !await flush() || state.active?.id !== id) return;
-            const button = byId('presentation-fill-missing-btn'), controller = beginAiRequest();
+            const button = byId('presentation-fill-missing-btn'), fallback = byId('presentation-fill-text-btn'), controller = beginAiRequest();
             button.disabled = true; button.textContent = '正在补齐…';
+            if (fallback) fallback.disabled = true;
             try {
-                await requestJson(API + '/' + encodeURIComponent(id) + '/ai/fill-missing', aiJsonOptions({ model }, controller));
+                await requestJson(API + '/' + encodeURIComponent(id) + '/ai/fill-missing', aiJsonOptions({ model, ...(allowTextFallback ? { allowTextFallback: true } : {}) }, controller));
                 if (!controller.signal.aborted && state.active?.id === id) await openPresentation(id);
                 if (!controller.signal.aborted) toast('缺页已补齐并保存。');
             } catch (error) {
@@ -67,6 +70,7 @@
             } finally {
                 endAiRequest(controller);
                 button.disabled = false; button.textContent = '补齐缺页';
+                if (fallback) fallback.disabled = false;
             }
         }
 
@@ -120,6 +124,11 @@
                 status.title = remaining.map(page => page.title).join('、');
             }
             byId('presentation-fill-missing-btn')?.classList.toggle('hidden', !remaining.length || state.active.isOwner === false);
+            const fallback = byId('presentation-fill-text-btn');
+            if (fallback) {
+                fallback.classList.toggle('hidden', !remaining.length || state.active.isOwner === false);
+                fallback.onclick = () => fillMissingPages({ allowTextFallback: true }).catch(error => toast(error.message, 'error'));
+            }
             return Boolean(remaining.length);
         }
 

@@ -57,22 +57,29 @@ function mergeContent(content, compiled, generation) {
     return { content: { ...content, slides: slides.map((slide, index) => ({ ...slide, index })), sources: [...sources.values()] }, pages };
 }
 
-async function compileGenerationPage(page, confirmed, request, { productionProfile, signal }) {
+async function compileGenerationPage(page, confirmed, request, { productionProfile, signal, allowTextFallback = false }) {
     const title = request.title || request.outline.title;
     const outlinePosition = Number(page.id.split('_').at(-1)) - 1;
     const raw = { ...page, layout: page.layout || page.layoutId || (outlinePosition === 0 ? 'cover' : 'content') };
-    const proposal = await compilePresentationProposal(JSON.stringify({ title, slides: [raw] }), {
+    const options = {
         title, templateId: request.templateId, template: request.template, aspectRatio: request.aspectRatio,
         language: request.language, sources: request.materials, productionProfile, outlinePosition, signal
-    });
+    };
+    let proposal = await compilePresentationProposal(JSON.stringify({ title, slides: [raw] }), options);
     const known = new Set(request.materials.map(source => source.id));
     const sourceRefs = item => (item.sourceRefs || []).filter(ref => known.has(ref));
-    const content = proposal.presentation;
+    let content = proposal.presentation;
     const dataLayout = String(confirmed.layoutHint || confirmed.layout || '').replace(/^design-/, '');
     const requiredType = dataLayout === 'image-focus' ? 'image' : dataLayout;
-    if (['chart', 'table', 'image'].includes(requiredType)
-        && !content.slides.some(slide => slide.elements.some(element => element.type === requiredType && element.visible && !element.locked))) {
+    const missingRequiredType = ['chart', 'table', 'image'].includes(requiredType)
+        && !content.slides.some(slide => slide.elements.some(element => element.type === requiredType && element.visible && !element.locked));
+    const textFallback = missingRequiredType && requiredType === 'image' && allowTextFallback;
+    if (missingRequiredType && !textFallback) {
         throw presentationError('当前页缺少已确认的图表、表格或图片。请根据原材料补齐对应内容。', 422, 'PRESENTATION_GENERATION_REQUIRED_DATA');
+    }
+    if (textFallback) {
+        proposal = await compilePresentationProposal(JSON.stringify({ title, slides: [{ ...raw, layout: 'content', layoutId: undefined }] }), options);
+        content = proposal.presentation;
     }
     if (content.slides.some(slide => slide.elements.some(element => /^content_placeholder(?:_|$)/.test(element.id)))) {
         throw presentationError('页面未生成有效内容，请按已确认的大纲重新提供。', 422, 'PRESENTATION_GENERATION_EMPTY_PAGE');
@@ -82,6 +89,7 @@ async function compileGenerationPage(page, confirmed, request, { productionProfi
         elements: slide.elements.map(element => ({ ...element, sourceRefs: sourceRefs(element) }))
     }));
     const warnings = (proposal.warnings || []).map(warning => warning.replace(/^原第 1 页/, '原第 ' + (outlinePosition + 1) + ' 页'));
+    if (textFallback) warnings.push('第 ' + (outlinePosition + 1) + ' 页已按确认改用正文版式，未添加缺失图片。');
     return { id: page.id, content, warnings };
 }
 
